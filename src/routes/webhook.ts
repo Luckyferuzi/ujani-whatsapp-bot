@@ -1,10 +1,7 @@
 // src/routes/webhook.ts
-// - Product actions are LIST (Nunua sasa / Maelezo zaidi / Ongeza kikapuni / Angalia kikapu / Rudi menyu)
-// - "Maelezo zaidi" shows details, then re-opens the same product actions
-// - Ongea na Wakala uses LIST with three options (no typing numbers)
-// - Cart supports multiple products, totals at checkout, shows "Oda yako ya kiasi <total> ..." for multi-item orders
-// - Fulfillment: starts with Area (Ndani ya Dar / Nje ya Dar), then Pickup/Delivery or Outside-Dar capture
-// - Proof: manual (user sends transaction message/screenshot). We add a hint to send the payer’s three names.
+// - Compact, compliant WhatsApp UI: all interactive list/button text is clamped to WA limits
+// - Flow: Area (Ndani ya Dar / Nje ya Dar) -> Pickup/Delivery or Outside details -> fee -> phone -> proof
+// - Proof: manual (payer's three names + amount + time or screenshot)
 
 import type { Request, Response } from 'express';
 import { Router } from 'express';
@@ -15,7 +12,7 @@ import { env } from '../config.js';
 import {
   getSession, setExpecting, setLang,
   startCheckout, updateCheckout, setCheckoutStage, resetCheckout, setLastOrderId,
-  addToCart, clearCart, cartTotal, clearCart as clearCheckoutCart
+  addToCart, clearCart, cartTotal
 } from '../session.js';
 import { t } from '../i18n.js';
 import { sendInteractiveButtons, sendInteractiveList, sendText } from '../whatsapp.js';
@@ -24,16 +21,38 @@ import {
   isProMaxPackageId, promaxPackageSummary, promaxPackageTitle,
   productTitle, formatTZS
 } from '../menu.js';
-import { createOrder, getOrder, updateOrderAddress, attachTxnMessage, attachTxnImage, OrderItem } from '../orders.js';
+import {
+  createOrder, getOrder, updateOrderAddress,
+  attachTxnMessage, attachTxnImage, OrderItem
+} from '../orders.js';
 
-// NEW: delivery helpers
+// Delivery helpers
 import { resolveWardDistrictFromFreeText, getDistanceKm } from '../wards.js';
 import { feeForDarDistance, OUTSIDE_DAR_FLAT } from '../delivery.js';
 
 const logger = pino({ name: 'webhook' });
 export const webhook = Router();
 
-/* ----------------------------- VERIFY (GET) ------------------------------ */
+/* --------------------------- WhatsApp UI limits -------------------------- */
+const MAX_ROW_TITLE = 24;
+const MAX_ROW_DESC = 72;
+const MAX_SECTION_TITLE = 24;
+const MAX_BUTTON_TITLE = 20;
+const MAX_HEADER_TEXT = 60;
+const MAX_BODY_TEXT = 1024;
+
+function clamp(s: string | undefined | null, max: number): string {
+  const str = (s ?? '').toString();
+  return str.length > max ? str.slice(0, max - 1) + '…' : str;
+}
+const clampTitle = (s: string) => clamp(s, MAX_ROW_TITLE);
+const clampDesc = (s: string) => clamp(s, MAX_ROW_DESC);
+const clampSection = (s: string) => clamp(s, MAX_SECTION_TITLE);
+const clampButton = (s: string) => clamp(s, MAX_BUTTON_TITLE);
+const clampHeader = (s: string) => clamp(s, MAX_HEADER_TEXT);
+const clampBody = (s: string) => clamp(s, MAX_BODY_TEXT);
+
+/* -------------------------------- Verify -------------------------------- */
 webhook.get('/', (req: Request, res: Response) => {
   const mode = req.query['hub.mode'];
   const token = req.query['hub.verify_token'];
@@ -42,7 +61,7 @@ webhook.get('/', (req: Request, res: Response) => {
   return res.sendStatus(403);
 });
 
-/* ------------------ RAW BODY SIGNATURE CHECK (optional) ------------------ */
+/* ------------------------------ Signatures ------------------------------- */
 function verifySignature(req: Request): boolean {
   if (!env.APP_SECRET) return true;
   try {
@@ -58,26 +77,30 @@ function verifySignature(req: Request): boolean {
   }
 }
 
-/* -------------------------- HELPERS ------------------------------------- */
+/* -------------------------------- Helpers -------------------------------- */
 function plainTZS(n: number): string {
-  return formatTZS(n).replace(/\u00A0/g, ' ');
+  return formatTZS(n).replace(/\u00A0/g, ' '); // replace NBSP with normal space
 }
+
+// Keep titles short; put price in description
 function productListTitleShort(id: string): string {
-  if (id === 'product_kiboko') return 'Ujani Kiboko • ' + plainTZS(PRODUCTS.find(p => p.id === 'product_kiboko')?.priceTZS ?? 0);
-  if (id === 'product_furaha') return 'Furaha ya Ndoa • ' + plainTZS(PRODUCTS.find(p => p.id === 'product_furaha')?.priceTZS ?? 0);
-  if (id === 'product_promax') return 'Ujani Pro Max • ' + plainTZS(PROMAX_PRICE_TZS);
-  return id;
+  if (id === 'product_kiboko') return clampTitle('Ujani Kiboko');
+  if (id === 'product_furaha') return clampTitle('Furaha ya Ndoa');
+  if (id === 'product_promax') return clampTitle('Ujani Pro Max');
+  return clampTitle(id);
 }
 function productListDescShort(k: string, lang: 'en' | 'sw'): string {
   if (k === 'product_kiboko') {
     const p = PRODUCTS.find(p => p.id === 'product_kiboko')?.priceTZS ?? 0;
-    return lang === 'en' ? `Topical • ${plainTZS(p)}` : `Ya kupaka • ${plainTZS(p)}`;
+    return clampDesc(lang === 'en' ? `Topical · ${plainTZS(p)}` : `Ya kupaka · ${plainTZS(p)}`);
   }
   if (k === 'product_furaha') {
     const p = PRODUCTS.find(p => p.id === 'product_furaha')?.priceTZS ?? 0;
-    return lang === 'en' ? `Oral • ${plainTZS(p)}` : `Ya kunywa • ${plainTZS(p)}`;
+    return clampDesc(lang === 'en' ? `Oral · ${plainTZS(p)}` : `Ya kunywa · ${plainTZS(p)}`);
   }
-  if (k === 'product_promax') return `A/B/C • ${plainTZS(PROMAX_PRICE_TZS)}`;
+  if (k === 'product_promax') {
+    return clampDesc(`A/B/C · ${plainTZS(PROMAX_PRICE_TZS)}`);
+  }
   return '';
 }
 
@@ -88,61 +111,59 @@ async function sendMainMenu(to: string, lang: 'en' | 'sw') {
     { id: 'product_promax', title: productListTitleShort('product_promax'), description: productListDescShort('product_promax', lang) },
   ];
   const helpRows = [
-    { id: 'view_cart', title: lang === 'sw' ? 'Angalia Kikapu' : 'View Cart', description: '' },
-    { id: 'talk_agent', title: t(lang, 'talk_agent_title'), description: t(lang, 'talk_agent_desc') },
-    { id: 'track_order', title: t(lang, 'track_order_title'), description: t(lang, 'track_order_desc') },
+    { id: 'view_cart', title: clampTitle(lang === 'sw' ? 'Angalia Kikapu' : 'View Cart'), description: '' },
+    { id: 'talk_agent', title: clampTitle(t(lang, 'talk_agent_title')), description: clampDesc(t(lang, 'talk_agent_desc')) },
+    { id: 'track_order', title: clampTitle(t(lang, 'track_order_title')), description: clampDesc(t(lang, 'track_order_desc')) },
   ];
   const settingsRows = [
-    { id: 'change_language', title: t(lang, 'change_lang_title'), description: t(lang, 'change_lang_desc') },
+    { id: 'change_language', title: clampTitle(t(lang, 'change_lang_title')), description: clampDesc(t(lang, 'change_lang_desc')) },
   ];
 
   await sendInteractiveList({
     to,
-    header: 'UJANI',
-    body: t(lang, 'menu_body'),
-    buttonText: t(lang, 'menu_button'),
+    header: clampHeader('UJANI'),
+    body: clampBody(t(lang, 'menu_body')),
+    buttonText: clampButton(t(lang, 'menu_button')),
     sections: [
-      { title: t(lang, 'section_products'), rows: productsRows },
-      { title: t(lang, 'section_help'), rows: helpRows },
-      { title: t(lang, 'section_settings'), rows: settingsRows },
+      { title: clampSection(t(lang, 'section_products')), rows: productsRows },
+      { title: clampSection(t(lang, 'section_help')), rows: helpRows },
+      { title: clampSection(t(lang, 'section_settings')), rows: settingsRows },
     ]
   });
 }
 
 async function showProductActionsList(to: string, lang: 'en' | 'sw', productId: string) {
   const rows = [
-    { id: `action_buy_${productId}`, title: lang === 'sw' ? 'Nunua sasa' : 'Buy now', description: '' },
-    { id: `action_info_${productId}`, title: lang === 'sw' ? 'Maelezo zaidi' : 'More details', description: '' },
-    { id: `action_add_${productId}`, title: lang === 'sw' ? 'Ongeza kikapuni' : 'Add to cart', description: '' },
-    { id: 'view_cart', title: lang === 'sw' ? 'Angalia Kikapu' : 'View Cart', description: '' },
-    { id: 'back_menu', title: lang === 'sw' ? 'Rudi menyu' : 'Back to menu', description: '' }
+    { id: `action_buy_${productId}`,  title: clampTitle(lang === 'sw' ? 'Nunua sasa' : 'Buy now'), description: '' },
+    { id: `action_info_${productId}`, title: clampTitle(lang === 'sw' ? 'Maelezo zaidi' : 'More details'), description: '' },
+    { id: `action_add_${productId}`,  title: clampTitle(lang === 'sw' ? 'Ongeza kikapuni' : 'Add to cart'), description: '' },
+    { id: 'view_cart',                title: clampTitle(lang === 'sw' ? 'Angalia Kikapu' : 'View Cart'), description: '' },
+    { id: 'back_menu',                title: clampTitle(lang === 'sw' ? 'Rudi menyu' : 'Back to menu'), description: '' }
   ];
 
   await sendInteractiveList({
     to,
-    header: productTitle(productId, lang),
-    body: lang === 'sw' ? 'Chagua hatua unayotaka' : 'Choose an action',
-    buttonText: t(lang, 'menu_button'),
-    sections: [
-      { title: lang === 'sw' ? 'Chaguo' : 'Options', rows }
-    ]
+    header: clampHeader(productTitle(productId, lang)),
+    body: clampBody(lang === 'sw' ? 'Chagua hatua unayotaka' : 'Choose an action'),
+    buttonText: clampButton(t(lang, 'menu_button')),
+    sections: [{ title: clampSection(lang === 'sw' ? 'Chaguo' : 'Options'), rows }]
   });
 }
 
 async function showAgentOptions(to: string, lang: 'en' | 'sw') {
   await sendInteractiveList({
     to,
-    header: lang === 'sw' ? 'Ongea na Wakala' : 'Talk to Agent',
-    body: t(lang, 'agent_body'),
-    buttonText: t(lang, 'menu_button'),
+    header: clampHeader(lang === 'sw' ? 'Ongea na Wakala' : 'Talk to Agent'),
+    body: clampBody(t(lang, 'agent_body')),
+    buttonText: clampButton(t(lang, 'menu_button')),
     sections: [
       {
-        title: lang === 'sw' ? 'Aina ya mawasiliano' : 'Contact types',
+        title: clampSection(lang === 'sw' ? 'Aina ya mawasiliano' : 'Contact types'),
         rows: [
-          { id: 'agent_text',       title: t(lang, 'agent_text_title'), description: t(lang, 'agent_text_desc') },
-          { id: 'agent_wa_call',    title: t(lang, 'agent_wa_call_title'), description: t(lang, 'agent_wa_call_desc') },
-          { id: 'agent_normal_call',title: t(lang, 'agent_phone_title'), description: t(lang, 'agent_phone_desc') },
-          { id: 'back_menu',        title: t(lang, 'row_back_menu'), description: '' },
+          { id: 'agent_text',        title: clampTitle(t(lang, 'agent_text_title')), description: clampDesc(t(lang, 'agent_text_desc')) },
+          { id: 'agent_wa_call',     title: clampTitle(t(lang, 'agent_wa_call_title')), description: clampDesc(t(lang, 'agent_wa_call_desc')) },
+          { id: 'agent_normal_call', title: clampTitle(t(lang, 'agent_phone_title')), description: clampDesc(t(lang, 'agent_phone_desc')) },
+          { id: 'back_menu',         title: clampTitle(t(lang, 'row_back_menu')), description: '' },
         ]
       }
     ]
@@ -152,23 +173,23 @@ async function showAgentOptions(to: string, lang: 'en' | 'sw') {
 async function pickProMaxPackage(to: string, lang: 'en' | 'sw') {
   await sendInteractiveList({
     to,
-    header: 'Ujani Pro Max',
-    body: t(lang, 'promax_pick_package'),
-    buttonText: t(lang, 'menu_button'),
+    header: clampHeader('Ujani Pro Max'),
+    body: clampBody(t(lang, 'promax_pick_package')),
+    buttonText: clampButton(t(lang, 'menu_button')),
     sections: [
       {
-        title: t(lang, 'section_promax'),
+        title: clampSection(t(lang, 'section_promax')),
         rows: PROMAX_PACKAGES.map(p => ({
           id: p.id,
-          title: promaxPackageTitle(p.id, lang),
-          description: promaxPackageSummary(p.id, lang),
+          title: clampTitle(promaxPackageTitle(p.id, lang)),
+          description: clampDesc(promaxPackageSummary(p.id, lang)),
         }))
       }
     ]
   });
 }
 
-/* ----------------------------- ADDRESS & PHONE --------------------------- */
+/* ----------------------------- Address parsing --------------------------- */
 function parseAddress(input: string): { street: string; city: string; country: string } | null {
   const parts = input.split(',').map(s => s.trim()).filter(Boolean);
   if (parts.length < 3) return null;
@@ -187,7 +208,7 @@ function normalizePhone(raw: string): string | null {
   return null;
 }
 
-/* --------------------------- WHATSAPP POST HOOK -------------------------- */
+/* ------------------------------- Webhook POST ---------------------------- */
 webhook.post('/', async (req: Request, res: Response) => {
   try {
     if (!verifySignature(req)) {
@@ -249,8 +270,8 @@ webhook.post('/', async (req: Request, res: Response) => {
         ? `${productTitle('product_promax', lang)} — ${promaxPackageTitle(pid, lang)}`
         : productTitle(pid, lang);
       const price =
-        pid === 'product_kiboko' ? PRODUCTS.find(p => p.id === 'product_kiboko')?.priceTZS ?? 0
-        : pid === 'product_furaha' ? PRODUCTS.find(p => p.id === 'product_furaha')?.priceTZS ?? 0
+        pid === 'product_kiboko' ? (PRODUCTS.find(p => p.id === 'product_kiboko')?.priceTZS ?? 0)
+        : pid === 'product_furaha' ? (PRODUCTS.find(p => p.id === 'product_furaha')?.priceTZS ?? 0)
         : PROMAX_PRICE_TZS;
 
       addToCart(from, { productId: pid, title, priceTZS: price, qty: 1 });
@@ -279,11 +300,13 @@ webhook.post('/', async (req: Request, res: Response) => {
       // Area choice first
       await sendInteractiveButtons({
         to: from,
-        body: lang === 'sw' ? 'Je, uko ndani ya Dar es Salaam au nje ya Dar es Salaam?' : 'Are you within Dar es Salaam or outside Dar es Salaam?',
+        body: clampBody(lang === 'sw'
+          ? 'Je, uko ndani ya Dar es Salaam au nje ya Dar es Salaam?'
+          : 'Are you within Dar es Salaam or outside Dar es Salaam?'),
         buttons: [
-          { id: 'area_dar',     title: lang === 'sw' ? 'Ndani ya Dar es Salaam' : 'Within Dar es Salaam' },
-          { id: 'area_outside', title: lang === 'sw' ? 'Nje ya Dar es Salaam'   : 'Outside Dar es Salaam' },
-          { id: 'back_menu',    title: t(lang, 'btn_back_menu') },
+          { id: 'area_dar',     title: clampButton(lang === 'sw' ? 'Ndani ya Dar es Salaam' : 'Within Dar') },
+          { id: 'area_outside', title: clampButton(lang === 'sw' ? 'Nje ya Dar es Salaam'   : 'Outside Dar') },
+          { id: 'back_menu',    title: clampButton(t(lang, 'btn_back_menu')) },
         ]
       });
       return res.sendStatus(200);
@@ -310,11 +333,13 @@ webhook.post('/', async (req: Request, res: Response) => {
       startCheckout(from);
       await sendInteractiveButtons({
         to: from,
-        body: lang === 'sw' ? 'Je, uko ndani ya Dar es Salaam au nje ya Dar es Salaam?' : 'Are you within Dar es Salaam or outside Dar es Salaam?',
+        body: clampBody(lang === 'sw'
+          ? 'Je, uko ndani ya Dar es Salaam au nje ya Dar es Salaam?'
+          : 'Are you within Dar es Salaam or outside Dar es Salaam?'),
         buttons: [
-          { id: 'area_dar',     title: lang === 'sw' ? 'Ndani ya Dar es Salaam' : 'Within Dar es Salaam' },
-          { id: 'area_outside', title: lang === 'sw' ? 'Nje ya Dar es Salaam'   : 'Outside Dar es Salaam' },
-          { id: 'back_menu',    title: t(lang, 'btn_back_menu') },
+          { id: 'area_dar',     title: clampButton(lang === 'sw' ? 'Ndani ya Dar es Salaam' : 'Within Dar') },
+          { id: 'area_outside', title: clampButton(lang === 'sw' ? 'Nje ya Dar es Salaam'   : 'Outside Dar') },
+          { id: 'back_menu',    title: clampButton(t(lang, 'btn_back_menu')) },
         ]
       });
       return res.sendStatus(200);
@@ -332,11 +357,11 @@ webhook.post('/', async (req: Request, res: Response) => {
       updateCheckout(from, { addressCountry: 'Dar es Salaam' } as any);
       await sendInteractiveButtons({
         to: from,
-        body: t(lang, 'choose_fulfillment'),
+        body: clampBody(t(lang, 'choose_fulfillment')),
         buttons: [
-          { id: 'fulfill_pickup',   title: t(lang, 'btn_pickup') },
-          { id: 'fulfill_delivery', title: t(lang, 'btn_delivery') },
-          { id: 'back_menu',        title: t(lang, 'btn_back_menu') },
+          { id: 'fulfill_pickup',   title: clampButton(t(lang, 'btn_pickup')) },
+          { id: 'fulfill_delivery', title: clampButton(t(lang, 'btn_delivery')) },
+          { id: 'back_menu',        title: clampButton(t(lang, 'btn_back_menu')) },
         ]
       });
       return res.sendStatus(200);
@@ -346,7 +371,9 @@ webhook.post('/', async (req: Request, res: Response) => {
       updateCheckout(from, { addressCountry: 'OUTSIDE_DAR' } as any);
       setCheckoutStage(from, 'asked_name');
       setExpecting(from, 'customer_name');
-      await sendText({ to: from, body: lang === 'sw' ? 'Tuma majina matatu kamili ya mteja.' : 'Send the customer\'s full name (three parts).' });
+      await sendText({ to: from, body: lang === 'sw'
+        ? 'Tuma majina matatu kamili ya mteja.'
+        : 'Send the customer\'s full name (three parts).' });
       return res.sendStatus(200);
     }
 
@@ -355,7 +382,9 @@ webhook.post('/', async (req: Request, res: Response) => {
       const mode = buttonReplyId === 'outside_mode_bus' ? 'Bus' : 'Boat';
       updateCheckout(from, { outsideMode: mode } as any);
       setExpecting(from, 'delivery_address');
-      await sendText({ to: from, body: lang === 'sw' ? (mode === 'Bus' ? 'Taja jina la basi (mf. Aboud).' : 'Taja jina la boti.') : (mode === 'Bus' ? 'Type the bus name (e.g., Aboud).' : 'Type the boat name.') });
+      await sendText({ to: from, body: lang === 'sw'
+        ? (mode === 'Bus' ? 'Taja jina la basi (mf. Aboud).' : 'Taja jina la boti.')
+        : (mode === 'Bus' ? 'Type the bus name (e.g., Aboud).' : 'Type the boat name.') });
       return res.sendStatus(200);
     }
 
@@ -518,10 +547,10 @@ webhook.post('/', async (req: Request, res: Response) => {
         updateCheckout(from, { addressCountryRegion: textBody } as any);
         await sendInteractiveButtons({
           to: from,
-          body: lang === 'sw' ? 'Chagua aina ya usafiri:' : 'Choose transport type:',
+          body: clampBody(lang === 'sw' ? 'Chagua aina ya usafiri:' : 'Choose transport type:'),
           buttons: [
-            { id: 'outside_mode_bus',  title: lang === 'sw' ? 'Basi' : 'Bus' },
-            { id: 'outside_mode_boat', title: lang === 'sw' ? 'Boti' : 'Boat' },
+            { id: 'outside_mode_bus',  title: clampButton(lang === 'sw' ? 'Basi' : 'Bus') },
+            { id: 'outside_mode_boat', title: clampButton(lang === 'sw' ? 'Boti' : 'Boat') },
           ]
         });
         return res.sendStatus(200);
@@ -534,7 +563,7 @@ webhook.post('/', async (req: Request, res: Response) => {
         return res.sendStatus(200);
       }
 
-      // Outside Dar — Step 3: Station → compute fee → summary → phone
+      // Outside Dar — Step 3: Station → fee → summary → phone
       if (outside && s.addressCountryRegion && s.outsideMode && s.outsideTransportName && !s.outsideStation) {
         updateCheckout(from, { outsideStation: textBody, deliveryFeeTZS: OUTSIDE_DAR_FLAT } as any);
         const fee = OUTSIDE_DAR_FLAT;
@@ -576,7 +605,7 @@ webhook.post('/', async (req: Request, res: Response) => {
         return res.sendStatus(200);
       }
 
-      // Fallback to old structured address if needed
+      // Structured fallback
       const parsed = parseAddress(textBody);
       if (!parsed) {
         await sendText({ to: from, body: t(lang, 'address_invalid') });
@@ -669,11 +698,11 @@ webhook.post('/', async (req: Request, res: Response) => {
 
       await sendInteractiveButtons({
         to: from,
-        body: t(lang, 'order_next_actions'),
+        body: clampBody(t(lang, 'order_next_actions')),
         buttons: [
-          { id: 'pay_now', title: t(lang, 'btn_pay_now') },
-          { id: 'edit_address', title: t(lang, 'btn_edit_address') },
-          { id: 'back_menu', title: t(lang, 'btn_back_menu') },
+          { id: 'pay_now',     title: clampButton(t(lang, 'btn_pay_now')) },
+          { id: 'edit_address',title: clampButton(t(lang, 'btn_edit_address')) },
+          { id: 'back_menu',   title: clampButton(t(lang, 'btn_back_menu')) },
         ],
       });
 
@@ -720,11 +749,11 @@ webhook.post('/', async (req: Request, res: Response) => {
 
       await sendInteractiveButtons({
         to: from,
-        body: t(lang, 'order_next_actions'),
+        body: clampBody(t(lang, 'order_next_actions')),
         buttons: [
-          { id: 'pay_now', title: t(lang, 'btn_pay_now') },
-          { id: 'edit_address', title: t(lang, 'btn_edit_address') },
-          { id: 'back_menu', title: t(lang, 'btn_back_menu') },
+          { id: 'pay_now',     title: clampButton(t(lang, 'btn_pay_now')) },
+          { id: 'edit_address',title: clampButton(t(lang, 'btn_edit_address')) },
+          { id: 'back_menu',   title: clampButton(t(lang, 'btn_back_menu')) },
         ],
       });
 
@@ -774,7 +803,7 @@ webhook.post('/', async (req: Request, res: Response) => {
   }
 });
 
-/* ----------------------------- CART SUMMARY ------------------------------ */
+/* ----------------------------- Cart summary ------------------------------ */
 async function showCartSummary(to: string, lang: 'en' | 'sw') {
   const items = getSession(to).cart.items;
   if (!items.length) {
@@ -794,11 +823,11 @@ async function showCartSummary(to: string, lang: 'en' | 'sw') {
 
   await sendInteractiveButtons({
     to,
-    body: t(lang, 'cart_actions'),
+    body: clampBody(t(lang, 'cart_actions')),
     buttons: [
-      { id: 'cart_checkout', title: t(lang, 'btn_cart_checkout') },
-      { id: 'cart_clear', title: t(lang, 'btn_cart_clear') },
-      { id: 'back_menu', title: t(lang, 'btn_cart_back') },
+      { id: 'cart_checkout', title: clampButton(t(lang, 'btn_cart_checkout')) },
+      { id: 'cart_clear',    title: clampButton(t(lang, 'btn_cart_clear')) },
+      { id: 'back_menu',     title: clampButton(t(lang, 'btn_cart_back')) },
     ],
   });
 }
