@@ -1,4 +1,10 @@
 // src/routes/webhook.ts
+// - Compact, compliant WhatsApp UI (clamped lengths)
+// - Pacing between multi-send steps so WA doesn't drop messages
+// - Full flow: Area -> (Pickup|Delivery) or Outside details -> fee -> phone -> proof
+// - Manual payment proof (payer three names + amount + time or screenshot)
+// - FIX: handle taps on product_kiboko & product_furaha rows (no more bouncing back to menu)
+
 import type { Request, Response } from 'express';
 import { Router } from 'express';
 import crypto from 'node:crypto';
@@ -21,6 +27,7 @@ import {
   createOrder, getOrder, updateOrderAddress,
   attachTxnMessage, attachTxnImage, OrderItem
 } from '../orders.js';
+
 import { resolveWardDistrictFromFreeText, getDistanceKm } from '../wards.js';
 import { feeForDarDistance, OUTSIDE_DAR_FLAT } from '../delivery.js';
 
@@ -38,7 +45,7 @@ const clampHeader = (s: string) => clamp(s, MAX_HEADER_TEXT);
 const clampBody = (s: string) => clamp(s, MAX_BODY_TEXT);
 
 /* ---------- Small pacing helper to avoid WA dropping extra messages ---------- */
-const SLEEP_MS = 450; // 300–600ms works well; adjust if needed
+const SLEEP_MS = 450; // ~300–600ms is safe
 const nap = (ms = SLEEP_MS) => new Promise((r) => setTimeout(r, ms));
 
 /* -------------------------------- Verify -------------------------------- */
@@ -214,9 +221,21 @@ webhook.post('/', async (req: Request, res: Response) => {
     // Main menu entry
     if (textBody === 'MENU' || buttonReplyId === 'back_menu') { await sendMainMenu(from, lang); return res.sendStatus(200); }
 
-    // Product pick from list
-    if (listReplyId === 'product_promax') { await pickProMaxPackage(from, lang); return res.sendStatus(200); }
-    if (listReplyId && isProMaxPackageId(listReplyId)) { await showProductActionsList(from, lang, listReplyId); return res.sendStatus(200); }
+    /* --------- PRODUCT ROW FIX: handle kiboko and furaha selections --------- */
+    if (listReplyId === 'product_kiboko' || listReplyId === 'product_furaha') {
+      await showProductActionsList(from, lang, listReplyId);
+      return res.sendStatus(200);
+    }
+    // Pro Max product row → show package options
+    if (listReplyId === 'product_promax') {
+      await pickProMaxPackage(from, lang);
+      return res.sendStatus(200);
+    }
+    // Pro Max package row → show product actions for that specific package
+    if (listReplyId && isProMaxPackageId(listReplyId)) {
+      await showProductActionsList(from, lang, listReplyId);
+      return res.sendStatus(200);
+    }
 
     // Product actions
     if (listReplyId?.startsWith('action_info_')) {
