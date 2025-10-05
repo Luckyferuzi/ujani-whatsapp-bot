@@ -1,78 +1,85 @@
 // src/wards.ts
-// Lazy CSV loader + helpers to resolve Ward/District from free-text,
-// and get distance (km) from Keko Furniture reference.
+// Loads Dar wards/districts from CSV and exposes:
+// - listDistricts()
+// - listWardsByDistrict(district)
+// - getDistanceKm(district, ward)
+//
+// CSV columns supported (case-insensitive): district, ward, km | distance_km
+// You can override the file path via env DAR_WARDS_CSV.
 
 import fs from 'node:fs';
 import path from 'node:path';
 
-type Row = { region: string; district: string; ward: string; distance: number };
+type Row = { district: string; ward: string; km: number };
 
-let WARDS: Row[] | null = null;
+const CSV_PATH = process.env.DAR_WARDS_CSV
+  ? path.resolve(process.env.DAR_WARDS_CSV)
+  : path.resolve(process.cwd(), 'dar_wards_distance_clean.csv');
 
-function findCsv(): string | null {
-  const candidates = [
-    path.join(process.cwd(), 'data', 'dar_wards_distance_clean.csv'),
-    path.join(process.cwd(), 'assets', 'dar_wards_distance_clean.csv'),
-    path.join(process.cwd(), 'dar_wards_distance_clean.csv'),
-  ];
-  for (const p of candidates) if (fs.existsSync(p)) return p;
-  return null;
+const rows: Row[] = [];
+const byDistrict = new Map<string, string[]>();
+const kmIndex = new Map<string, number>(); // key `${district}::${ward}`
+
+function parseCSVLine(line: string): string[] {
+  // simple CSV splitter (dataset shouldn't include quoted commas)
+  return line.split(',').map(s => s.trim());
 }
 
-function load(): Row[] {
-  if (WARDS) return WARDS;
-  const p = findCsv();
-  if (!p) {
-    console.warn('[wards] CSV not found — delivery-fee by ward will be disabled.');
-    WARDS = [];
-    return WARDS;
+(function load() {
+  if (!fs.existsSync(CSV_PATH)) {
+    console.warn(`[wards] CSV not found at ${CSV_PATH}`);
+    return;
   }
-  const raw = fs.readFileSync(p, 'utf8');
+  const raw = fs.readFileSync(CSV_PATH, 'utf8');
   const lines = raw.split(/\r?\n/).filter(Boolean);
-  lines.shift(); // header: region,district,ward,distance
-  WARDS = lines.map((ln) => {
-    const [region, district, ward, dist] = ln.split(',').map((s) => s.trim());
-    return { region, district, ward, distance: Number(dist) || 0 };
-  });
-  return WARDS!;
-}
+  if (lines.length <= 1) return;
 
-function norm(s: string) {
-  return (s || '')
-    .toLowerCase()
-    .normalize('NFKD')
-    .replace(/[^\p{L}\p{N}\s-]/gu, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
+  const header = parseCSVLine(lines[0]).map(h => h.toLowerCase());
+  const di = header.findIndex(h => h === 'district');
+  const wi = header.findIndex(h => h === 'ward');
+  let ki = header.findIndex(h => h === 'km' || h === 'distance_km');
+  if (ki < 0) ki = header.findIndex(h => h.includes('km')); // fallback to any km-like column
 
-/** Resolve free text like "tabata kimanga ilala" → { ward: "Kimanga", district: "Ilala" } */
-export function resolveWardDistrictFromFreeText(text: string): { ward: string; district: string } | null {
-  const rows = load();
-  if (!rows.length) return null;
+  for (let i = 1; i < lines.length; i++) {
+    const cols = parseCSVLine(lines[i]);
+    const district = (cols[di] || '').trim();
+    const ward = (cols[wi] || '').trim();
+    const kmRaw = (cols[ki] || '').replace(/[^\d.]/g, '');
+    const km = kmRaw ? parseFloat(kRawSafe(kmRaw)) : 0;
 
-  const t = norm(text);
-  const byWard = rows.filter((r) => t.includes(norm(r.ward)));
-  if (byWard.length === 1) return { ward: byWard[0].ward, district: byWard[0].district };
-  if (byWard.length > 1) {
-    // Prefer candidates whose district is also present
-    const narrowed = byWard.filter((r) => t.includes(norm(r.district)));
-    if (narrowed.length === 1) return { ward: narrowed[0].ward, district: narrowed[0].district };
-    // Fallback to the longest ward name
-    narrowed.sort((a, b) => b.ward.length - a.ward.length);
-    return { ward: narrowed[0].ward, district: narrowed[0].district };
+    if (!district || !ward) continue;
+
+    rows.push({ district, ward, km: isFinite(km) ? km : 0 });
+
+    const key = `${district.toLowerCase()}::${ward.toLowerCase()}`;
+    kmIndex.set(key, isFinite(km) ? km : 0);
+
+    const list = byDistrict.get(district) || [];
+    list.push(ward);
+    byDistrict.set(district, list);
   }
 
-  // No ward hit — try district first and pick any ward included
-  const byDistrict = rows.filter((r) => t.includes(norm(r.district)));
-  if (byDistrict.length === 1) return { ward: byDistrict[0].ward, district: byDistrict[0].district };
+  // sort ward lists alphabetically for UX
+  for (const [d, list] of byDistrict) {
+    list.sort((a, b) => a.localeCompare(b, 'en', { sensitivity: 'base' }));
+    byDistrict.set(d, list);
+  }
+})();
 
-  return null;
+function kRawSafe(x: string): string {
+  // Allow "12.3", "12", "12,3"
+  return x.replace(',', '.');
 }
 
-/** Distance in km for exact district+ward pair (or null if not found). */
-export function getDistanceKm(district: string, ward: string): number | null {
-  const rows = load();
-  const r = rows.find((x) => norm(x.district) === norm(district) && norm(x.ward) === norm(ward));
-  return r ? r.distance : null;
+export function listDistricts(): string[] {
+  return Array.from(byDistrict.keys()).sort((a, b) => a.localeCompare(b, 'en', { sensitivity: 'base' }));
+}
+
+export function listWardsByDistrict(district: string): string[] {
+  return byDistrict.get(district) ?? [];
+}
+
+export function getDistanceKm(district: string, ward: string): number | undefined {
+  const key = `${district.toLowerCase()}::${ward.toLowerCase()}`;
+  return kmIndex.get(key);
 }

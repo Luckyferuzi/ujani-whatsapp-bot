@@ -1,9 +1,8 @@
 // src/routes/webhook.ts
-// - Compact, compliant WhatsApp UI (clamped lengths)
-// - Pacing between multi-send steps so WA doesn't drop messages
-// - Full flow: Area -> (Pickup|Delivery) or Outside details -> fee -> phone -> proof
-// - Manual payment proof (payer three names + amount + time or screenshot)
-// - FIX: handle taps on product_kiboko & product_furaha rows (no more bouncing back to menu)
+// - Inside Dar: choose District -> choose Ward (from CSV) -> auto fee by distance -> phone -> order -> proof
+// - Outside Dar: region + transport + station -> flat fee -> phone -> order -> proof
+// - Clamps for WhatsApp interactive limits + tiny pacing to avoid dropped messages
+// - Language row always shows the *other* language (SW menu shows "Switch to English", EN menu shows "Badili Kiswahili")
 
 import type { Request, Response } from 'express';
 import { Router } from 'express';
@@ -28,15 +27,25 @@ import {
   attachTxnMessage, attachTxnImage, OrderItem
 } from '../orders.js';
 
-import { resolveWardDistrictFromFreeText, getDistanceKm } from '../wards.js';
+// New: district/ward helpers from CSV
+import { getDistanceKm, listDistricts, listWardsByDistrict } from '../wards.js';
 import { feeForDarDistance, OUTSIDE_DAR_FLAT } from '../delivery.js';
 
 const logger = pino({ name: 'webhook' });
 export const webhook = Router();
 
-/* ---------- WhatsApp UI limits & clamp helpers ---------- */
-const MAX_ROW_TITLE = 24, MAX_ROW_DESC = 72, MAX_SECTION_TITLE = 24, MAX_BUTTON_TITLE = 20, MAX_HEADER_TEXT = 60, MAX_BODY_TEXT = 1024;
-const clamp = (s: string | null | undefined, n: number) => ((s ?? '') + '').length > n ? ((s ?? '') + '').slice(0, n - 1) + '…' : ((s ?? '') + '');
+/* --------------------------- WhatsApp UI limits -------------------------- */
+const MAX_ROW_TITLE = 24;
+const MAX_ROW_DESC = 72;
+const MAX_SECTION_TITLE = 24;
+const MAX_BUTTON_TITLE = 20;
+const MAX_HEADER_TEXT = 60;
+const MAX_BODY_TEXT = 1024;
+
+function clamp(s: string | undefined | null, max: number): string {
+  const str = (s ?? '').toString();
+  return str.length > max ? str.slice(0, max - 1) + '…' : str;
+}
 const clampTitle = (s: string) => clamp(s, MAX_ROW_TITLE);
 const clampDesc = (s: string) => clamp(s, MAX_ROW_DESC);
 const clampSection = (s: string) => clamp(s, MAX_SECTION_TITLE);
@@ -44,8 +53,8 @@ const clampButton = (s: string) => clamp(s, MAX_BUTTON_TITLE);
 const clampHeader = (s: string) => clamp(s, MAX_HEADER_TEXT);
 const clampBody = (s: string) => clamp(s, MAX_BODY_TEXT);
 
-/* ---------- Small pacing helper to avoid WA dropping extra messages ---------- */
-const SLEEP_MS = 450; // ~300–600ms is safe
+/* ----------------------- Small pacing (avoid drops) ---------------------- */
+const SLEEP_MS = 450;
 const nap = (ms = SLEEP_MS) => new Promise((r) => setTimeout(r, ms));
 
 /* -------------------------------- Verify -------------------------------- */
@@ -92,8 +101,26 @@ function productListDescShort(k: string, lang: 'en' | 'sw'): string {
     const p = PRODUCTS.find(p => p.id === 'product_furaha')?.priceTZS ?? 0;
     return clampDesc(lang === 'en' ? `Oral · ${plainTZS(p)}` : `Ya kunywa · ${plainTZS(p)}`);
   }
-  if (k === 'product_promax') return clampDesc(`A/B/C · ${plainTZS(PROMAX_PRICE_TZS)}`);
+  if (k === 'product_promax') {
+    return clampDesc(`A/B/C · ${plainTZS(PROMAX_PRICE_TZS)}`);
+  }
   return '';
+}
+
+function changeLanguageRow(lang: 'en' | 'sw') {
+  // If menu is in Swahili, show "Switch to English"; if in English, show "Badili Kiswahili".
+  if (lang === 'sw') {
+    return {
+      id: 'change_language',
+      title: clampTitle('Switch to English'),
+      description: clampDesc('Change language to English'),
+    };
+  }
+  return {
+    id: 'change_language',
+    title: clampTitle('Badili Kiswahili'),
+    description: clampDesc('Chagua Kiswahili'),
+  };
 }
 
 async function sendMainMenu(to: string, lang: 'en' | 'sw') {
@@ -107,7 +134,7 @@ async function sendMainMenu(to: string, lang: 'en' | 'sw') {
     { id: 'talk_agent', title: clampTitle(t(lang, 'talk_agent_title')), description: clampDesc(t(lang, 'talk_agent_desc')) },
     { id: 'track_order', title: clampTitle(t(lang, 'track_order_title')), description: clampDesc(t(lang, 'track_order_desc')) },
   ];
-  const settingsRows = [{ id: 'change_language', title: clampTitle(t(lang, 'change_lang_title')), description: clampDesc(t(lang, 'change_lang_desc')) }];
+  const settingsRows = [changeLanguageRow(lang)];
 
   await sendInteractiveList({
     to,
@@ -179,6 +206,60 @@ async function pickProMaxPackage(to: string, lang: 'en' | 'sw') {
   });
 }
 
+/* -------------------- District/Ward interactive lists -------------------- */
+async function sendDistrictList(to: string, lang: 'en' | 'sw') {
+  const districts = listDistricts();
+  const rows = districts.map((d: string) => ({
+    id: `pick_district::${d}`,
+    title: clampTitle(d),
+    description: ''
+  }));
+  await sendInteractiveList({
+    to,
+    header: clampHeader(lang === 'sw' ? 'Chagua District' : 'Choose District'),
+    body: clampBody(lang === 'sw' ? 'Tafadhali chagua district yako.' : 'Please choose your district.'),
+    buttonText: clampButton(lang === 'sw' ? 'Fungua' : 'Open'),
+    sections: [{ title: clampSection('Districts'), rows }]
+  });
+}
+
+function chunk<T>(arr: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
+async function sendWardList(to: string, lang: 'en' | 'sw', district: string) {
+  const wards = listWardsByDistrict(district);
+  if (!wards.length) {
+    await sendText({ to, body: lang === 'sw'
+      ? `Hatukupata kata (wards) za "${district}". Jaribu district nyingine.`
+      : `No wards found for "${district}". Please choose another district.` });
+    await nap();
+    await sendDistrictList(to, lang);
+    return;
+  }
+
+  // WA list: max 10 rows per section. Chunk wards.
+  const wardChunks = chunk(wards, 10);
+  await sendInteractiveList({
+    to,
+    header: clampHeader(lang === 'sw' ? `Chagua Kata` : `Choose Ward`),
+    body: clampBody(lang === 'sw'
+      ? `District: ${district}\nTafadhali chagua kata.`
+      : `District: ${district}\nPlease choose a ward.`),
+    buttonText: clampButton(lang === 'sw' ? 'Fungua' : 'Open'),
+    sections: wardChunks.map((w, idx) => ({
+      title: clampSection(lang === 'sw' ? `Kata ${idx + 1}` : `Wards ${idx + 1}`),
+      rows: w.map((ward: string) => ({
+        id: `pick_ward::${district}::${ward}`,
+        title: clampTitle(ward),
+        description: ''
+      }))
+    }))
+  });
+}
+
 /* ----------------------------- Address parsing --------------------------- */
 function parseAddress(input: string): { street: string; city: string; country: string } | null {
   const parts = input.split(',').map(s => s.trim()).filter(Boolean);
@@ -189,6 +270,7 @@ function parseAddress(input: string): { street: string; city: string; country: s
   if (!street || !city || !country) return null;
   return { street, city, country };
 }
+
 function normalizePhone(raw: string): string | null {
   const s = raw.replace(/\s+/g, '');
   if (/^0\d{8,10}$/.test(s)) return `+255${s.slice(1)}`;
@@ -200,7 +282,10 @@ function normalizePhone(raw: string): string | null {
 /* ------------------------------- Webhook POST ---------------------------- */
 webhook.post('/', async (req: Request, res: Response) => {
   try {
-    if (!verifySignature(req)) { logger.warn('Signature check failed'); return res.sendStatus(200); }
+    if (!verifySignature(req)) {
+      logger.warn('Signature check failed');
+      return res.sendStatus(200);
+    }
 
     const entry = req.body?.entry?.[0];
     const messages = entry?.changes?.[0]?.value?.messages;
@@ -213,25 +298,34 @@ webhook.post('/', async (req: Request, res: Response) => {
     const listReplyId: string | undefined = msg.interactive?.list_reply?.id;
     const image = msg.image, document = msg.document, media = image || document;
 
-    // Language selection
+    // Language quick codes
     if (textBody === 'EN') { setLang(from, 'en'); await sendMainMenu(from, 'en'); return res.sendStatus(200); }
     if (textBody === 'SW') { setLang(from, 'sw'); await sendMainMenu(from, 'sw'); return res.sendStatus(200); }
-    const lang = getSession(from).lang || 'sw';
+    const lang: 'en' | 'sw' = getSession(from).lang || 'sw';
 
-    // Main menu entry
-    if (textBody === 'MENU' || buttonReplyId === 'back_menu') { await sendMainMenu(from, lang); return res.sendStatus(200); }
+    // Menu
+    if (textBody === 'MENU' || buttonReplyId === 'back_menu') {
+      await sendMainMenu(from, lang);
+      return res.sendStatus(200);
+    }
 
-    /* --------- PRODUCT ROW FIX: handle kiboko and furaha selections --------- */
+    // Toggle language (always show opposite language)
+    if (listReplyId === 'change_language') {
+      const next = lang === 'sw' ? 'en' : 'sw';
+      setLang(from, next);
+      await sendMainMenu(from, next);
+      return res.sendStatus(200);
+    }
+
+    /* --------- Product rows --------- */
     if (listReplyId === 'product_kiboko' || listReplyId === 'product_furaha') {
       await showProductActionsList(from, lang, listReplyId);
       return res.sendStatus(200);
     }
-    // Pro Max product row → show package options
     if (listReplyId === 'product_promax') {
       await pickProMaxPackage(from, lang);
       return res.sendStatus(200);
     }
-    // Pro Max package row → show product actions for that specific package
     if (listReplyId && isProMaxPackageId(listReplyId)) {
       await showProductActionsList(from, lang, listReplyId);
       return res.sendStatus(200);
@@ -252,7 +346,9 @@ webhook.post('/', async (req: Request, res: Response) => {
 
     if (listReplyId?.startsWith('action_add_')) {
       const pid = listReplyId.replace('action_add_', '');
-      const title = isProMaxPackageId(pid) ? `${productTitle('product_promax', lang)} — ${promaxPackageTitle(pid, lang)}` : productTitle(pid, lang);
+      const title = isProMaxPackageId(pid)
+        ? `${productTitle('product_promax', lang)} — ${promaxPackageTitle(pid, lang)}`
+        : productTitle(pid, lang);
       const price =
         pid === 'product_kiboko' ? (PRODUCTS.find(p => p.id === 'product_kiboko')?.priceTZS ?? 0) :
         pid === 'product_furaha' ? (PRODUCTS.find(p => p.id === 'product_furaha')?.priceTZS ?? 0) :
@@ -284,13 +380,23 @@ webhook.post('/', async (req: Request, res: Response) => {
       return res.sendStatus(200);
     }
 
-    if (listReplyId === 'view_cart') { await showCartSummary(from, lang); return res.sendStatus(200); }
-    if (listReplyId === 'back_menu') { await sendMainMenu(from, lang); return res.sendStatus(200); }
+    if (listReplyId === 'view_cart') {
+      await showCartSummary(from, lang);
+      return res.sendStatus(200);
+    }
+    if (listReplyId === 'back_menu') {
+      await sendMainMenu(from, lang);
+      return res.sendStatus(200);
+    }
 
     // Cart actions
     if (buttonReplyId === 'cart_checkout') {
       const items = getSession(from).cart.items;
-      if (!items.length) { await sendText({ to: from, body: t(lang, 'cart_empty') }); await sendMainMenu(from, lang); return res.sendStatus(200); }
+      if (!items.length) {
+        await sendText({ to: from, body: t(lang, 'cart_empty') });
+        await sendMainMenu(from, lang);
+        return res.sendStatus(200);
+      }
       startCheckout(from);
       await sendInteractiveButtons({
         to: from,
@@ -303,7 +409,13 @@ webhook.post('/', async (req: Request, res: Response) => {
       });
       return res.sendStatus(200);
     }
-    if (buttonReplyId === 'cart_clear') { clearCart(from); await sendText({ to: from, body: t(lang, 'cart_empty') }); await sendMainMenu(from, lang); return res.sendStatus(200); }
+
+    if (buttonReplyId === 'cart_clear') {
+      clearCart(from);
+      await sendText({ to: from, body: t(lang, 'cart_empty') });
+      await sendMainMenu(from, lang);
+      return res.sendStatus(200);
+    }
 
     // Area choice
     if (buttonReplyId === 'area_dar') {
@@ -319,9 +431,11 @@ webhook.post('/', async (req: Request, res: Response) => {
       });
       return res.sendStatus(200);
     }
+
     if (buttonReplyId === 'area_outside') {
       updateCheckout(from, { addressCountry: 'OUTSIDE_DAR' } as any);
-      setCheckoutStage(from, 'asked_name'); setExpecting(from, 'customer_name');
+      setCheckoutStage(from, 'asked_name');
+      setExpecting(from, 'customer_name');
       await sendText({ to: from, body: lang === 'sw' ? 'Tuma majina matatu kamili ya mteja.' : 'Send the customer\'s full name (three parts).' });
       return res.sendStatus(200);
     }
@@ -338,75 +452,193 @@ webhook.post('/', async (req: Request, res: Response) => {
     // Fulfillment pick → ask name
     if (buttonReplyId === 'fulfill_pickup' || buttonReplyId === 'fulfill_delivery') {
       updateCheckout(from, { fulfillment: buttonReplyId === 'fulfill_pickup' ? 'pickup' : 'delivery' });
-      setCheckoutStage(from, 'asked_name'); setExpecting(from, 'customer_name');
+      setCheckoutStage(from, 'asked_name');
+      setExpecting(from, 'customer_name');
       await sendText({ to: from, body: t(lang, 'ask_full_name') });
       return res.sendStatus(200);
     }
 
     // Agent
-    if (listReplyId === 'talk_agent') { await showAgentOptions(from, lang); return res.sendStatus(200); }
-    if (listReplyId === 'agent_text') { await sendText({ to: from, body: t(lang, 'agent_text_ack') }); return res.sendStatus(200); }
-    if (listReplyId === 'agent_wa_call') { logger.info({ type: 'wa_call_request', from }, 'User requested WhatsApp call'); await sendText({ to: from, body: t(lang, 'agent_wa_call_ack') }); return res.sendStatus(200); }
-    if (listReplyId === 'agent_normal_call') { setExpecting(from, 'agent_phone'); await sendText({ to: from, body: t(lang, 'agent_prompt_phone') }); return res.sendStatus(200); }
+    if (listReplyId === 'talk_agent') {
+      await showAgentOptions(from, lang);
+      return res.sendStatus(200);
+    }
+    if (listReplyId === 'agent_text') {
+      await sendText({ to: from, body: t(lang, 'agent_text_ack') });
+      return res.sendStatus(200);
+    }
+    if (listReplyId === 'agent_wa_call') {
+      logger.info({ type: 'wa_call_request', from }, 'User requested WhatsApp call');
+      await sendText({ to: from, body: t(lang, 'agent_wa_call_ack') });
+      return res.sendStatus(200);
+    }
+    if (listReplyId === 'agent_normal_call') {
+      setExpecting(from, 'agent_phone');
+      await sendText({ to: from, body: t(lang, 'agent_prompt_phone') });
+      return res.sendStatus(200);
+    }
 
     // Track order
-    if (listReplyId === 'track_order') { setExpecting(from, 'order_id'); await sendText({ to: from, body: t(lang, 'prompt_order_id') }); return res.sendStatus(200); }
+    if (listReplyId === 'track_order') {
+      setExpecting(from, 'order_id');
+      await sendText({ to: from, body: t(lang, 'prompt_order_id') });
+      return res.sendStatus(200);
+    }
 
     if (textBody && getSession(from).expecting === 'order_id') {
-      const id = textBody.replace(/\s+/g, ''); const o = getOrder(id);
-      if (!o) { await sendText({ to: from, body: t(lang, 'status_not_found') }); setExpecting(from, 'none'); return res.sendStatus(200); }
-      const paid = o.paidTZS ?? 0; const due = Math.max(0, (o.totalTZS ?? 0) - paid);
-      await sendText({ to: from, body: `*${t(lang, 'order_created_title')}*\n*Order:* ${o.orderId}\n*Title:* ${o.title}\n*Name:* ${o.customerName || ''}\n*Address:* ${o.addressStreet || ''} ${o.addressCity || ''} ${o.addressCountry || ''}\n*Total:* ${plainTZS(o.totalTZS ?? 0)}\n*Paid:* ${plainTZS(paid)}\n*Balance:* ${plainTZS(due)}\n` });
-      setExpecting(from, 'none'); return res.sendStatus(200);
+      const id = textBody.replace(/\s+/g, '');
+      const o = getOrder(id);
+      if (!o) {
+        await sendText({ to: from, body: t(lang, 'status_not_found') });
+        setExpecting(from, 'none');
+        return res.sendStatus(200);
+      }
+      const paid = o.paidTZS ?? 0;
+      const due = Math.max(0, (o.totalTZS ?? 0) - paid);
+      await sendText({
+        to: from,
+        body:
+          `*${t(lang, 'order_created_title')}*\n` +
+          `*Order:* ${o.orderId}\n*Title:* ${o.title}\n*Name:* ${o.customerName || ''}\n*Address:* ${o.addressStreet || ''} ${o.addressCity || ''} ${o.addressCountry || ''}\n*Total:* ${plainTZS(o.totalTZS ?? 0)}\n*Paid:* ${plainTZS(paid)}\n*Balance:* ${plainTZS(due)}\n`
+      });
+      setExpecting(from, 'none');
+      return res.sendStatus(200);
     }
 
     // Agent phone
     if (textBody && getSession(from).expecting === 'agent_phone') {
       const normalized = normalizePhone(textBody);
-      if (!normalized) { await sendText({ to: from, body: t(lang, 'phone_invalid') }); return res.sendStatus(200); }
+      if (!normalized) {
+        await sendText({ to: from, body: t(lang, 'phone_invalid') });
+        return res.sendStatus(200);
+      }
       logger.info({ type: 'normal_call_request', from, phone: normalized }, 'User requested normal phone call');
       await sendText({ to: from, body: t(lang, 'agent_phone_ack', { phone: normalized }) });
-      setExpecting(from, 'none'); return res.sendStatus(200);
+      setExpecting(from, 'none');
+      return res.sendStatus(200);
     }
 
-    // Checkout: Full name (branches by area)
+    /* ---------------------- Checkout: full name step ---------------------- */
     if (textBody && getSession(from).expecting === 'customer_name') {
       updateCheckout(from, { customerName: textBody });
-      const s = (getSession(from).checkout ?? {}) as any; const outside = s.addressCountry === 'OUTSIDE_DAR'; const isPickup = s.fulfillment === 'pickup';
-      if (outside) { setCheckoutStage(from, 'asked_address'); setExpecting(from, 'delivery_address'); await sendText({ to: from, body: lang === 'sw' ? 'Taja mkoa (region) uliopo.' : 'Type your region.' }); return res.sendStatus(200); }
-      if (isPickup) { setCheckoutStage(from, 'asked_phone'); setExpecting(from, 'pickup_phone'); await sendText({ to: from, body: t(lang, 'ask_phone') }); return res.sendStatus(200); }
-      setCheckoutStage(from, 'asked_address'); setExpecting(from, 'delivery_address');
-      await sendText({ to: from, body: lang === 'sw' ? 'Taja *ward na district* (mf. "tabata kimanga ilala").' : 'Type *ward and district* (e.g., "tabata kimanga ilala").' });
+
+      const s = (getSession(from).checkout ?? {}) as any;
+      const outside = s.addressCountry === 'OUTSIDE_DAR';
+      const isPickup = s.fulfillment === 'pickup';
+      const isDeliveryDar = s.addressCountry === 'Dar es Salaam' && s.fulfillment === 'delivery';
+
+      if (outside) {
+        setCheckoutStage(from, 'asked_address');
+        setExpecting(from, 'delivery_address');
+        await sendText({ to: from, body: lang === 'sw' ? 'Taja mkoa (region) uliopo.' : 'Type your region.' });
+        return res.sendStatus(200);
+      }
+
+      if (isPickup) {
+        setCheckoutStage(from, 'asked_phone');
+        setExpecting(from, 'pickup_phone');
+        await sendText({ to: from, body: t(lang, 'ask_phone') });
+        return res.sendStatus(200);
+      }
+
+      if (isDeliveryDar) {
+        // NEW: ask district via list
+        setCheckoutStage(from, 'asked_district' as any);
+        setExpecting(from, 'select_district' as any);
+        await sendDistrictList(from, lang);
+        return res.sendStatus(200);
+      }
+
+      // Fallback (shouldn't happen)
+      await sendMainMenu(from, lang);
+      return res.sendStatus(200);
+    }
+
+    /* -------------------- Inside Dar: district/ward picks -------------------- */
+    if (typeof listReplyId === 'string' && listReplyId.startsWith('pick_district::')) {
+      const district = listReplyId.split('::')[1] as string;
+      updateCheckout(from, { addressCity: district, addressCountry: 'Dar es Salaam' } as any);
+      setCheckoutStage(from, 'asked_ward' as any);
+      setExpecting(from, 'select_ward' as any);
+      await sendWardList(from, lang, district);
+      return res.sendStatus(200);
+    }
+
+    if (typeof listReplyId === 'string' && listReplyId.startsWith('pick_ward::')) {
+      const parts = listReplyId.split('::');
+      const district = parts[1] as string;
+      const ward = parts[2] as string;
+      updateCheckout(from, { addressStreet: ward } as any);
+
+      // compute fee
+      const km = getDistanceKm(district, ward) ?? 0;
+      const fee = feeForDarDistance(km);
+      const s = (getSession(from).checkout ?? {}) as any;
+      updateCheckout(from, { deliveryKm: km, deliveryFeeTZS: fee } as any);
+      const total = (s.totalTZS ?? cartTotal(from)) + fee;
+
+      const summary = lang === 'sw'
+        ? `📦 *Muhtasari (Delivery Dar)*\nJina: ${s.customerName || ''}\nMahali: ${ward}, ${district}\nUmbali: ${km.toFixed(2)} km\nNauli: ${plainTZS(fee)}\nJumla: ${plainTZS(total)}`
+        : `📦 *Summary (Dar Delivery)*\nName: ${s.customerName || ''}\nPlace: ${ward}, ${district}\nDistance: ${km.toFixed(2)} km\nDelivery: ${plainTZS(fee)}\nTotal: ${plainTZS(total)}`;
+      await sendText({ to: from, body: summary });
+      await nap();
+
+      setCheckoutStage(from, 'asked_phone');
+      setExpecting(from, 'delivery_phone');
+      await sendText({ to: from, body: t(lang, 'ask_phone') });
       return res.sendStatus(200);
     }
 
     // Pickup: Phone → create order
     if (textBody && getSession(from).expecting === 'pickup_phone') {
       const normalized = normalizePhone(textBody);
-      if (!normalized) { await sendText({ to: from, body: t(lang, 'phone_invalid') }); return res.sendStatus(200); }
+      if (!normalized) {
+        await sendText({ to: from, body: t(lang, 'phone_invalid') });
+        return res.sendStatus(200);
+      }
       updateCheckout(from, { contactPhone: normalized });
+
       const s = (getSession(from).checkout ?? {}) as any;
       let items: OrderItem[] = [];
-      if (!s.productId) items = getSession(from).cart.items.map((it: any) => ({ ...it }));
-      else {
-        let price = isProMaxPackageId(s.productId) ? PROMAX_PRICE_TZS : (PRODUCTS.find(p => p.id === s.productId)?.priceTZS ?? 0);
-        const title = isProMaxPackageId(s.productId) ? `${productTitle('product_promax', lang)} — ${promaxPackageTitle(s.productId, lang)}` : productTitle(s.productId, lang);
+      if (!s.productId) {
+        items = getSession(from).cart.items.map((it: any) => ({ ...it }));
+      } else {
+        let price = 0;
+        if (isProMaxPackageId(s.productId)) price = PROMAX_PRICE_TZS;
+        else price = PRODUCTS.find(p => p.id === s.productId)?.priceTZS ?? 0;
+        const title = isProMaxPackageId(s.productId)
+          ? `${productTitle('product_promax', lang)} — ${promaxPackageTitle(s.productId, lang)}`
+          : productTitle(s.productId, lang);
         items.push({ productId: s.productId, title, qty: 1, priceTZS: price });
       }
       const fee = Math.max(0, Math.floor((s as any).deliveryFeeTZS || 0));
-      if (fee > 0) items.push({ productId: 'delivery_fee', title: lang === 'sw' ? 'Nauli ya Usafiri' : 'Delivery Fee', qty: 1, priceTZS: fee });
+      if (fee > 0) {
+        items.push({ productId: 'delivery_fee', title: lang === 'sw' ? 'Nauli ya Usafiri' : 'Delivery Fee', qty: 1, priceTZS: fee });
+      }
 
-      const order = createOrder({ items, lang, customerPhone: from, contactPhone: s.contactPhone, fulfillment: 'pickup', customerName: s.customerName, addressStreet: s.addressStreet, addressCity: s.addressCity, addressCountry: s.addressCountry });
-      setLastOrderId(from, order.orderId); clearCart(from);
+      const order = createOrder({
+        items,
+        lang,
+        customerPhone: from,
+        contactPhone: s.contactPhone,
+        fulfillment: 'pickup',
+        customerName: s.customerName,
+        addressStreet: s.addressStreet,
+        addressCity: s.addressCity,
+        addressCountry: s.addressCountry,
+      });
+      setLastOrderId(from, order.orderId);
+      clearCart(from);
 
       await sendText({ to: from, body: t(lang, 'pickup_thanks', { customerName: order.customerName || '' }) });
-      resetCheckout(from); return res.sendStatus(200);
+      resetCheckout(from);
+      return res.sendStatus(200);
     }
 
-    // Address handler (multi-step)
+    // Outside Dar typed steps remain
     if (textBody && getSession(from).expecting === 'delivery_address') {
       const s = (getSession(from).checkout ?? {}) as any;
-      const outside = s.addressCountry === 'OUTSIDE_DAR'; const isDarDelivery = s.addressCountry === 'Dar es Salaam' && s.fulfillment === 'delivery';
+      const outside = s.addressCountry === 'OUTSIDE_DAR';
 
       // Outside Dar — Step 1: Region
       if (outside && !s.addressCountryRegion) {
@@ -432,62 +664,82 @@ webhook.post('/', async (req: Request, res: Response) => {
       // Outside Dar — Step 3: Station → fee → summary → phone
       if (outside && s.addressCountryRegion && s.outsideMode && s.outsideTransportName && !s.outsideStation) {
         updateCheckout(from, { outsideStation: textBody, deliveryFeeTZS: OUTSIDE_DAR_FLAT } as any);
-        const fee = OUTSIDE_DAR_FLAT; const total = (s.totalTZS ?? cartTotal(from)) + fee;
+        const fee = OUTSIDE_DAR_FLAT;
+        const total = (s.totalTZS ?? cartTotal(from)) + fee;
         const summary = lang === 'sw'
           ? `📦 *Muhtasari (Nje ya Dar)*\nJina: ${s.customerName || ''}\nMkoa: ${s.addressCountryRegion}\nUsafiri: ${s.outsideMode} - ${s.outsideTransportName}\nKituo: ${textBody}\nNauli: ${plainTZS(fee)}\nJumla: ${plainTZS(total)}`
           : `📦 *Summary (Outside Dar)*\nName: ${s.customerName || ''}\nRegion: ${s.addressCountryRegion}\nTransport: ${s.outsideMode} - ${s.outsideTransportName}\nStation: ${textBody}\nDelivery: ${plainTZS(fee)}\nTotal: ${plainTZS(total)}`;
         await sendText({ to: from, body: summary });
         await nap();
-        setCheckoutStage(from, 'asked_phone'); setExpecting(from, 'delivery_phone');
+        setCheckoutStage(from, 'asked_phone');
+        setExpecting(from, 'delivery_phone');
         await sendText({ to: from, body: t(lang, 'ask_phone') });
         return res.sendStatus(200);
       }
 
-      // Inside Dar — Delivery: ward+district → distance + fee → summary → phone
-      if (isDarDelivery && !s.addressStreet && !s.addressCity) {
-        const resolved = resolveWardDistrictFromFreeText(textBody);
-        if (!resolved) { await sendText({ to: from, body: lang === 'sw' ? 'Hatukupata eneo lako. Taja tena ward + district (mf. Kimanga Ilala).' : 'Could not resolve. Please type ward + district (e.g., Kimanga Ilala).' }); return res.sendStatus(200); }
-        const km = getDistanceKm(resolved.district, resolved.ward) ?? 0; const fee = feeForDarDistance(km);
-        updateCheckout(from, { addressStreet: resolved.ward, addressCity: resolved.district, addressCountry: 'Dar es Salaam', deliveryKm: km, deliveryFeeTZS: fee } as any);
-        const total = (s.totalTZS ?? cartTotal(from)) + fee;
-        const summary = lang === 'sw'
-          ? `📦 *Muhtasari (Delivery Dar)*\nJina: ${s.customerName || ''}\nMahali: ${resolved.ward}, ${resolved.district}\nUmbali: ${km.toFixed(2)} km\nNauli: ${plainTZS(fee)}\nJumla: ${plainTZS(total)}`
-          : `📦 *Summary (Dar Delivery)*\nName: ${s.customerName || ''}\nPlace: ${resolved.ward}, ${resolved.district}\nDistance: ${km.toFixed(2)} km\nDelivery: ${plainTZS(fee)}\nTotal: ${plainTZS(total)}`;
-        await sendText({ to: from, body: summary });
-        await nap();
-        setCheckoutStage(from, 'asked_phone'); setExpecting(from, 'delivery_phone');
-        await sendText({ to: from, body: t(lang, 'ask_phone') });
-        return res.sendStatus(200);
-      }
-
-      // Structured fallback
+      // Fallback structured
       const parsed = parseAddress(textBody);
-      if (!parsed) { await sendText({ to: from, body: t(lang, 'address_invalid') }); return res.sendStatus(200); }
-      updateCheckout(from, { addressRaw: textBody, addressStreet: parsed.street, addressCity: parsed.city, addressCountry: parsed.country });
-      setCheckoutStage(from, 'asked_phone'); setExpecting(from, 'delivery_phone');
+      if (!parsed) {
+        await sendText({ to: from, body: t(lang, 'address_invalid') });
+        return res.sendStatus(200);
+      }
+      updateCheckout(from, {
+        addressRaw: textBody,
+        addressStreet: parsed.street,
+        addressCity: parsed.city,
+        addressCountry: parsed.country,
+      });
+      setCheckoutStage(from, 'asked_phone');
+      setExpecting(from, 'delivery_phone');
       await sendText({ to: from, body: t(lang, 'ask_phone') });
       return res.sendStatus(200);
     }
 
-    // Delivery: Phone → create order → summary + actions (+ proof hint)
+    // Delivery: Phone → create order → summary + actions
     if (textBody && getSession(from).expecting === 'delivery_phone') {
       const normalized = normalizePhone(textBody);
-      if (!normalized) { await sendText({ to: from, body: t(lang, 'phone_invalid') }); return res.sendStatus(200); }
+      if (!normalized) {
+        await sendText({ to: from, body: t(lang, 'phone_invalid') });
+        return res.sendStatus(200);
+      }
       updateCheckout(from, { contactPhone: normalized });
 
       const s = (getSession(from).checkout ?? {}) as any;
       let items: OrderItem[] = [];
-      if (!s.productId) items = getSession(from).cart.items.map((it: any) => ({ ...it }));
-      else {
-        const price = isProMaxPackageId(s.productId) ? PROMAX_PRICE_TZS : (PRODUCTS.find((p) => p.id === s.productId)?.priceTZS ?? 0);
-        const title = isProMaxPackageId(s.productId) ? `${productTitle('product_promax', lang)} — ${promaxPackageTitle(s.productId, lang)}` : productTitle(s.productId, lang);
+      if (!s.productId) {
+        items = getSession(from).cart.items.map((it: any) => ({ ...it }));
+      } else {
+        const price = isProMaxPackageId(s.productId) ? PROMAX_PRICE_TZS
+          : (PRODUCTS.find((p) => p.id === s.productId)?.priceTZS ?? 0);
+        const title = isProMaxPackageId(s.productId)
+          ? `${productTitle('product_promax', lang)} — ${promaxPackageTitle(s.productId, lang)}`
+          : productTitle(s.productId, lang);
         items.push({ productId: s.productId, title, qty: 1, priceTZS: price });
       }
-      const fee = Math.max(0, Math.floor((s as any).deliveryFeeTZS || 0));
-      if (fee > 0) items.push({ productId: 'delivery_fee', title: lang === 'sw' ? 'Nauli ya Usafiri' : 'Delivery Fee', qty: 1, priceTZS: fee });
 
-      const order = createOrder({ items, lang, customerPhone: from, contactPhone: s.contactPhone, fulfillment: 'delivery', customerName: s.customerName, addressStreet: s.addressStreet, addressCity: s.addressCity, addressCountry: s.addressCountry });
-      setLastOrderId(from, order.orderId); clearCart(from);
+      const fee = Math.max(0, Math.floor((s as any).deliveryFeeTZS || 0));
+      if (fee > 0) {
+        items.push({
+          productId: 'delivery_fee',
+          title: lang === 'sw' ? 'Nauli ya Usafiri' : 'Delivery Fee',
+          qty: 1,
+          priceTZS: fee,
+        });
+      }
+
+      const order = createOrder({
+        items,
+        lang,
+        customerPhone: from,
+        contactPhone: s.contactPhone,
+        fulfillment: 'delivery',
+        customerName: s.customerName,
+        addressStreet: s.addressStreet,
+        addressCity: s.addressCity,
+        addressCountry: s.addressCountry,
+      });
+      setLastOrderId(from, order.orderId);
+      clearCart(from);
 
       const isMulti = order.items.length > 1;
       await sendText({
@@ -495,8 +747,21 @@ webhook.post('/', async (req: Request, res: Response) => {
         body:
           `*${t(lang, 'order_created_title')}*\n\n` +
           (isMulti
-            ? t(lang, 'order_created_body_total', { total: plainTZS(order.totalTZS), customerName: order.customerName || '', street: order.addressStreet || '', city: order.addressCity || '', country: order.addressCountry || '' })
-            : t(lang, 'order_created_body_single', { title: order.title, total: plainTZS(order.totalTZS), customerName: order.customerName || '', street: order.addressStreet || '', city: order.addressCity || '', country: order.addressCountry || '' }))
+            ? t(lang, 'order_created_body_total', {
+                total: plainTZS(order.totalTZS),
+                customerName: order.customerName || '',
+                street: order.addressStreet || '',
+                city: order.addressCity || '',
+                country: order.addressCountry || '',
+              })
+            : t(lang, 'order_created_body_single', {
+                title: order.title,
+                total: plainTZS(order.totalTZS),
+                customerName: order.customerName || '',
+                street: order.addressStreet || '',
+                city: order.addressCity || '',
+                country: order.addressCountry || '',
+              }))
       });
       await nap();
 
@@ -521,18 +786,33 @@ webhook.post('/', async (req: Request, res: Response) => {
     // Edit address after order created
     if (textBody && getSession(from).expecting === 'edit_address') {
       const oid = getSession(from).lastCreatedOrderId;
-      if (!oid) { await sendText({ to: from, body: t(lang, 'status_not_found') }); setExpecting(from, 'none'); return res.sendStatus(200); }
+      if (!oid) {
+        await sendText({ to: from, body: t(lang, 'status_not_found') });
+        setExpecting(from, 'none');
+        return res.sendStatus(200);
+      }
 
       const parsed = parseAddress(textBody);
-      if (!parsed) { await sendText({ to: from, body: t(lang, 'address_invalid') }); return res.sendStatus(200); }
+      if (!parsed) {
+        await sendText({ to: from, body: t(lang, 'address_invalid') });
+        return res.sendStatus(200);
+      }
 
       const updated = updateOrderAddress(oid, parsed.street, parsed.city, parsed.country);
-      if (!updated) { await sendText({ to: from, body: t(lang, 'status_not_found') }); setExpecting(from, 'none'); return res.sendStatus(200); }
+      if (!updated) {
+        await sendText({ to: from, body: t(lang, 'status_not_found') });
+        setExpecting(from, 'none');
+        return res.sendStatus(200);
+      }
 
       await sendText({
         to: from,
         body:
-          t(lang, 'address_updated', { street: updated.addressStreet || '', city: updated.addressCity || '', country: updated.addressCountry || '' }) +
+          t(lang, 'address_updated', {
+            street: updated.addressStreet || '',
+            city: updated.addressCity || '',
+            country: updated.addressCountry || '',
+          }) +
           `\n\n*${t(lang, 'order_created_title')}*\n` +
           `*Order:* ${updated.orderId}\n*Title:* ${updated.title}\n*Name:* ${updated.customerName || ''}\n*Address:* ${updated.addressStreet || ''} ${updated.addressCity || ''} ${updated.addressCountry || ''}\n*Total:* ${plainTZS(updated.totalTZS)}`
       });
@@ -548,7 +828,8 @@ webhook.post('/', async (req: Request, res: Response) => {
         ],
       });
 
-      setExpecting(from, 'none'); return res.sendStatus(200);
+      setExpecting(from, 'none');
+      return res.sendStatus(200);
     }
 
     // Pay now (send manual proof)
@@ -562,18 +843,31 @@ webhook.post('/', async (req: Request, res: Response) => {
     // Transaction message or image
     if (getSession(from).expecting === 'txn_message' && (textBody || media)) {
       const oid = getSession(from).lastCreatedOrderId;
-      if (!oid) { await sendText({ to: from, body: t(lang, 'status_not_found') }); setExpecting(from, 'none'); return res.sendStatus(200); }
+      if (!oid) {
+        await sendText({ to: from, body: t(lang, 'status_not_found') });
+        setExpecting(from, 'none');
+        return res.sendStatus(200);
+      }
 
-      if (textBody) { const updated = attachTxnMessage(oid, textBody); await sendText({ to: from, body: t(lang, 'txn_ok_text', { orderId: updated?.orderId ?? oid }) }); }
-      else if (image) { const updated = attachTxnImage(oid, image.id, image.caption || ''); await sendText({ to: from, body: t(lang, 'txn_ok_image', { orderId: updated?.orderId ?? oid }) }); }
-      else if (document) { const updated = attachTxnImage(oid, document.id, document.caption || ''); await sendText({ to: from, body: t(lang, 'txn_ok_image', { orderId: updated?.orderId ?? oid }) }); }
+      if (textBody) {
+        const updated = attachTxnMessage(oid, textBody);
+        await sendText({ to: from, body: t(lang, 'txn_ok_text', { orderId: updated?.orderId ?? oid }) });
+      } else if (image) {
+        const updated = attachTxnImage(oid, image.id, image.caption || '');
+        await sendText({ to: from, body: t(lang, 'txn_ok_image', { orderId: updated?.orderId ?? oid }) });
+      } else if (document) {
+        const updated = attachTxnImage(oid, document.id, document.caption || '');
+        await sendText({ to: from, body: t(lang, 'txn_ok_image', { orderId: updated?.orderId ?? oid }) });
+      }
 
-      setExpecting(from, 'none'); return res.sendStatus(200);
+      setExpecting(from, 'none');
+      return res.sendStatus(200);
     }
 
     // Default
     await sendMainMenu(from, lang);
     return res.sendStatus(200);
+
   } catch (err) {
     logger.error({ err }, 'Webhook processing error');
     return res.sendStatus(200);
@@ -583,11 +877,22 @@ webhook.post('/', async (req: Request, res: Response) => {
 /* ----------------------------- Cart summary ------------------------------ */
 async function showCartSummary(to: string, lang: 'en' | 'sw') {
   const items = getSession(to).cart.items;
-  if (!items.length) { await sendText({ to, body: t(lang, 'cart_empty') }); await sendMainMenu(to, lang); return; }
+  if (!items.length) {
+    await sendText({ to, body: t(lang, 'cart_empty') });
+    await sendMainMenu(to, lang);
+    return;
+  }
 
   const lines = items.map((it: any) => `• ${it.title} x${it.qty} — ${plainTZS(it.priceTZS * it.qty)}`).join('\n');
-  await sendText({ to, body: `${t(lang, 'cart_summary_header')}\n${lines}\n\n` + t(lang, 'cart_summary_total', { total: plainTZS(cartTotal(to)) }) });
+
+  await sendText({
+    to,
+    body:
+      `${t(lang, 'cart_summary_header')}\n${lines}\n\n` +
+      t(lang, 'cart_summary_total', { total: plainTZS(cartTotal(to)) })
+  });
   await nap();
+
   await sendInteractiveButtons({
     to,
     body: clampBody(t(lang, 'cart_actions')),
