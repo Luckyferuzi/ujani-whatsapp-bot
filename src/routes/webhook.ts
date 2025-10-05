@@ -1,8 +1,6 @@
 // src/routes/webhook.ts
-// - Inside Dar: choose District -> choose Ward (from CSV) -> auto fee by distance -> phone -> order -> proof
-// - Outside Dar: region + transport + station -> flat fee -> phone -> order -> proof
-// - Clamps for WhatsApp interactive limits + tiny pacing to avoid dropped messages
-// - Language row always shows the *other* language (SW menu shows "Switch to English", EN menu shows "Badili Kiswahili")
+// Robust District → Ward flow with numeric fallback & pagination (no config required).
+// JSON-first (via wards.ts), CSV fallback, and free-text “ward + district” final fallback.
 
 import type { Request, Response } from 'express';
 import { Router } from 'express';
@@ -27,7 +25,7 @@ import {
   attachTxnMessage, attachTxnImage, OrderItem
 } from '../orders.js';
 
-// New: district/ward helpers from CSV
+// District/Ward utilities (JSON-first, CSV fallback)
 import { getDistanceKm, listDistricts, listWardsByDistrict } from '../wards.js';
 import { feeForDarDistance, OUTSIDE_DAR_FLAT } from '../delivery.js';
 
@@ -35,17 +33,8 @@ const logger = pino({ name: 'webhook' });
 export const webhook = Router();
 
 /* --------------------------- WhatsApp UI limits -------------------------- */
-const MAX_ROW_TITLE = 24;
-const MAX_ROW_DESC = 72;
-const MAX_SECTION_TITLE = 24;
-const MAX_BUTTON_TITLE = 20;
-const MAX_HEADER_TEXT = 60;
-const MAX_BODY_TEXT = 1024;
-
-function clamp(s: string | undefined | null, max: number): string {
-  const str = (s ?? '').toString();
-  return str.length > max ? str.slice(0, max - 1) + '…' : str;
-}
+const MAX_ROW_TITLE = 24, MAX_ROW_DESC = 72, MAX_SECTION_TITLE = 24, MAX_BUTTON_TITLE = 20, MAX_HEADER_TEXT = 60, MAX_BODY_TEXT = 1024;
+const clamp = (s: any, n: number) => { const str = (s ?? '').toString(); return str.length > n ? str.slice(0, n - 1) + '…' : str; };
 const clampTitle = (s: string) => clamp(s, MAX_ROW_TITLE);
 const clampDesc = (s: string) => clamp(s, MAX_ROW_DESC);
 const clampSection = (s: string) => clamp(s, MAX_SECTION_TITLE);
@@ -83,181 +72,121 @@ function verifySignature(req: Request): boolean {
 }
 
 /* -------------------------------- Helpers -------------------------------- */
-function plainTZS(n: number): string {
-  return formatTZS(n).replace(/\u00A0/g, ' ');
-}
-function productListTitleShort(id: string): string {
-  if (id === 'product_kiboko') return clampTitle('Ujani Kiboko');
-  if (id === 'product_furaha') return clampTitle('Furaha ya Ndoa');
-  if (id === 'product_promax') return clampTitle('Ujani Pro Max');
-  return clampTitle(id);
-}
-function productListDescShort(k: string, lang: 'en' | 'sw'): string {
-  if (k === 'product_kiboko') {
-    const p = PRODUCTS.find(p => p.id === 'product_kiboko')?.priceTZS ?? 0;
-    return clampDesc(lang === 'en' ? `Topical · ${plainTZS(p)}` : `Ya kupaka · ${plainTZS(p)}`);
+function plainTZS(n: number): string { return formatTZS(n).replace(/\u00A0/g, ' '); }
+function titleCase(s: string): string { return s.replace(/\b\w+/g, (w) => w[0]?.toUpperCase() + w.slice(1).toLowerCase()); }
+function parseWardDistrictFreeform(input: string): { district: string; ward: string } | null {
+  const text = (input || '').toLowerCase().trim().replace(/\s+/g, ' ');
+  const parts = text.split(' ');
+  if (parts.length >= 2) {
+    const district = parts[parts.length - 1];
+    const ward = parts.slice(0, parts.length - 1).join(' ').trim();
+    if (ward) return { district: titleCase(district), ward: titleCase(ward) };
   }
-  if (k === 'product_furaha') {
-    const p = PRODUCTS.find(p => p.id === 'product_furaha')?.priceTZS ?? 0;
-    return clampDesc(lang === 'en' ? `Oral · ${plainTZS(p)}` : `Ya kunywa · ${plainTZS(p)}`);
-  }
-  if (k === 'product_promax') {
-    return clampDesc(`A/B/C · ${plainTZS(PROMAX_PRICE_TZS)}`);
-  }
-  return '';
+  return null;
 }
 
-function changeLanguageRow(lang: 'en' | 'sw') {
-  // If menu is in Swahili, show "Switch to English"; if in English, show "Badili Kiswahili".
-  if (lang === 'sw') {
-    return {
-      id: 'change_language',
-      title: clampTitle('Switch to English'),
-      description: clampDesc('Change language to English'),
-    };
-  }
-  return {
-    id: 'change_language',
-    title: clampTitle('Badili Kiswahili'),
-    description: clampDesc('Chagua Kiswahili'),
-  };
+// 👇 NEW: type-safe-ish checker to avoid TS2367 when Expecting doesn’t include new keys
+function expectingIs(from: string, key: string): boolean {
+  return (getSession(from).expecting as any) === key;
 }
 
-async function sendMainMenu(to: string, lang: 'en' | 'sw') {
-  const productsRows = [
-    { id: 'product_kiboko', title: productListTitleShort('product_kiboko'), description: productListDescShort('product_kiboko', lang) },
-    { id: 'product_furaha', title: productListTitleShort('product_furaha'), description: productListDescShort('product_furaha', lang) },
-    { id: 'product_promax', title: productListTitleShort('product_promax'), description: productListDescShort('product_promax', lang) },
-  ];
-  const helpRows = [
-    { id: 'view_cart', title: clampTitle(lang === 'sw' ? 'Angalia Kikapu' : 'View Cart'), description: '' },
-    { id: 'talk_agent', title: clampTitle(t(lang, 'talk_agent_title')), description: clampDesc(t(lang, 'talk_agent_desc')) },
-    { id: 'track_order', title: clampTitle(t(lang, 'track_order_title')), description: clampDesc(t(lang, 'track_order_desc')) },
-  ];
-  const settingsRows = [changeLanguageRow(lang)];
+/* ------------------------ District/Ward pickers -------------------------- */
+function chunk<T>(arr: T[], size: number): T[][] { const out: T[][] = []; for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size)); return out; }
 
-  await sendInteractiveList({
-    to,
-    header: clampHeader('UJANI'),
-    body: clampBody(t(lang, 'menu_body')),
-    buttonText: clampButton(t(lang, 'menu_button')),
-    sections: [
-      { title: clampSection(t(lang, 'section_products')), rows: productsRows },
-      { title: clampSection(t(lang, 'section_help')), rows: helpRows },
-      { title: clampSection(t(lang, 'section_settings')), rows: settingsRows },
-    ]
-  });
-}
-
-async function showProductActionsList(to: string, lang: 'en' | 'sw', productId: string) {
-  const rows = [
-    { id: `action_buy_${productId}`,  title: clampTitle(lang === 'sw' ? 'Nunua sasa' : 'Buy now'), description: '' },
-    { id: `action_info_${productId}`, title: clampTitle(lang === 'sw' ? 'Maelezo zaidi' : 'More details'), description: '' },
-    { id: `action_add_${productId}`,  title: clampTitle(lang === 'sw' ? 'Ongeza kikapuni' : 'Add to cart'), description: '' },
-    { id: 'view_cart',                title: clampTitle(lang === 'sw' ? 'Angalia Kikapu' : 'View Cart'), description: '' },
-    { id: 'back_menu',                title: clampTitle(lang === 'sw' ? 'Rudi menyu' : 'Back to menu'), description: '' }
-  ];
-
-  await sendInteractiveList({
-    to,
-    header: clampHeader(productTitle(productId, lang)),
-    body: clampBody(lang === 'sw' ? 'Chagua hatua unayotaka' : 'Choose an action'),
-    buttonText: clampButton(t(lang, 'menu_button')),
-    sections: [{ title: clampSection(lang === 'sw' ? 'Chaguo' : 'Options'), rows }]
-  });
-}
-
-async function showAgentOptions(to: string, lang: 'en' | 'sw') {
-  await sendInteractiveList({
-    to,
-    header: clampHeader(lang === 'sw' ? 'Ongea na Wakala' : 'Talk to Agent'),
-    body: clampBody(t(lang, 'agent_body')),
-    buttonText: clampButton(t(lang, 'menu_button')),
-    sections: [
-      {
-        title: clampSection(lang === 'sw' ? 'Aina ya mawasiliano' : 'Contact types'),
-        rows: [
-          { id: 'agent_text',        title: clampTitle(t(lang, 'agent_text_title')), description: clampDesc(t(lang, 'agent_text_desc')) },
-          { id: 'agent_wa_call',     title: clampTitle(t(lang, 'agent_wa_call_title')), description: clampDesc(t(lang, 'agent_wa_call_desc')) },
-          { id: 'agent_normal_call', title: clampTitle(t(lang, 'agent_phone_title')), description: clampDesc(t(lang, 'agent_phone_desc')) },
-          { id: 'back_menu',         title: clampTitle(t(lang, 'row_back_menu')), description: '' },
-        ]
-      }
-    ]
-  });
-}
-
-async function pickProMaxPackage(to: string, lang: 'en' | 'sw') {
-  await sendInteractiveList({
-    to,
-    header: clampHeader('Ujani Pro Max'),
-    body: clampBody(t(lang, 'promax_pick_package')),
-    buttonText: clampButton(t(lang, 'menu_button')),
-    sections: [
-      {
-        title: clampSection(t(lang, 'section_promax')),
-        rows: PROMAX_PACKAGES.map(p => ({
-          id: p.id,
-          title: clampTitle(promaxPackageTitle(p.id, lang)),
-          description: clampDesc(promaxPackageSummary(p.id, lang)),
-        }))
-      }
-    ]
-  });
-}
-
-/* -------------------- District/Ward interactive lists -------------------- */
-async function sendDistrictList(to: string, lang: 'en' | 'sw') {
+async function sendDistrictPicker(to: string, lang: 'en' | 'sw') {
   const districts = listDistricts();
-  const rows = districts.map((d: string) => ({
-    id: `pick_district::${d}`,
-    title: clampTitle(d),
-    description: ''
-  }));
-  await sendInteractiveList({
-    to,
-    header: clampHeader(lang === 'sw' ? 'Chagua District' : 'Choose District'),
-    body: clampBody(lang === 'sw' ? 'Tafadhali chagua district yako.' : 'Please choose your district.'),
-    buttonText: clampButton(lang === 'sw' ? 'Fungua' : 'Open'),
-    sections: [{ title: clampSection('Districts'), rows }]
-  });
-}
-
-function chunk<T>(arr: T[], size: number): T[][] {
-  const out: T[][] = [];
-  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
-  return out;
-}
-
-async function sendWardList(to: string, lang: 'en' | 'sw', district: string) {
-  const wards = listWardsByDistrict(district);
-  if (!wards.length) {
+  if (!districts.length) {
+    // Final fallback: free-text
+    setExpecting(to, 'delivery_address' as any);
     await sendText({ to, body: lang === 'sw'
-      ? `Hatukupata kata (wards) za "${district}". Jaribu district nyingine.`
-      : `No wards found for "${district}". Please choose another district.` });
-    await nap();
-    await sendDistrictList(to, lang);
+      ? 'Tafadhali taja *ward na district* (mf. "Kimanga Ilala").'
+      : 'Please type your *ward and district* (e.g., "Kimanga Ilala").' });
     return;
   }
 
-  // WA list: max 10 rows per section. Chunk wards.
-  const wardChunks = chunk(wards, 10);
+  // Save the exact list for numeric fallback mapping
+  updateCheckout(to, { districtsCache: districts } as any);
+
+  // Interactive list (at most ~10 rows per section is fine here)
+  await sendInteractiveList({
+    to,
+    header: clampHeader(lang === 'sw' ? 'Chagua District' : 'Choose District'),
+    body: clampBody(lang === 'sw' ? 'Chagua district yako au jibu kwa namba iliyo kwenye orodha hapa chini.' : 'Pick your district or reply with its number from the list below.'),
+    buttonText: clampButton(lang === 'sw' ? 'Fungua' : 'Open'),
+    sections: [{
+      title: clampSection('Districts'),
+      rows: districts.map((d, idx) => ({
+        id: `pick_district::${idx}`,
+        title: clampTitle(d),
+        description: ''
+      }))
+    }]
+  });
+
+  // Numeric fallback list
+  const asText = districts.map((d, i) => `${i + 1}) ${d}`).join('\n');
+  await nap();
+  await sendText({
+    to,
+    body: lang === 'sw'
+      ? `Orodha ya District:\n${asText}\n\nJibu kwa *namba* ya district (mf. 2).`
+      : `District list:\n${asText}\n\nReply with the *number* of your district (e.g., 2).`
+  });
+
+  setExpecting(to, 'select_district' as any);
+  setCheckoutStage(to, 'asked_district' as any);
+}
+
+async function sendWardPage(to: string, lang: 'en' | 'sw', district: string, pageIndex = 0) {
+  const wardsAll = listWardsByDistrict(district);
+  if (!wardsAll.length) {
+    // Fallback: ask typed ward
+    setExpecting(to, 'select_ward' as any);
+    await sendText({
+      to,
+      body: lang === 'sw'
+        ? `District: ${district}\nTaja *ward* yako (mf. "Kimanga").`
+        : `District: ${district}\nType your *ward* (e.g., "Kimanga").`
+    });
+    return;
+  }
+
+  const pages = chunk(wardsAll, 9); // 9 wards + 1 "Next" row = 10 max
+  const page = Math.max(0, Math.min(pageIndex, pages.length - 1));
+  const wards = pages[page];
+
+  // Save pagination state for numeric fallback
+  updateCheckout(to, { wardPageIndex: page } as any);
+
+  // Build interactive page with optional "Next"
+  const rows = wards.map((w) => ({ id: `pick_ward::${district}::${w}`, title: clampTitle(w), description: '' }));
+  if (page < pages.length - 1) rows.push({ id: `ward_next::${district}::${page + 1}`, title: clampTitle(lang === 'sw' ? 'Ifuatayo →' : 'Next →'), description: '' });
+
   await sendInteractiveList({
     to,
     header: clampHeader(lang === 'sw' ? `Chagua Kata` : `Choose Ward`),
     body: clampBody(lang === 'sw'
-      ? `District: ${district}\nTafadhali chagua kata.`
-      : `District: ${district}\nPlease choose a ward.`),
+      ? `District: ${district}\nChagua kata au jibu kwa namba kutoka orodhani hapa chini.`
+      : `District: ${district}\nPick a ward or reply with its number from the list below.`),
     buttonText: clampButton(lang === 'sw' ? 'Fungua' : 'Open'),
-    sections: wardChunks.map((w, idx) => ({
-      title: clampSection(lang === 'sw' ? `Kata ${idx + 1}` : `Wards ${idx + 1}`),
-      rows: w.map((ward: string) => ({
-        id: `pick_ward::${district}::${ward}`,
-        title: clampTitle(ward),
-        description: ''
-      }))
-    }))
+    sections: [{ title: clampSection(lang === 'sw' ? `Kata` : `Wards`), rows }]
   });
+
+  // Numeric fallback for this page
+  const asText = wards.map((w, i) => `${i + 1}) ${w}`).join('\n');
+  const nextHint = page < pages.length - 1
+    ? (lang === 'sw' ? '\nTuma N au NEXT kwenda ukurasa unaofuata.' : '\nSend N or NEXT for the next page.')
+    : '';
+  await nap();
+  await sendText({
+    to,
+    body: (lang === 'sw'
+      ? `Orodha ya Kata (Ukurasa ${page + 1}/${pages.length}):\n`
+      : `Ward list (Page ${page + 1}/${pages.length}):\n`) + asText + nextHint
+  });
+
+  setExpecting(to, 'select_ward' as any);
+  setCheckoutStage(to, 'asked_ward' as any);
 }
 
 /* ----------------------------- Address parsing --------------------------- */
@@ -270,7 +199,6 @@ function parseAddress(input: string): { street: string; city: string; country: s
   if (!street || !city || !country) return null;
   return { street, city, country };
 }
-
 function normalizePhone(raw: string): string | null {
   const s = raw.replace(/\s+/g, '');
   if (/^0\d{8,10}$/.test(s)) return `+255${s.slice(1)}`;
@@ -279,13 +207,10 @@ function normalizePhone(raw: string): string | null {
   return null;
 }
 
-/* ------------------------------- Webhook POST ---------------------------- */
+/* --------------------------------- POST ---------------------------------- */
 webhook.post('/', async (req: Request, res: Response) => {
   try {
-    if (!verifySignature(req)) {
-      logger.warn('Signature check failed');
-      return res.sendStatus(200);
-    }
+    if (!verifySignature(req)) { logger.warn('Signature check failed'); return res.sendStatus(200); }
 
     const entry = req.body?.entry?.[0];
     const messages = entry?.changes?.[0]?.value?.messages;
@@ -303,71 +228,43 @@ webhook.post('/', async (req: Request, res: Response) => {
     if (textBody === 'SW') { setLang(from, 'sw'); await sendMainMenu(from, 'sw'); return res.sendStatus(200); }
     const lang: 'en' | 'sw' = getSession(from).lang || 'sw';
 
-    // Menu
-    if (textBody === 'MENU' || buttonReplyId === 'back_menu') {
-      await sendMainMenu(from, lang);
-      return res.sendStatus(200);
-    }
+    // Main menu shortcut
+    if (textBody === 'MENU' || buttonReplyId === 'back_menu') { await sendMainMenu(from, lang); return res.sendStatus(200); }
 
-    // Toggle language (always show opposite language)
-    if (listReplyId === 'change_language') {
-      const next = lang === 'sw' ? 'en' : 'sw';
-      setLang(from, next);
-      await sendMainMenu(from, next);
-      return res.sendStatus(200);
-    }
+    // Change language (always show opposite language on the row)
+    if (listReplyId === 'change_language') { const next = lang === 'sw' ? 'en' : 'sw'; setLang(from, next); await sendMainMenu(from, next); return res.sendStatus(200); }
 
-    /* --------- Product rows --------- */
+    /* ---------------------------- Product flows --------------------------- */
     if (listReplyId === 'product_kiboko' || listReplyId === 'product_furaha') {
-      await showProductActionsList(from, lang, listReplyId);
-      return res.sendStatus(200);
+      await showProductActionsList(from, lang, listReplyId); return res.sendStatus(200);
     }
-    if (listReplyId === 'product_promax') {
-      await pickProMaxPackage(from, lang);
-      return res.sendStatus(200);
-    }
-    if (listReplyId && isProMaxPackageId(listReplyId)) {
-      await showProductActionsList(from, lang, listReplyId);
-      return res.sendStatus(200);
-    }
+    if (listReplyId === 'product_promax') { await pickProMaxPackage(from, lang); return res.sendStatus(200); }
+    if (listReplyId && isProMaxPackageId(listReplyId)) { await showProductActionsList(from, lang, listReplyId); return res.sendStatus(200); }
 
-    // Product actions
     if (listReplyId?.startsWith('action_info_')) {
       const pid = listReplyId.replace('action_info_', '');
       const key = pid === 'product_kiboko' ? 'kiboko_more_bullets'
                : pid === 'product_furaha' ? 'furaha_more_bullets'
                : (isProMaxPackageId(pid) ? 'promax_detail_promax_a' : null);
-      if (key) await sendText({ to: from, body: t(lang, key) });
-      else     await sendText({ to: from, body: t(lang, 'not_found') });
-      await nap();
-      await showProductActionsList(from, lang, pid);
-      return res.sendStatus(200);
+      await sendText({ to: from, body: key ? t(lang, key) : t(lang, 'not_found') });
+      await nap(); await showProductActionsList(from, lang, pid); return res.sendStatus(200);
     }
-
     if (listReplyId?.startsWith('action_add_')) {
       const pid = listReplyId.replace('action_add_', '');
-      const title = isProMaxPackageId(pid)
-        ? `${productTitle('product_promax', lang)} — ${promaxPackageTitle(pid, lang)}`
-        : productTitle(pid, lang);
-      const price =
-        pid === 'product_kiboko' ? (PRODUCTS.find(p => p.id === 'product_kiboko')?.priceTZS ?? 0) :
-        pid === 'product_furaha' ? (PRODUCTS.find(p => p.id === 'product_furaha')?.priceTZS ?? 0) :
-        PROMAX_PRICE_TZS;
-
+      const title = isProMaxPackageId(pid) ? `${productTitle('product_promax', lang)} — ${promaxPackageTitle(pid, lang)}` : productTitle(pid, lang);
+      const price = pid === 'product_kiboko' ? (PRODUCTS.find(p => p.id === 'product_kiboko')?.priceTZS ?? 0)
+                  : pid === 'product_furaha' ? (PRODUCTS.find(p => p.id === 'product_furaha')?.priceTZS ?? 0)
+                  : PROMAX_PRICE_TZS;
       addToCart(from, { productId: pid, title, priceTZS: price, qty: 1 });
       await sendText({ to: from, body: t(lang, 'cart_added', { title }) });
-      await nap();
-      await showCartSummary(from, lang);
-      return res.sendStatus(200);
+      await nap(); await showCartSummary(from, lang); return res.sendStatus(200);
     }
-
     if (listReplyId?.startsWith('action_buy_')) {
       const pid = listReplyId.replace('action_buy_', '');
       let totalTZS = 0; let title = '';
       if (isProMaxPackageId(pid)) { title = `${productTitle('product_promax', lang)} — ${promaxPackageTitle(pid, lang)}`; totalTZS = PROMAX_PRICE_TZS; }
       else { title = productTitle(pid, lang); totalTZS = PRODUCTS.find(p => p.id === pid)?.priceTZS ?? 0; }
       startCheckout(from, pid, title, totalTZS);
-
       await sendInteractiveButtons({
         to: from,
         body: clampBody(lang === 'sw' ? 'Je, uko ndani ya Dar es Salaam au nje ya Dar es Salaam?' : 'Are you within Dar es Salaam or outside Dar es Salaam?'),
@@ -380,23 +277,13 @@ webhook.post('/', async (req: Request, res: Response) => {
       return res.sendStatus(200);
     }
 
-    if (listReplyId === 'view_cart') {
-      await showCartSummary(from, lang);
-      return res.sendStatus(200);
-    }
-    if (listReplyId === 'back_menu') {
-      await sendMainMenu(from, lang);
-      return res.sendStatus(200);
-    }
+    if (listReplyId === 'view_cart') { await showCartSummary(from, lang); return res.sendStatus(200); }
+    if (listReplyId === 'back_menu') { await sendMainMenu(from, lang); return res.sendStatus(200); }
 
     // Cart actions
     if (buttonReplyId === 'cart_checkout') {
       const items = getSession(from).cart.items;
-      if (!items.length) {
-        await sendText({ to: from, body: t(lang, 'cart_empty') });
-        await sendMainMenu(from, lang);
-        return res.sendStatus(200);
-      }
+      if (!items.length) { await sendText({ to: from, body: t(lang, 'cart_empty') }); await sendMainMenu(from, lang); return res.sendStatus(200); }
       startCheckout(from);
       await sendInteractiveButtons({
         to: from,
@@ -409,13 +296,7 @@ webhook.post('/', async (req: Request, res: Response) => {
       });
       return res.sendStatus(200);
     }
-
-    if (buttonReplyId === 'cart_clear') {
-      clearCart(from);
-      await sendText({ to: from, body: t(lang, 'cart_empty') });
-      await sendMainMenu(from, lang);
-      return res.sendStatus(200);
-    }
+    if (buttonReplyId === 'cart_clear') { clearCart(from); await sendText({ to: from, body: t(lang, 'cart_empty') }); await sendMainMenu(from, lang); return res.sendStatus(200); }
 
     // Area choice
     if (buttonReplyId === 'area_dar') {
@@ -431,11 +312,9 @@ webhook.post('/', async (req: Request, res: Response) => {
       });
       return res.sendStatus(200);
     }
-
     if (buttonReplyId === 'area_outside') {
       updateCheckout(from, { addressCountry: 'OUTSIDE_DAR' } as any);
-      setCheckoutStage(from, 'asked_name');
-      setExpecting(from, 'customer_name');
+      setCheckoutStage(from, 'asked_name'); setExpecting(from, 'customer_name');
       await sendText({ to: from, body: lang === 'sw' ? 'Tuma majina matatu kamili ya mteja.' : 'Send the customer\'s full name (three parts).' });
       return res.sendStatus(200);
     }
@@ -449,196 +328,157 @@ webhook.post('/', async (req: Request, res: Response) => {
       return res.sendStatus(200);
     }
 
-    // Fulfillment pick → ask name
+    // Fulfillment → ask name
     if (buttonReplyId === 'fulfill_pickup' || buttonReplyId === 'fulfill_delivery') {
       updateCheckout(from, { fulfillment: buttonReplyId === 'fulfill_pickup' ? 'pickup' : 'delivery' });
-      setCheckoutStage(from, 'asked_name');
-      setExpecting(from, 'customer_name');
+      setCheckoutStage(from, 'asked_name'); setExpecting(from, 'customer_name');
       await sendText({ to: from, body: t(lang, 'ask_full_name') });
       return res.sendStatus(200);
     }
 
-    // Agent
-    if (listReplyId === 'talk_agent') {
-      await showAgentOptions(from, lang);
-      return res.sendStatus(200);
-    }
-    if (listReplyId === 'agent_text') {
-      await sendText({ to: from, body: t(lang, 'agent_text_ack') });
-      return res.sendStatus(200);
-    }
-    if (listReplyId === 'agent_wa_call') {
-      logger.info({ type: 'wa_call_request', from }, 'User requested WhatsApp call');
-      await sendText({ to: from, body: t(lang, 'agent_wa_call_ack') });
-      return res.sendStatus(200);
-    }
-    if (listReplyId === 'agent_normal_call') {
-      setExpecting(from, 'agent_phone');
-      await sendText({ to: from, body: t(lang, 'agent_prompt_phone') });
-      return res.sendStatus(200);
-    }
-
-    // Track order
-    if (listReplyId === 'track_order') {
-      setExpecting(from, 'order_id');
-      await sendText({ to: from, body: t(lang, 'prompt_order_id') });
-      return res.sendStatus(200);
-    }
-
-    if (textBody && getSession(from).expecting === 'order_id') {
-      const id = textBody.replace(/\s+/g, '');
-      const o = getOrder(id);
-      if (!o) {
-        await sendText({ to: from, body: t(lang, 'status_not_found') });
-        setExpecting(from, 'none');
-        return res.sendStatus(200);
-      }
-      const paid = o.paidTZS ?? 0;
-      const due = Math.max(0, (o.totalTZS ?? 0) - paid);
-      await sendText({
-        to: from,
-        body:
-          `*${t(lang, 'order_created_title')}*\n` +
-          `*Order:* ${o.orderId}\n*Title:* ${o.title}\n*Name:* ${o.customerName || ''}\n*Address:* ${o.addressStreet || ''} ${o.addressCity || ''} ${o.addressCountry || ''}\n*Total:* ${plainTZS(o.totalTZS ?? 0)}\n*Paid:* ${plainTZS(paid)}\n*Balance:* ${plainTZS(due)}\n`
-      });
-      setExpecting(from, 'none');
-      return res.sendStatus(200);
+    // Agent / Track order (unchanged)
+    if (listReplyId === 'talk_agent') { await showAgentOptions(from, lang); return res.sendStatus(200); }
+    if (listReplyId === 'agent_text') { await sendText({ to: from, body: t(lang, 'agent_text_ack') }); return res.sendStatus(200); }
+    if (listReplyId === 'agent_wa_call') { logger.info({ type: 'wa_call_request', from }, 'User requested WhatsApp call'); await sendText({ to: from, body: t(lang, 'agent_wa_call_ack') }); return res.sendStatus(200); }
+    if (listReplyId === 'agent_normal_call') { setExpecting(from, 'agent_phone'); await sendText({ to: from, body: t(lang, 'agent_prompt_phone') }); return res.sendStatus(200); }
+    if (listReplyId === 'track_order') { setExpecting(from, 'order_id'); await sendText({ to: from, body: t(lang, 'prompt_order_id') }); return res.sendStatus(200); }
+    if (textBody && expectingIs(from, 'order_id')) {
+      const id = textBody.replace(/\s+/g, ''); const o = getOrder(id);
+      if (!o) { await sendText({ to: from, body: t(lang, 'status_not_found') }); setExpecting(from, 'none'); return res.sendStatus(200); }
+      const paid = o.paidTZS ?? 0; const due = Math.max(0, (o.totalTZS ?? 0) - paid);
+      await sendText({ to: from, body: `*${t(lang, 'order_created_title')}*\n*Order:* ${o.orderId}\n*Title:* ${o.title}\n*Name:* ${o.customerName || ''}\n*Address:* ${o.addressStreet || ''} ${o.addressCity || ''} ${o.addressCountry || ''}\n*Total:* ${plainTZS(o.totalTZS ?? 0)}\n*Paid:* ${plainTZS(paid)}\n*Balance:* ${plainTZS(due)}\n` });
+      setExpecting(from, 'none'); return res.sendStatus(200);
     }
 
     // Agent phone
-    if (textBody && getSession(from).expecting === 'agent_phone') {
+    if (textBody && expectingIs(from, 'agent_phone')) {
       const normalized = normalizePhone(textBody);
-      if (!normalized) {
-        await sendText({ to: from, body: t(lang, 'phone_invalid') });
-        return res.sendStatus(200);
-      }
+      if (!normalized) { await sendText({ to: from, body: t(lang, 'phone_invalid') }); return res.sendStatus(200); }
       logger.info({ type: 'normal_call_request', from, phone: normalized }, 'User requested normal phone call');
       await sendText({ to: from, body: t(lang, 'agent_phone_ack', { phone: normalized }) });
-      setExpecting(from, 'none');
-      return res.sendStatus(200);
+      setExpecting(from, 'none'); return res.sendStatus(200);
     }
 
-    /* ---------------------- Checkout: full name step ---------------------- */
-    if (textBody && getSession(from).expecting === 'customer_name') {
+    /* ---------------------- Full name → address step ---------------------- */
+    if (textBody && expectingIs(from, 'customer_name')) {
       updateCheckout(from, { customerName: textBody });
-
       const s = (getSession(from).checkout ?? {}) as any;
       const outside = s.addressCountry === 'OUTSIDE_DAR';
       const isPickup = s.fulfillment === 'pickup';
       const isDeliveryDar = s.addressCountry === 'Dar es Salaam' && s.fulfillment === 'delivery';
 
       if (outside) {
-        setCheckoutStage(from, 'asked_address');
-        setExpecting(from, 'delivery_address');
+        setCheckoutStage(from, 'asked_address'); setExpecting(from, 'delivery_address');
         await sendText({ to: from, body: lang === 'sw' ? 'Taja mkoa (region) uliopo.' : 'Type your region.' });
         return res.sendStatus(200);
       }
-
       if (isPickup) {
-        setCheckoutStage(from, 'asked_phone');
-        setExpecting(from, 'pickup_phone');
+        setCheckoutStage(from, 'asked_phone'); setExpecting(from, 'pickup_phone');
         await sendText({ to: from, body: t(lang, 'ask_phone') });
         return res.sendStatus(200);
       }
-
       if (isDeliveryDar) {
-        // NEW: ask district via list
-        setCheckoutStage(from, 'asked_district' as any);
-        setExpecting(from, 'select_district' as any);
-        await sendDistrictList(from, lang);
+        await sendDistrictPicker(from, lang);
         return res.sendStatus(200);
       }
-
-      // Fallback (shouldn't happen)
       await sendMainMenu(from, lang);
       return res.sendStatus(200);
     }
 
-    /* -------------------- Inside Dar: district/ward picks -------------------- */
+    /* ---------------------- District selection handlers ------------------- */
     if (typeof listReplyId === 'string' && listReplyId.startsWith('pick_district::')) {
-      const district = listReplyId.split('::')[1] as string;
-      updateCheckout(from, { addressCity: district, addressCountry: 'Dar es Salaam' } as any);
-      setCheckoutStage(from, 'asked_ward' as any);
-      setExpecting(from, 'select_ward' as any);
-      await sendWardList(from, lang, district);
+      const idx = Number(listReplyId.split('::')[1]);
+      const cache: string[] = ((getSession(from).checkout || {}) as any).districtsCache || listDistricts();
+      const picked = cache[idx];
+      if (!picked) { await sendDistrictPicker(from, lang); return res.sendStatus(200); }
+      updateCheckout(from, { addressCity: picked, addressCountry: 'Dar es Salaam' } as any);
+      await sendWardPage(from, lang, picked, 0);
+      return res.sendStatus(200);
+    }
+    // 👇 UPDATED to use expectingIs to avoid TS2367
+    if (textBody && expectingIs(from, 'select_district')) {
+      const cache: string[] = ((getSession(from).checkout || {}) as any).districtsCache || listDistricts();
+      const n = Number(textBody);
+      const chosen = Number.isFinite(n) && n >= 1 && n <= cache.length ? cache[n - 1] : cache.find(d => d.toLowerCase() === textBody.toLowerCase());
+      if (!chosen) {
+        await sendText({ to: from, body: lang === 'sw' ? 'Sikupata district hiyo. Jaribu tena kwa namba au jina sahihi.' : 'Couldn’t find that district. Reply with a valid number or exact name.' });
+        await nap(); await sendDistrictPicker(from, lang); return res.sendStatus(200);
+      }
+      updateCheckout(from, { addressCity: chosen, addressCountry: 'Dar es Salaam' } as any);
+      await sendWardPage(from, lang, chosen, 0);
       return res.sendStatus(200);
     }
 
+    /* ------------------------- Ward selection handlers -------------------- */
+    if (typeof listReplyId === 'string' && listReplyId.startsWith('ward_next::')) {
+      const [, district, pageStr] = listReplyId.split('::');
+      const next = Number(pageStr) || 0;
+      await sendWardPage(from, lang, district, next);
+      return res.sendStatus(200);
+    }
     if (typeof listReplyId === 'string' && listReplyId.startsWith('pick_ward::')) {
-      const parts = listReplyId.split('::');
-      const district = parts[1] as string;
-      const ward = parts[2] as string;
-      updateCheckout(from, { addressStreet: ward } as any);
-
-      // compute fee
-      const km = getDistanceKm(district, ward) ?? 0;
-      const fee = feeForDarDistance(km);
+      const [, district, ward] = listReplyId.split('::');
+      await handleWardChosen(from, lang, district, ward);
+      return res.sendStatus(200);
+    }
+    // 👇 UPDATED to use expectingIs to avoid TS2367
+    if (textBody && expectingIs(from, 'select_ward')) {
       const s = (getSession(from).checkout ?? {}) as any;
-      updateCheckout(from, { deliveryKm: km, deliveryFeeTZS: fee } as any);
-      const total = (s.totalTZS ?? cartTotal(from)) + fee;
+      const district = s.addressCity as string;
+      const wardsAll = listWardsByDistrict(district);
+      if (!district || !wardsAll.length) {
+        const typed = textBody.trim();
+        await handleWardChosen(from, lang, district || 'Dar es Salaam', titleCase(typed));
+        return res.sendStatus(200);
+      }
+      const page = Number.isFinite(Number(s.wardPageIndex)) ? Number(s.wardPageIndex) : 0;
+      const pages = chunk(wardsAll, 9);
+      const wards = pages[Math.max(0, Math.min(page, pages.length - 1))];
 
-      const summary = lang === 'sw'
-        ? `📦 *Muhtasari (Delivery Dar)*\nJina: ${s.customerName || ''}\nMahali: ${ward}, ${district}\nUmbali: ${km.toFixed(2)} km\nNauli: ${plainTZS(fee)}\nJumla: ${plainTZS(total)}`
-        : `📦 *Summary (Dar Delivery)*\nName: ${s.customerName || ''}\nPlace: ${ward}, ${district}\nDistance: ${km.toFixed(2)} km\nDelivery: ${plainTZS(fee)}\nTotal: ${plainTZS(total)}`;
-      await sendText({ to: from, body: summary });
-      await nap();
+      if (/^(n|next)$/i.test(textBody)) {
+        const next = page + 1 < pages.length ? page + 1 : page;
+        await sendWardPage(from, lang, district, next);
+        return res.sendStatus(200);
+      }
 
-      setCheckoutStage(from, 'asked_phone');
-      setExpecting(from, 'delivery_phone');
-      await sendText({ to: from, body: t(lang, 'ask_phone') });
+      const n = Number(textBody);
+      let ward = (Number.isFinite(n) && n >= 1 && n <= wards.length) ? wards[n - 1] : wards.find(w => w.toLowerCase() === textBody.toLowerCase());
+      if (!ward) {
+        await sendText({ to: from, body: lang === 'sw' ? 'Sikupata kata hiyo. Jibu kwa *namba* iliyopo au jina kamili.' : 'Couldn’t find that ward. Reply with the *number* shown or the exact name.' });
+        await nap(); await sendWardPage(from, lang, district, page); return res.sendStatus(200);
+      }
+      await handleWardChosen(from, lang, district, ward);
       return res.sendStatus(200);
     }
 
     // Pickup: Phone → create order
-    if (textBody && getSession(from).expecting === 'pickup_phone') {
+    if (textBody && expectingIs(from, 'pickup_phone')) {
       const normalized = normalizePhone(textBody);
-      if (!normalized) {
-        await sendText({ to: from, body: t(lang, 'phone_invalid') });
-        return res.sendStatus(200);
-      }
+      if (!normalized) { await sendText({ to: from, body: t(lang, 'phone_invalid') }); return res.sendStatus(200); }
       updateCheckout(from, { contactPhone: normalized });
 
       const s = (getSession(from).checkout ?? {}) as any;
       let items: OrderItem[] = [];
-      if (!s.productId) {
-        items = getSession(from).cart.items.map((it: any) => ({ ...it }));
-      } else {
-        let price = 0;
-        if (isProMaxPackageId(s.productId)) price = PROMAX_PRICE_TZS;
-        else price = PRODUCTS.find(p => p.id === s.productId)?.priceTZS ?? 0;
-        const title = isProMaxPackageId(s.productId)
-          ? `${productTitle('product_promax', lang)} — ${promaxPackageTitle(s.productId, lang)}`
-          : productTitle(s.productId, lang);
+      if (!s.productId) items = getSession(from).cart.items.map((it: any) => ({ ...it }));
+      else {
+        const price = isProMaxPackageId(s.productId) ? PROMAX_PRICE_TZS : (PRODUCTS.find(p => p.id === s.productId)?.priceTZS ?? 0);
+        const title = isProMaxPackageId(s.productId) ? `${productTitle('product_promax', lang)} — ${promaxPackageTitle(s.productId, lang)}` : productTitle(s.productId, lang);
         items.push({ productId: s.productId, title, qty: 1, priceTZS: price });
       }
       const fee = Math.max(0, Math.floor((s as any).deliveryFeeTZS || 0));
-      if (fee > 0) {
-        items.push({ productId: 'delivery_fee', title: lang === 'sw' ? 'Nauli ya Usafiri' : 'Delivery Fee', qty: 1, priceTZS: fee });
-      }
+      if (fee > 0) items.push({ productId: 'delivery_fee', title: lang === 'sw' ? 'Nauli ya Usafiri' : 'Delivery Fee', qty: 1, priceTZS: fee });
 
-      const order = createOrder({
-        items,
-        lang,
-        customerPhone: from,
-        contactPhone: s.contactPhone,
-        fulfillment: 'pickup',
-        customerName: s.customerName,
-        addressStreet: s.addressStreet,
-        addressCity: s.addressCity,
-        addressCountry: s.addressCountry,
-      });
-      setLastOrderId(from, order.orderId);
-      clearCart(from);
-
+      const order = createOrder({ items, lang, customerPhone: from, contactPhone: s.contactPhone, fulfillment: 'pickup', customerName: s.customerName, addressStreet: s.addressStreet, addressCity: s.addressCity, addressCountry: s.addressCountry });
+      setLastOrderId(from, order.orderId); clearCart(from);
       await sendText({ to: from, body: t(lang, 'pickup_thanks', { customerName: order.customerName || '' }) });
-      resetCheckout(from);
-      return res.sendStatus(200);
+      resetCheckout(from); return res.sendStatus(200);
     }
 
-    // Outside Dar typed steps remain
-    if (textBody && getSession(from).expecting === 'delivery_address') {
+    // Address / region multi-step (Outside Dar + fallback)
+    if (textBody && expectingIs(from, 'delivery_address')) {
       const s = (getSession(from).checkout ?? {}) as any;
       const outside = s.addressCountry === 'OUTSIDE_DAR';
+      const isDarDelivery = s.addressCountry === 'Dar es Salaam' && s.fulfillment === 'delivery';
 
       // Outside Dar — Step 1: Region
       if (outside && !s.addressCountryRegion) {
@@ -654,92 +494,45 @@ webhook.post('/', async (req: Request, res: Response) => {
         return res.sendStatus(200);
       }
 
-      // Outside Dar — Step 2: Transport name
-      if (outside && s.addressCountryRegion && s.outsideMode && !s.outsideTransportName) {
-        updateCheckout(from, { outsideTransportName: textBody } as any);
-        await sendText({ to: from, body: lang === 'sw' ? 'Taja kituo/stendi unachopendelea (mf. Kisamvu, Morogoro).' : 'Type the preferred station (e.g., Kisamvu, Morogoro).' });
+      // Dar Delivery free-text: "ward district"
+      if (isDarDelivery && !s.addressStreet) {
+        const parsed = parseWardDistrictFreeform(textBody);
+        if (!parsed) {
+          await sendText({ to: from, body: lang === 'sw' ? 'Hatukupata eneo. Taja tena *ward na district* (mf. "Kimanga Ilala").' : 'Could not resolve. Type *ward and district* again (e.g., "Kimanga Ilala").' });
+          return res.sendStatus(200);
+        }
+        await handleWardChosen(from, lang, parsed.district, parsed.ward);
         return res.sendStatus(200);
       }
 
-      // Outside Dar — Step 3: Station → fee → summary → phone
-      if (outside && s.addressCountryRegion && s.outsideMode && s.outsideTransportName && !s.outsideStation) {
-        updateCheckout(from, { outsideStation: textBody, deliveryFeeTZS: OUTSIDE_DAR_FLAT } as any);
-        const fee = OUTSIDE_DAR_FLAT;
-        const total = (s.totalTZS ?? cartTotal(from)) + fee;
-        const summary = lang === 'sw'
-          ? `📦 *Muhtasari (Nje ya Dar)*\nJina: ${s.customerName || ''}\nMkoa: ${s.addressCountryRegion}\nUsafiri: ${s.outsideMode} - ${s.outsideTransportName}\nKituo: ${textBody}\nNauli: ${plainTZS(fee)}\nJumla: ${plainTZS(total)}`
-          : `📦 *Summary (Outside Dar)*\nName: ${s.customerName || ''}\nRegion: ${s.addressCountryRegion}\nTransport: ${s.outsideMode} - ${s.outsideTransportName}\nStation: ${textBody}\nDelivery: ${plainTZS(fee)}\nTotal: ${plainTZS(total)}`;
-        await sendText({ to: from, body: summary });
-        await nap();
-        setCheckoutStage(from, 'asked_phone');
-        setExpecting(from, 'delivery_phone');
-        await sendText({ to: from, body: t(lang, 'ask_phone') });
-        return res.sendStatus(200);
-      }
-
-      // Fallback structured
-      const parsed = parseAddress(textBody);
-      if (!parsed) {
-        await sendText({ to: from, body: t(lang, 'address_invalid') });
-        return res.sendStatus(200);
-      }
-      updateCheckout(from, {
-        addressRaw: textBody,
-        addressStreet: parsed.street,
-        addressCity: parsed.city,
-        addressCountry: parsed.country,
-      });
-      setCheckoutStage(from, 'asked_phone');
-      setExpecting(from, 'delivery_phone');
+      // Structured fallback address
+      const parsedAddr = parseAddress(textBody);
+      if (!parsedAddr) { await sendText({ to: from, body: t(lang, 'address_invalid') }); return res.sendStatus(200); }
+      updateCheckout(from, { addressRaw: textBody, addressStreet: parsedAddr.street, addressCity: parsedAddr.city, addressCountry: parsedAddr.country });
+      setCheckoutStage(from, 'asked_phone'); setExpecting(from, 'delivery_phone');
       await sendText({ to: from, body: t(lang, 'ask_phone') });
       return res.sendStatus(200);
     }
 
     // Delivery: Phone → create order → summary + actions
-    if (textBody && getSession(from).expecting === 'delivery_phone') {
+    if (textBody && expectingIs(from, 'delivery_phone')) {
       const normalized = normalizePhone(textBody);
-      if (!normalized) {
-        await sendText({ to: from, body: t(lang, 'phone_invalid') });
-        return res.sendStatus(200);
-      }
+      if (!normalized) { await sendText({ to: from, body: t(lang, 'phone_invalid') }); return res.sendStatus(200); }
       updateCheckout(from, { contactPhone: normalized });
 
       const s = (getSession(from).checkout ?? {}) as any;
       let items: OrderItem[] = [];
-      if (!s.productId) {
-        items = getSession(from).cart.items.map((it: any) => ({ ...it }));
-      } else {
-        const price = isProMaxPackageId(s.productId) ? PROMAX_PRICE_TZS
-          : (PRODUCTS.find((p) => p.id === s.productId)?.priceTZS ?? 0);
-        const title = isProMaxPackageId(s.productId)
-          ? `${productTitle('product_promax', lang)} — ${promaxPackageTitle(s.productId, lang)}`
-          : productTitle(s.productId, lang);
+      if (!s.productId) items = getSession(from).cart.items.map((it: any) => ({ ...it }));
+      else {
+        const price = isProMaxPackageId(s.productId) ? PROMAX_PRICE_TZS : (PRODUCTS.find((p) => p.id === s.productId)?.priceTZS ?? 0);
+        const title = isProMaxPackageId(s.productId) ? `${productTitle('product_promax', lang)} — ${promaxPackageTitle(s.productId, lang)}` : productTitle(s.productId, lang);
         items.push({ productId: s.productId, title, qty: 1, priceTZS: price });
       }
-
       const fee = Math.max(0, Math.floor((s as any).deliveryFeeTZS || 0));
-      if (fee > 0) {
-        items.push({
-          productId: 'delivery_fee',
-          title: lang === 'sw' ? 'Nauli ya Usafiri' : 'Delivery Fee',
-          qty: 1,
-          priceTZS: fee,
-        });
-      }
+      if (fee > 0) items.push({ productId: 'delivery_fee', title: lang === 'sw' ? 'Nauli ya Usafiri' : 'Delivery Fee', qty: 1, priceTZS: fee });
 
-      const order = createOrder({
-        items,
-        lang,
-        customerPhone: from,
-        contactPhone: s.contactPhone,
-        fulfillment: 'delivery',
-        customerName: s.customerName,
-        addressStreet: s.addressStreet,
-        addressCity: s.addressCity,
-        addressCountry: s.addressCountry,
-      });
-      setLastOrderId(from, order.orderId);
-      clearCart(from);
+      const order = createOrder({ items, lang, customerPhone: from, contactPhone: s.contactPhone, fulfillment: 'delivery', customerName: s.customerName, addressStreet: s.addressStreet, addressCity: s.addressCity, addressCountry: s.addressCountry });
+      setLastOrderId(from, order.orderId); clearCart(from);
 
       const isMulti = order.items.length > 1;
       await sendText({
@@ -747,24 +540,10 @@ webhook.post('/', async (req: Request, res: Response) => {
         body:
           `*${t(lang, 'order_created_title')}*\n\n` +
           (isMulti
-            ? t(lang, 'order_created_body_total', {
-                total: plainTZS(order.totalTZS),
-                customerName: order.customerName || '',
-                street: order.addressStreet || '',
-                city: order.addressCity || '',
-                country: order.addressCountry || '',
-              })
-            : t(lang, 'order_created_body_single', {
-                title: order.title,
-                total: plainTZS(order.totalTZS),
-                customerName: order.customerName || '',
-                street: order.addressStreet || '',
-                city: order.addressCity || '',
-                country: order.addressCountry || '',
-              }))
+            ? t(lang, 'order_created_body_total', { total: plainTZS(order.totalTZS), customerName: order.customerName || '', street: order.addressStreet || '', city: order.addressCity || '', country: order.addressCountry || '' })
+            : t(lang, 'order_created_body_single', { title: order.title, total: plainTZS(order.totalTZS), customerName: order.customerName || '', street: order.addressStreet || '', city: order.addressCity || '', country: order.addressCountry || '' }))
       });
       await nap();
-
       await sendInteractiveButtons({
         to: from,
         body: clampBody(t(lang, 'order_next_actions')),
@@ -775,7 +554,6 @@ webhook.post('/', async (req: Request, res: Response) => {
         ],
       });
       await nap();
-
       resetCheckout(from);
       await sendText({ to: from, body: lang === 'sw'
         ? 'Thibitisha malipo yako: Tuma *majina matatu kamili ya mlipaji*, *kiasi*, na *muda* ulipolipa, au tuma *screenshot*.'
@@ -784,40 +562,24 @@ webhook.post('/', async (req: Request, res: Response) => {
     }
 
     // Edit address after order created
-    if (textBody && getSession(from).expecting === 'edit_address') {
+    if (textBody && expectingIs(from, 'edit_address')) {
       const oid = getSession(from).lastCreatedOrderId;
-      if (!oid) {
-        await sendText({ to: from, body: t(lang, 'status_not_found') });
-        setExpecting(from, 'none');
-        return res.sendStatus(200);
-      }
+      if (!oid) { await sendText({ to: from, body: t(lang, 'status_not_found') }); setExpecting(from, 'none'); return res.sendStatus(200); }
 
       const parsed = parseAddress(textBody);
-      if (!parsed) {
-        await sendText({ to: from, body: t(lang, 'address_invalid') });
-        return res.sendStatus(200);
-      }
+      if (!parsed) { await sendText({ to: from, body: t(lang, 'address_invalid') }); return res.sendStatus(200); }
 
       const updated = updateOrderAddress(oid, parsed.street, parsed.city, parsed.country);
-      if (!updated) {
-        await sendText({ to: from, body: t(lang, 'status_not_found') });
-        setExpecting(from, 'none');
-        return res.sendStatus(200);
-      }
+      if (!updated) { await sendText({ to: from, body: t(lang, 'status_not_found') }); setExpecting(from, 'none'); return res.sendStatus(200); }
 
       await sendText({
         to: from,
         body:
-          t(lang, 'address_updated', {
-            street: updated.addressStreet || '',
-            city: updated.addressCity || '',
-            country: updated.addressCountry || '',
-          }) +
+          t(lang, 'address_updated', { street: updated.addressStreet || '', city: updated.addressCity || '', country: updated.addressCountry || '' }) +
           `\n\n*${t(lang, 'order_created_title')}*\n` +
           `*Order:* ${updated.orderId}\n*Title:* ${updated.title}\n*Name:* ${updated.customerName || ''}\n*Address:* ${updated.addressStreet || ''} ${updated.addressCity || ''} ${updated.addressCountry || ''}\n*Total:* ${plainTZS(updated.totalTZS)}`
       });
       await nap();
-
       await sendInteractiveButtons({
         to: from,
         body: clampBody(t(lang, 'order_next_actions')),
@@ -827,44 +589,23 @@ webhook.post('/', async (req: Request, res: Response) => {
           { id: 'back_menu',   title: clampButton(t(lang, 'btn_back_menu')) },
         ],
       });
-
-      setExpecting(from, 'none');
-      return res.sendStatus(200);
+      setExpecting(from, 'none'); return res.sendStatus(200);
     }
 
     // Pay now (send manual proof)
-    if (buttonReplyId === 'pay_now') {
-      const oid = getSession(from).lastCreatedOrderId || '—';
-      setExpecting(from, 'txn_message');
-      await sendText({ to: from, body: t(lang, 'prompt_txn_message', { orderId: oid }) });
-      return res.sendStatus(200);
-    }
+    if (buttonReplyId === 'pay_now') { const oid = getSession(from).lastCreatedOrderId || '—'; setExpecting(from, 'txn_message'); await sendText({ to: from, body: t(lang, 'prompt_txn_message', { orderId: oid }) }); return res.sendStatus(200); }
 
     // Transaction message or image
-    if (getSession(from).expecting === 'txn_message' && (textBody || media)) {
+    if (expectingIs(from, 'txn_message') && (textBody || media)) {
       const oid = getSession(from).lastCreatedOrderId;
-      if (!oid) {
-        await sendText({ to: from, body: t(lang, 'status_not_found') });
-        setExpecting(from, 'none');
-        return res.sendStatus(200);
-      }
-
-      if (textBody) {
-        const updated = attachTxnMessage(oid, textBody);
-        await sendText({ to: from, body: t(lang, 'txn_ok_text', { orderId: updated?.orderId ?? oid }) });
-      } else if (image) {
-        const updated = attachTxnImage(oid, image.id, image.caption || '');
-        await sendText({ to: from, body: t(lang, 'txn_ok_image', { orderId: updated?.orderId ?? oid }) });
-      } else if (document) {
-        const updated = attachTxnImage(oid, document.id, document.caption || '');
-        await sendText({ to: from, body: t(lang, 'txn_ok_image', { orderId: updated?.orderId ?? oid }) });
-      }
-
-      setExpecting(from, 'none');
-      return res.sendStatus(200);
+      if (!oid) { await sendText({ to: from, body: t(lang, 'status_not_found') }); setExpecting(from, 'none'); return res.sendStatus(200); }
+      if (textBody) { const updated = attachTxnMessage(oid, textBody); await sendText({ to: from, body: t(lang, 'txn_ok_text', { orderId: updated?.orderId ?? oid }) }); }
+      else if (image) { const updated = attachTxnImage(oid, image.id, image.caption || ''); await sendText({ to: from, body: t(lang, 'txn_ok_image', { orderId: updated?.orderId ?? oid }) }); }
+      else if (document) { const updated = attachTxnImage(oid, document.id, document.caption || ''); await sendText({ to: from, body: t(lang, 'txn_ok_image', { orderId: updated?.orderId ?? oid }) }); }
+      setExpecting(from, 'none'); return res.sendStatus(200);
     }
 
-    // Default
+    // Default → menu
     await sendMainMenu(from, lang);
     return res.sendStatus(200);
 
@@ -874,25 +615,64 @@ webhook.post('/', async (req: Request, res: Response) => {
   }
 });
 
+/* -------------------------- Product helpers (UI) ------------------------- */
+async function showProductActionsList(to: string, lang: 'en' | 'sw', productId: string) {
+  const rows = [
+    { id: `action_buy_${productId}`,  title: clampTitle(lang === 'sw' ? 'Nunua sasa' : 'Buy now'), description: '' },
+    { id: `action_info_${productId}`, title: clampTitle(lang === 'sw' ? 'Maelezo zaidi' : 'More details'), description: '' },
+    { id: `action_add_${productId}`,  title: clampTitle(lang === 'sw' ? 'Ongeza kikapuni' : 'Add to cart'), description: '' },
+    { id: 'view_cart',                title: clampTitle(lang === 'sw' ? 'Angalia Kikapu' : 'View Cart'), description: '' },
+    { id: 'back_menu',                title: clampTitle(lang === 'sw' ? 'Rudi menyu' : 'Back to menu'), description: '' }
+  ];
+  await sendInteractiveList({
+    to,
+    header: clampHeader(productTitle(productId, lang)),
+    body: clampBody(lang === 'sw' ? 'Chagua hatua unayotaka' : 'Choose an action'),
+    buttonText: clampButton(t(lang, 'menu_button')),
+    sections: [{ title: clampSection(lang === 'sw' ? 'Chaguo' : 'Options'), rows }]
+  });
+}
+async function pickProMaxPackage(to: string, lang: 'en' | 'sw') {
+  await sendInteractiveList({
+    to,
+    header: clampHeader('Ujani Pro Max'),
+    body: clampBody(t(lang, 'promax_pick_package')),
+    buttonText: clampButton(t(lang, 'menu_button')),
+    sections: [{
+      title: clampSection(t(lang, 'section_promax')),
+      rows: PROMAX_PACKAGES.map(p => ({
+        id: p.id,
+        title: clampTitle(promaxPackageTitle(p.id, lang)),
+        description: clampDesc(promaxPackageSummary(p.id, lang)),
+      }))
+    }]
+  });
+}
+async function showAgentOptions(to: string, lang: 'en' | 'sw') {
+  await sendInteractiveList({
+    to,
+    header: clampHeader(lang === 'sw' ? 'Ongea na Wakala' : 'Talk to Agent'),
+    body: clampBody(t(lang, 'agent_body')),
+    buttonText: clampButton(t(lang, 'menu_button')),
+    sections: [{
+      title: clampSection(lang === 'sw' ? 'Aina ya mawasiliano' : 'Contact types'),
+      rows: [
+        { id: 'agent_text',        title: clampTitle(t(lang, 'agent_text_title')), description: clampDesc(t(lang, 'agent_text_desc')) },
+        { id: 'agent_wa_call',     title: clampTitle(t(lang, 'agent_wa_call_title')), description: clampDesc(t(lang, 'agent_wa_call_desc')) },
+        { id: 'agent_normal_call', title: clampTitle(t(lang, 'agent_phone_title')), description: clampDesc(t(lang, 'agent_phone_desc')) },
+        { id: 'back_menu',         title: clampTitle(t(lang, 'row_back_menu')), description: '' },
+      ]
+    }]
+  });
+}
+
 /* ----------------------------- Cart summary ------------------------------ */
 async function showCartSummary(to: string, lang: 'en' | 'sw') {
   const items = getSession(to).cart.items;
-  if (!items.length) {
-    await sendText({ to, body: t(lang, 'cart_empty') });
-    await sendMainMenu(to, lang);
-    return;
-  }
-
+  if (!items.length) { await sendText({ to, body: t(lang, 'cart_empty') }); await sendMainMenu(to, lang); return; }
   const lines = items.map((it: any) => `• ${it.title} x${it.qty} — ${plainTZS(it.priceTZS * it.qty)}`).join('\n');
-
-  await sendText({
-    to,
-    body:
-      `${t(lang, 'cart_summary_header')}\n${lines}\n\n` +
-      t(lang, 'cart_summary_total', { total: plainTZS(cartTotal(to)) })
-  });
+  await sendText({ to, body: `${t(lang, 'cart_summary_header')}\n${lines}\n\n` + t(lang, 'cart_summary_total', { total: plainTZS(cartTotal(to)) }) });
   await nap();
-
   await sendInteractiveButtons({
     to,
     body: clampBody(t(lang, 'cart_actions')),
@@ -901,6 +681,55 @@ async function showCartSummary(to: string, lang: 'en' | 'sw') {
       { id: 'cart_clear',    title: clampButton(t(lang, 'btn_cart_clear')) },
       { id: 'back_menu',     title: clampButton(t(lang, 'btn_cart_back')) },
     ],
+  });
+}
+
+/* ------------------------- Ward chosen → summary ------------------------- */
+async function handleWardChosen(to: string, lang: 'en' | 'sw', district: string, ward: string) {
+  updateCheckout(to, { addressCity: district, addressStreet: ward, addressCountry: 'Dar es Salaam' } as any);
+
+  const km = getDistanceKm(district, ward) ?? 0;
+  const fee = feeForDarDistance(km);
+  const s = (getSession(to).checkout ?? {}) as any;
+  updateCheckout(to, { deliveryKm: km, deliveryFeeTZS: fee } as any);
+  const total = (s.totalTZS ?? cartTotal(to)) + fee;
+
+  const summary = lang === 'sw'
+    ? `📦 *Muhtasari (Delivery Dar)*\nJina: ${s.customerName || ''}\nMahali: ${ward}, ${district}\nUmbali: ${km.toFixed(2)} km\nNauli: ${plainTZS(fee)}\nJumla: ${plainTZS(total)}`
+    : `📦 *Summary (Dar Delivery)*\nName: ${s.customerName || ''}\nPlace: ${ward}, ${district}\nDistance: ${km.toFixed(2)} km\nDelivery: ${plainTZS(fee)}\nTotal: ${plainTZS(total)}`;
+  await sendText({ to, body: summary });
+  await nap();
+
+  setCheckoutStage(to, 'asked_phone');
+  setExpecting(to, 'delivery_phone');
+  await sendText({ to, body: t(lang, 'ask_phone') });
+}
+
+/* ------------------------------ Main menu -------------------------------- */
+async function sendMainMenu(to: string, lang: 'en' | 'sw') {
+  const productsRows = [
+    { id: 'product_kiboko', title: clampTitle('Ujani Kiboko'), description: clampDesc(lang === 'en' ? `Topical · ${plainTZS(PRODUCTS.find(p=>p.id==='product_kiboko')?.priceTZS ?? 0)}` : `Ya kupaka · ${plainTZS(PRODUCTS.find(p=>p.id==='product_kiboko')?.priceTZS ?? 0)}`) },
+    { id: 'product_furaha', title: clampTitle('Furaha ya Ndoa'), description: clampDesc(lang === 'en' ? `Oral · ${plainTZS(PRODUCTS.find(p=>p.id==='product_furaha')?.priceTZS ?? 0)}` : `Ya kunywa · ${plainTZS(PRODUCTS.find(p=>p.id==='product_furaha')?.priceTZS ?? 0)}`) },
+    { id: 'product_promax', title: clampTitle('Ujani Pro Max'), description: clampDesc(`A/B/C · ${plainTZS(PROMAX_PRICE_TZS)}`) },
+  ];
+  const settingsRow = lang === 'sw'
+    ? { id: 'change_language', title: clampTitle('Switch to English'), description: clampDesc('Change language to English') }
+    : { id: 'change_language', title: clampTitle('Badili Kiswahili'), description: clampDesc('Chagua Kiswahili') };
+
+  await sendInteractiveList({
+    to,
+    header: clampHeader('UJANI'),
+    body: clampBody(t(lang, 'menu_body')),
+    buttonText: clampButton(t(lang, 'menu_button')),
+    sections: [
+      { title: clampSection(t(lang, 'section_products')), rows: productsRows },
+      { title: clampSection(t(lang, 'section_help')), rows: [
+        { id: 'view_cart',   title: clampTitle(lang === 'sw' ? 'Angalia Kikapu' : 'View Cart'), description: '' },
+        { id: 'talk_agent',  title: clampTitle(t(lang, 'talk_agent_title')), description: clampDesc(t(lang, 'talk_agent_desc')) },
+        { id: 'track_order', title: clampTitle(t(lang, 'track_order_title')), description: clampDesc(t(lang, 'track_order_desc')) },
+      ]},
+      { title: clampSection(t(lang, 'section_settings')), rows: [settingsRow] },
+    ]
   });
 }
 

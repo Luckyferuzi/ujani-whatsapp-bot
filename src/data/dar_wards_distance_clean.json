@@ -1,0 +1,614 @@
+[
+ {
+   "region": "Dar es Salaam",
+   "district": "Ilala",
+   "ward": "Bonyokwa",
+   "distance": 12.99
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Ilala",
+   "ward": "Buguruni",
+   "distance": 3.57
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Ilala",
+   "ward": "Buyuni",
+   "distance": 3.01
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Ilala",
+   "ward": "Chanika",
+   "distance": 28.1
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Ilala",
+   "ward": "Gongo La Mboto",
+   "distance": 13.7
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Ilala",
+   "ward": "Ilala",
+   "distance": 2.02
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Ilala",
+   "ward": "Kimanga",
+   "distance": 8.07
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Ilala",
+   "ward": "Kinyerezi",
+   "distance": 14.24
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Ilala",
+   "ward": "Kipawa",
+   "distance": 8.53
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Ilala",
+   "ward": "Kipunguni",
+   "distance": 12
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Ilala",
+   "ward": "Kisukulu",
+   "distance": 9.5
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Ilala",
+   "ward": "Kitunda",
+   "distance": 10.87
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Ilala",
+   "ward": "Kivule",
+   "distance": 14.57
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Ilala",
+   "ward": "Kiwalani",
+   "distance": 5.21
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Ilala",
+   "ward": "Liwiti",
+   "distance": 7.19
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Ilala",
+   "ward": "Majohe",
+   "distance": 17
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Ilala",
+   "ward": "Minazi Mirefu",
+   "distance": 10
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Ilala",
+   "ward": "Mnyamani",
+   "distance": 4.16
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Ilala",
+   "ward": "Msongola",
+   "distance": 18
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Ilala",
+   "ward": "Mzinga",
+   "distance": 10.68
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Ilala",
+   "ward": "Pugu",
+   "distance": 19.05
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Ilala",
+   "ward": "Pugu Station",
+   "distance": 17.11
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Ilala",
+   "ward": "Segerea",
+   "distance": 9.49
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Ilala",
+   "ward": "Tabata",
+   "distance": 5.69
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Ilala",
+   "ward": "Ukonga",
+   "distance": 12.3
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Ilala",
+   "ward": "Vingunguti",
+   "distance": 5.4
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Ilala",
+   "ward": "Zingiziwa",
+   "distance": 30.75
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Ilala Cbd",
+   "ward": "Gerezani",
+   "distance": 1.86
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Ilala Cbd",
+   "ward": "Jangwani",
+   "distance": 2.95
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Ilala Cbd",
+   "ward": "Kariakoo",
+   "distance": 2.45
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Ilala Cbd",
+   "ward": "Kisutu",
+   "distance": 3.12
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Ilala Cbd",
+   "ward": "Kivukoni",
+   "distance": 4.16
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Ilala Cbd",
+   "ward": "Mchafukoge",
+   "distance": 2.31
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Ilala Cbd",
+   "ward": "Mchikichini",
+   "distance": 2.38
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Ilala Cbd",
+   "ward": "Upanga Magharibi",
+   "distance": 4.32
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Ilala Cbd",
+   "ward": "Upanga Mashariki",
+   "distance": 4.04
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Kigamboni",
+   "ward": "Kibada",
+   "distance": 4.94
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Kigamboni",
+   "ward": "Kigamboni",
+   "distance": 3.9
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Kigamboni",
+   "ward": "Kimbiji",
+   "distance": 31.3
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Kigamboni",
+   "ward": "Kisarawe Ii",
+   "distance": 20.93
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Kigamboni",
+   "ward": "Mjimwema",
+   "distance": 7.3
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Kigamboni",
+   "ward": "Pembamnazi",
+   "distance": 15
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Kigamboni",
+   "ward": "Somangila",
+   "distance": 20.91
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Kigamboni",
+   "ward": "Tungi",
+   "distance": 5.77
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Kigamboni",
+   "ward": "Vijibweni",
+   "distance": 5.4
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Kinondoni",
+   "ward": "Bunju",
+   "distance": 33.34
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Kinondoni",
+   "ward": "Hananasif",
+   "distance": 5.05
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Kinondoni",
+   "ward": "Kawe",
+   "distance": 18.73
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Kinondoni",
+   "ward": "Kigogo",
+   "distance": 4.2
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Kinondoni",
+   "ward": "Kijitonyama",
+   "distance": 8.1
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Kinondoni",
+   "ward": "Kinondoni",
+   "distance": 6.49
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Kinondoni",
+   "ward": "Kunduchi",
+   "distance": 20.26
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Kinondoni",
+   "ward": "Mabwepande",
+   "distance": 29.76
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Kinondoni",
+   "ward": "Magomeni",
+   "distance": 4.62
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Kinondoni",
+   "ward": "Makongo",
+   "distance": 12.41
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Kinondoni",
+   "ward": "Makumbusho",
+   "distance": 6.63
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Kinondoni",
+   "ward": "Mbezi Juu",
+   "distance": 15.33
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Kinondoni",
+   "ward": "Mbweni",
+   "distance": 33.48
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Kinondoni",
+   "ward": "Mikocheni",
+   "distance": 9.03
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Kinondoni",
+   "ward": "Msasani",
+   "distance": 8.32
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Kinondoni",
+   "ward": "Mwananyamala",
+   "distance": 6.23
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Kinondoni",
+   "ward": "Mzimuni",
+   "distance": 4.61
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Kinondoni",
+   "ward": "Ndugumbi",
+   "distance": 5.27
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Kinondoni",
+   "ward": "Tandale",
+   "distance": 6.49
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Kinondoni",
+   "ward": "Wazo",
+   "distance": 20.33
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Temeke",
+   "ward": "Azimio",
+   "distance": 3.32
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Temeke",
+   "ward": "Buza",
+   "distance": 7.22
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Temeke",
+   "ward": "Chamazi",
+   "distance": 15
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Temeke",
+   "ward": "Chang’Ombe",
+   "distance": 1.43
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Temeke",
+   "ward": "Charambe",
+   "distance": 15.15
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Temeke",
+   "ward": "Keko",
+   "distance": 0.52
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Temeke",
+   "ward": "Kibondemaji",
+   "distance": 6.91
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Temeke",
+   "ward": "Kiburugwa",
+   "distance": 8.6
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Temeke",
+   "ward": "Kijichi",
+   "distance": 5.13
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Temeke",
+   "ward": "Kilakala",
+   "distance": 5
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Temeke",
+   "ward": "Kilungule",
+   "distance": 8.7
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Temeke",
+   "ward": "Kurasini",
+   "distance": 1.24
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Temeke",
+   "ward": "Makangarawe",
+   "distance": 5.2
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Temeke",
+   "ward": "Mbagala",
+   "distance": 6.62
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Temeke",
+   "ward": "Mbagala Kuu",
+   "distance": 6.62
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Temeke",
+   "ward": "Mianzini",
+   "distance": 10.13
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Temeke",
+   "ward": "Miburani",
+   "distance": 1.19
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Temeke",
+   "ward": "Mtoni",
+   "distance": 2.87
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Temeke",
+   "ward": "Sandali",
+   "distance": 3.53
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Temeke",
+   "ward": "Tandika",
+   "distance": 3.38
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Temeke",
+   "ward": "Temeke",
+   "distance": 2.24
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Temeke",
+   "ward": "Toangoma",
+   "distance": 10.85
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Temeke",
+   "ward": "Yombo Vituka",
+   "distance": 6.3
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Ubungo",
+   "ward": "Goba",
+   "distance": 18.59
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Ubungo",
+   "ward": "Kibamba",
+   "distance": 26.79
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Ubungo",
+   "ward": "Kimara",
+   "distance": 12.36
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Ubungo",
+   "ward": "Kwembe",
+   "distance": 22.03
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Ubungo",
+   "ward": "Mabibo",
+   "distance": 6.54
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Ubungo",
+   "ward": "Makuburi",
+   "distance": 9.05
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Ubungo",
+   "ward": "Makurumla",
+   "distance": 5.52
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Ubungo",
+   "ward": "Manzese",
+   "distance": 7.1
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Ubungo",
+   "ward": "Mbezi",
+   "distance": 23.34
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Ubungo",
+   "ward": "Mburahati",
+   "distance": 5.5
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Ubungo",
+   "ward": "Msigani",
+   "distance": 17.87
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Ubungo",
+   "ward": "Saranga",
+   "distance": 14.7
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Ubungo",
+   "ward": "Sinza",
+   "distance": 8.88
+ },
+ {
+   "region": "Dar es Salaam",
+   "district": "Ubungo",
+   "ward": "Ubungo",
+   "distance": 10.27
+ }
+]
