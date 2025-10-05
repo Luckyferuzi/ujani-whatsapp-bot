@@ -4,33 +4,56 @@
 // - listWardsByDistrict(district)
 // - getDistanceKm(district, ward)
 //
-// CSV columns supported (case-insensitive): district, ward, km | distance_km
-// You can override the file path via env DAR_WARDS_CSV.
+// No Render config required: we auto-search several common repo paths.
+// Place your CSV at one of:
+//   • src/data/dar_wards_distance_clean.csv   ← recommended
+//   • data/dar_wards_distance_clean.csv
+//   • dar_wards_distance_clean.csv            (repo root)
+//
+// CSV headers (case-insensitive): district, ward, km | distance_km
 
 import fs from 'node:fs';
 import path from 'node:path';
 
 type Row = { district: string; ward: string; km: number };
 
-const CSV_PATH = process.env.DAR_WARDS_CSV
-  ? path.resolve(process.env.DAR_WARDS_CSV)
-  : path.resolve(process.cwd(), 'dar_wards_distance_clean.csv');
-
-const rows: Row[] = [];
 const byDistrict = new Map<string, string[]>();
 const kmIndex = new Map<string, number>(); // key `${district}::${ward}`
 
+// Choose the first existing file from these candidates
+function findCsvPath(): string | null {
+  const cwd = process.cwd();
+  const candidates = [
+    process.env.DAR_WARDS_CSV || '',                                  // if ever set, still supported
+    path.resolve(cwd, 'src', 'data', 'dar_wards_distance_clean.csv'), // recommended
+    path.resolve(cwd, 'data', 'dar_wards_distance_clean.csv'),
+    path.resolve(cwd, 'dar_wards_distance_clean.csv'),
+  ].filter(Boolean);
+
+  for (const p of candidates) {
+    try {
+      if (fs.existsSync(p)) return p;
+    } catch { /* ignore */ }
+  }
+  return null;
+}
+
 function parseCSVLine(line: string): string[] {
-  // simple CSV splitter (dataset shouldn't include quoted commas)
+  // Simple splitter (dataset shouldn’t contain quoted commas)
   return line.split(',').map(s => s.trim());
 }
 
 (function load() {
-  if (!fs.existsSync(CSV_PATH)) {
-    console.warn(`[wards] CSV not found at ${CSV_PATH}`);
+  const csvPath = findCsvPath();
+  if (!csvPath) {
+    console.warn('[wards] CSV not found in src/data/, data/, or repo root. Falling back to free-text flow.');
     return;
   }
-  const raw = fs.readFileSync(CSV_PATH, 'utf8');
+
+  let raw = fs.readFileSync(csvPath, 'utf8');
+  // Remove optional BOM
+  if (raw.charCodeAt(0) === 0xFEFF) raw = raw.slice(1);
+
   const lines = raw.split(/\r?\n/).filter(Boolean);
   if (lines.length <= 1) return;
 
@@ -38,38 +61,33 @@ function parseCSVLine(line: string): string[] {
   const di = header.findIndex(h => h === 'district');
   const wi = header.findIndex(h => h === 'ward');
   let ki = header.findIndex(h => h === 'km' || h === 'distance_km');
-  if (ki < 0) ki = header.findIndex(h => h.includes('km')); // fallback to any km-like column
+  if (ki < 0) ki = header.findIndex(h => h.includes('km')); // last-resort km column
 
   for (let i = 1; i < lines.length; i++) {
     const cols = parseCSVLine(lines[i]);
     const district = (cols[di] || '').trim();
     const ward = (cols[wi] || '').trim();
-    const kmRaw = (cols[ki] || '').replace(/[^\d.]/g, '');
-    const km = kmRaw ? parseFloat(kRawSafe(kmRaw)) : 0;
+    const kmRaw = (cols[ki] || '').replace(/[^\d.,]/g, '').replace(',', '.');
+    const km = kmRaw ? parseFloat(kmRaw) : 0;
 
     if (!district || !ward) continue;
-
-    rows.push({ district, ward, km: isFinite(km) ? km : 0 });
-
-    const key = `${district.toLowerCase()}::${ward.toLowerCase()}`;
-    kmIndex.set(key, isFinite(km) ? km : 0);
 
     const list = byDistrict.get(district) || [];
     list.push(ward);
     byDistrict.set(district, list);
+
+    const key = `${district.toLowerCase()}::${ward.toLowerCase()}`;
+    kmIndex.set(key, isFinite(km) ? km : 0);
   }
 
-  // sort ward lists alphabetically for UX
+  // Sort wards alphabetically for nicer UX
   for (const [d, list] of byDistrict) {
     list.sort((a, b) => a.localeCompare(b, 'en', { sensitivity: 'base' }));
     byDistrict.set(d, list);
   }
-})();
 
-function kRawSafe(x: string): string {
-  // Allow "12.3", "12", "12,3"
-  return x.replace(',', '.');
-}
+  console.log(`[wards] Loaded CSV from: ${csvPath} (districts: ${byDistrict.size})`);
+})();
 
 export function listDistricts(): string[] {
   return Array.from(byDistrict.keys()).sort((a, b) => a.localeCompare(b, 'en', { sensitivity: 'base' }));
