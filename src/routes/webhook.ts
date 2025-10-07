@@ -1,6 +1,6 @@
 // src/routes/webhook.ts
 // WhatsApp Cloud API webhook with Smart Delivery (district → ward → street/location)
-// Preserves your existing flow; compiles without getDistanceKm/feeForDarDistance.
+// Preserves your prior flow, always replies to messages, and compiles without getDistanceKm/feeForDarDistance.
 
 import { Router, type Request, type Response } from 'express';
 import crypto from 'node:crypto';
@@ -26,7 +26,6 @@ import { quoteDelivery } from '../delivery.js';
 import {
   sendText,
   sendInteractiveList,
-  sendInteractiveButtons, // ok if unused in this file
 } from '../whatsapp.js';
 
 const logger = pino({ name: 'webhook' });
@@ -124,6 +123,11 @@ webhook.post('/', async (req: Request, res: Response) => {
   try { await (Wards.loadLocations?.() ?? Promise.resolve()); } catch { /* ok */ }
 
   const inbound = parseIncoming(req.body);
+  if (!inbound.length) {
+    // Most Meta POSTs are status webhooks; log & ack
+    logger.info({ kind: 'noop_webhook', keys: Object.keys(req.body || {}) }, 'No user messages in this webhook');
+  }
+
   for (const m of inbound) {
     try {
       await handleMessage(m);
@@ -187,12 +191,7 @@ function haversineM(lat1: number, lon1: number, lat2: number, lon2: number) {
 }
 
 /* --------------------------- Resolution fallbacks ------------------------- */
-type KmResolution = {
-  km: number | null;
-  used: string;
-  confidence: number;
-  resolvedStreet?: string | null; // <-- allow string | null | undefined
-};
+// Removed duplicate KmResolution type declaration
 
 async function resolveKmFallback(
   district: string,
@@ -299,7 +298,10 @@ async function handleMessage(m: InMsg) {
 
   // Text messages
   const text = (m.text || '').trim();
-  if (!text) return;
+  if (!text) {
+    await showMenu(from); // safety: always reply something
+    return;
+  }
 
   // Numeric street choice maps to CURRENT page; we only advance on "next"
   if (expectingIs(from, 'select_street') && /^\d+$/.test(text)) {
@@ -344,7 +346,8 @@ async function handleMessage(m: InMsg) {
     return;
   }
 
-  // Leave all your other flows intact (menu/products/cart/payment/etc.)
+  // ✅ Default reply so the user always gets something
+  await showMenu(from);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -426,7 +429,20 @@ async function routeInteractive(from: string, m: InMsg) {
     return;
   }
 
-  // …your other interactive routes continue here (unchanged)…
+  // Menu → simple demo routes so user always gets a reply
+  if (id === 'menu::products') {
+    await showProducts(from);
+    return;
+  }
+
+  if (id.startsWith('prod::details::')) {
+    const pid = id.split('::')[2];
+    await showProductDetails(from, pid);
+    return;
+  }
+
+  // Fallback
+  await showMenu(from);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -467,8 +483,15 @@ async function renderWardPicker(to: string) {
 }
 
 /* -------------------------------------------------------------------------- */
-/*                           Quote (street/ward/pin)                          */
+/*                              Quote (ward/street)                           */
 /* -------------------------------------------------------------------------- */
+
+type KmResolution = {
+  km: number | null;
+  used: string;
+  confidence: number;
+  resolvedStreet?: string | null;
+};
 
 async function quoteFromSource(
   to: string,
@@ -517,6 +540,58 @@ async function quoteFromSource(
       fee: q.total_fee_tzs.toLocaleString('en-TZ')
     })
   });
+}
+
+/* -------------------------------------------------------------------------- */
+/*                              Simple menu & products                        */
+/* -------------------------------------------------------------------------- */
+
+const PRODUCTS = [
+  { id: 'kiboko', titleKey: 'product_kiboko_title', taglineKey: 'product_kiboko_tagline' },
+  { id: 'furaha', titleKey: 'product_furaha_title', taglineKey: 'product_furaha_tagline' },
+];
+
+async function showMenu(to: string) {
+  const s = getSession(to);
+  const lang: 'sw' | 'en' = s.lang ?? 'sw';
+  const rows = [
+    { id: 'menu::products', title: t(lang, 'section_products') },
+    { id: 'menu::help', title: t(lang, 'section_help') },
+    { id: 'menu::settings', title: t(lang, 'section_settings') },
+  ];
+  await sendInteractiveList({
+    to,
+    body: t(lang, 'menu_body'),
+    buttonText: t(lang, 'menu_button'),
+    sections: [{ title: 'Menu', rows }]
+  });
+}
+
+async function showProducts(to: string) {
+  const s = getSession(to);
+  const lang: 'sw' | 'en' = s.lang ?? 'sw';
+  const rows = PRODUCTS.map(p => ({
+    id: `prod::details::${p.id}`,
+    title: t(lang, p.titleKey),
+    description: t(lang, p.taglineKey),
+  }));
+  await sendInteractiveList({
+    to,
+    body: t(lang, 'products_pick'),
+    buttonText: t(lang, 'menu_button'),
+    sections: [{ title: t(lang, 'products_title'), rows }]
+  });
+}
+
+async function showProductDetails(to: string, productId: string) {
+  const s = getSession(to);
+  const lang: 'sw' | 'en' = s.lang ?? 'sw';
+  const p = PRODUCTS.find(x => x.id === productId);
+  if (!p) return showProducts(to);
+  const bulletsKey = productId === 'kiboko' ? 'product_kiboko_points' : 'product_furaha_points';
+  const bullets = t(lang, bulletsKey).split('\n').map(l => `• ${l}`).join('\n');
+  const body = `${t(lang, p.titleKey)}\n${t(lang, p.taglineKey)}\n\n${bullets}`;
+  await sendText({ to, body });
 }
 
 /* -------------------------------------------------------------------------- */
