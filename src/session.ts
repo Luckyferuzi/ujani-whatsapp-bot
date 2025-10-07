@@ -1,196 +1,313 @@
 // src/session.ts
-// Session with CART support + checkout states + smart-delivery selections.
+// Lightweight in-memory session store for WhatsApp conversations.
+// Safe defaults, typed helpers, and the same function names you’ve been using.
 
-export type Lang = 'en' | 'sw';
+export type Lang = "sw" | "en";
 
+/** Conversation state machine */
 export type Expecting =
-  | 'none'
-  | 'customer_name'
-  | 'pickup_phone'
-  | 'delivery_address'
-  | 'delivery_phone'
-  | 'edit_address'
-  | 'order_id'
-  | 'agent_phone'
-  | 'txn_message'
-  // NEW states already referenced in your webhook.ts and our street flow:
-  | 'select_district'
-  | 'select_ward'
-  | 'select_street'
-  | 'awaiting_location'
-  | 'confirm_delivery';
+  | "full_name"
+  | "in_out_dar"
+  | "phone_in_dar"
+  | "address_in_dar"
+  | "region_outside"
+  | "done_in_dar"
+  | "done_outside"
+  // Delivery pickers (kept for compatibility with your previous flow)
+  | "select_district"
+  | "select_ward"
+  | "select_street"
+  | "awaiting_location"
+  | "confirm_delivery"
+  // Generic/defaults
+  | "menu"
+  | "none";
 
-export type Fulfillment = 'pickup' | 'delivery';
+export type MatchType =
+  | "street_exact"
+  | "nearest_location"
+  | "ward_only"
+  | "derived_min_street"
+  | string;
 
-export type CartItem = { productId: string; title: string; priceTZS: number; qty: number };
-export type Cart = { items: CartItem[] };
-
-export type CheckoutStage = 'start' | 'asked_name' | 'asked_address' | 'asked_phone' | 'done';
-
-export type Checkout = {
-  stage: CheckoutStage;
-  // single-product convenience
-  productId?: string;
-  title?: string;
-  totalTZS?: number;
-
-  fulfillment?: Fulfillment;
-
-  customerName?: string;
-  contactPhone?: string;
-
-  // legacy / free-text address fields (used elsewhere in your code)
-  addressStreet?: string;      // you currently save the *ward* here
-  addressCity?: string;        // district
-  addressCountry?: string;     // "Dar es Salaam" or "OUTSIDE_DAR"
-  addressCountryRegion?: string; // outside-Dar region
-
-  // outside-Dar transport (your webhook uses these as any)
-  outsideMode?: 'bus' | 'boat';
-  outsideStation?: string;
-
-  // UI helpers cached in webhook.ts
-  districtsCache?: string[];
-  wardPageIndex?: number;
-
-  // smart delivery (final numbers persisted in summary)
-  deliveryKm?: number;
+export interface CheckoutState {
+  deliveryKm?: number | null;
   deliveryFeeTZS?: number;
-
-  // extra telemetry for street flow (optional)
-  matchType?: 'street_exact' | 'street_fuzzy' | 'nearest_location' | 'ward_only' | 'derived_min_street';
-  matchConfidence?: number;
+  matchType?: MatchType;
+  matchConfidence?: number; // 0..1
   resolvedStreet?: string | null;
-};
+  ward?: string | null;
+  street?: string | null;
+  district?: string | null;
+  receiverName?: string | null;
+  receiverPhone?: string | null;
+}
 
-export type Session = {
+export interface SessionData {
+  /** WhatsApp number (msisdn) used as key */
+  phone: string;
+
+  /** i18n language */
   lang: Lang;
+
+  /** current expected input */
   expecting: Expecting;
 
-  cart: Cart;
+  /** customer data for your order flow */
+  fullName?: string | null;
+  phoneNumber?: string | null;
+  region?: string | null; // outside Dar use-case
 
-  // last created order id (used by payment attach)
-  lastCreatedOrderId?: string;
-
-  checkout?: Checkout;
-
-  // Smart delivery selections
-  selectedDistrict?: string;
-  selectedWard?: string;
+  /** delivery choices (UI list flow compatibility) */
+  selectedDistrict?: string | null;
+  selectedWard?: string | null;
   selectedStreet?: string | null;
-  streetPage?: number;
+  streetPage?: number; // pagination pointer when listing streets
 
-  // WhatsApp location cache
-  lastLocationLat?: number | null;
-  lastLocationLon?: number | null;
-};
+  /** last shared location pin */
+  lastLocation?: { lat: number; lon: number; at: number } | null;
 
-/* ------------------------------------------------------------------------ */
+  /** last computed delivery info (convenience) */
+  delivery?: {
+    city?: string | null; // e.g., "Dar es Salaam"
+    ward?: string | null;
+    street?: string | null;
+    district?: string | null;
+    distance_km?: number | null;
+    fee_tzs?: number | null;
+    raw_input?: string | null; // "mtaa, wilaya" free text
+  } | null;
 
-const sessions = new Map<string, Session>();
+  /** checkout-like aggregate for pricing integration */
+  checkout?: CheckoutState;
 
-function ensure(phone: string): Session {
-  let s = sessions.get(phone);
+  /** optionally, your cart or other temp data */
+  cart?: Record<string, any> | null;
+
+  /** housekeeping */
+  createdAt: number;
+  updatedAt: number;
+}
+
+/* -------------------------------------------------------------------------- */
+/*                                In-memory DB                                */
+/* -------------------------------------------------------------------------- */
+
+const SESSIONS = new Map<string, SessionData>();
+
+// Optional: expire inactive sessions after N hours (cleanup is lazy)
+const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24h
+let _lastSweep = Date.now();
+
+function sweepIfNeeded() {
+  const now = Date.now();
+  if (now - _lastSweep < 10 * 60 * 1000) return; // at most every 10 minutes
+  _lastSweep = now;
+  for (const [key, s] of SESSIONS) {
+    if (now - s.updatedAt > SESSION_TTL_MS) {
+      SESSIONS.delete(key);
+    }
+  }
+}
+
+function touch(s: SessionData) {
+  s.updatedAt = Date.now();
+}
+
+/* -------------------------------------------------------------------------- */
+/*                              Session lifecycle                             */
+/* -------------------------------------------------------------------------- */
+
+export function getSession(phone: string): SessionData {
+  sweepIfNeeded();
+  let s = SESSIONS.get(phone);
   if (!s) {
     s = {
-      lang: 'sw',
-      expecting: 'none',
-      cart: { items: [] }
+      phone,
+      lang: "sw",
+      expecting: "full_name",
+      selectedDistrict: null,
+      selectedWard: null,
+      selectedStreet: null,
+      streetPage: 0,
+      lastLocation: null,
+      delivery: null,
+      checkout: {},
+      cart: null,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
     };
-    sessions.set(phone, s);
+    SESSIONS.set(phone, s);
   }
   return s;
 }
 
-/* ------------------------------ Accessors -------------------------------- */
+export function resetSession(phone: string) {
+  const base = getSession(phone);
+  base.expecting = "full_name";
+  base.lang = base.lang || "sw";
+  base.fullName = null;
+  base.phoneNumber = null;
+  base.region = null;
+  base.selectedDistrict = null;
+  base.selectedWard = null;
+  base.selectedStreet = null;
+  base.streetPage = 0;
+  base.lastLocation = null;
+  base.delivery = null;
+  base.checkout = {};
+  base.cart = null;
+  touch(base);
+}
 
-export function getSession(phone: string): Session {
-  return ensure(phone);
+/* -------------------------------------------------------------------------- */
+/*                                 Mutators                                   */
+/* -------------------------------------------------------------------------- */
+
+export function setExpecting(phone: string, expecting: Expecting) {
+  const s = getSession(phone);
+  s.expecting = expecting;
+  touch(s);
 }
 
 export function setLang(phone: string, lang: Lang) {
-  ensure(phone).lang = lang;
+  const s = getSession(phone);
+  s.lang = lang;
+  touch(s);
 }
 
-export function setExpecting(phone: string, expecting: Expecting) {
-  ensure(phone).expecting = expecting;
+/** Full name (majina matatu kamili) */
+export function setFullName(phone: string, fullName: string) {
+  const s = getSession(phone);
+  s.fullName = (fullName || "").trim();
+  touch(s);
 }
 
-/* -------------------------------- CART ----------------------------------- */
-
-export function addToCart(phone: string, item: CartItem) {
-  const s = ensure(phone);
-  const existing = s.cart.items.find((x) => x.productId === item.productId);
-  if (existing) existing.qty += item.qty;
-  else s.cart.items.push(item);
+/** Delivery phone */
+export function setPhoneNumber(phone: string, phoneNumber: string) {
+  const s = getSession(phone);
+  s.phoneNumber = (phoneNumber || "").trim();
+  touch(s);
 }
 
-export function clearCart(phone: string) {
-  ensure(phone).cart.items = [];
+/** Outside Dar region */
+export function setRegion(phone: string, region: string) {
+  const s = getSession(phone);
+  s.region = (region || "").trim();
+  touch(s);
 }
 
-export function cartTotal(phone: string): number {
-  const s = ensure(phone);
-  return s.cart.items.reduce((sum, it) => sum + it.priceTZS * it.qty, 0);
-}
-
-/* ------------------------------ Checkout --------------------------------- */
-
-export function startCheckout(phone: string) {
-  const s = ensure(phone);
-  s.checkout = { stage: 'start', totalTZS: cartTotal(phone) };
-}
-
-export function updateCheckout(phone: string, updates: Partial<Checkout>) {
-  const s = ensure(phone);
-  s.checkout = { ...(s.checkout ?? { stage: 'start' }), ...updates };
-}
-
-export function setCheckoutStage(phone: string, stage: CheckoutStage) {
-  const s = ensure(phone);
-  if (!s.checkout) s.checkout = { stage: 'start' };
-  s.checkout.stage = stage;
-}
-
-export function setLastOrderId(phone: string, orderId: string) {
-  ensure(phone).lastCreatedOrderId = orderId;
-}
-
-export function resetCheckout(phone: string) {
-  const s = ensure(phone);
-  delete s.checkout;
-  s.expecting = 'none';
-}
-
-/* --------------------------- Smart Delivery ------------------------------ */
-
-export function setSelectedDistrict(phone: string, name: string) {
-  const s = ensure(phone);
-  s.selectedDistrict = name;
-  s.selectedWard = undefined;
+/** District/Ward/Street selections (compat with your list flow) */
+export function setSelectedDistrict(phone: string, district: string | null) {
+  const s = getSession(phone);
+  s.selectedDistrict = district || null;
+  // when district changes, clear downstream selections
+  s.selectedWard = null;
   s.selectedStreet = null;
   s.streetPage = 0;
+  touch(s);
 }
 
-export function setSelectedWard(phone: string, name: string) {
-  const s = ensure(phone);
-  s.selectedWard = name;
+export function setSelectedWard(phone: string, ward: string | null) {
+  const s = getSession(phone);
+  s.selectedWard = ward || null;
+  // when ward changes, clear street
   s.selectedStreet = null;
   s.streetPage = 0;
+  touch(s);
 }
 
-export function setSelectedStreet(phone: string, name: string | null) {
-  const s = ensure(phone);
-  s.selectedStreet = name;
+export function setSelectedStreet(phone: string, street: string | null) {
+  const s = getSession(phone);
+  s.selectedStreet = street || null;
+  touch(s);
 }
 
-export function nextStreetPage(phone: string) {
-  const s = ensure(phone);
-  s.streetPage = (s.streetPage ?? 0) + 1;
+export function setStreetPage(phone: string, page: number) {
+  const s = getSession(phone);
+  s.streetPage = Math.max(0, Math.floor(page || 0));
+  touch(s);
 }
 
-export function setLastLocation(phone: string, lat: number | null, lon: number | null) {
-  const s = ensure(phone);
-  s.lastLocationLat = lat;
-  s.lastLocationLon = lon;
+/** Last shared location pin */
+export function setLastLocation(
+  phone: string,
+  lat: number,
+  lon: number,
+  at: number = Date.now()
+) {
+  const s = getSession(phone);
+  s.lastLocation = { lat, lon, at };
+  touch(s);
+}
+
+/** Update delivery snapshot (for quick order summaries) */
+export function updateDelivery(
+  phone: string,
+  patch: Partial<NonNullable<SessionData["delivery"]>>
+) {
+  const s = getSession(phone);
+  s.delivery = { ...(s.delivery ?? {}), ...patch };
+  touch(s);
+}
+
+/** Checkout aggregate used by pricing and order submit */
+export function updateCheckout(phone: string, patch: Partial<CheckoutState>) {
+  const s = getSession(phone);
+  s.checkout = { ...(s.checkout ?? {}), ...patch };
+  touch(s);
+}
+
+export function getCheckout(phone: string): CheckoutState {
+  return getSession(phone).checkout ?? {};
+}
+
+export function clearCheckout(phone: string) {
+  const s = getSession(phone);
+  s.checkout = {};
+  touch(s);
+}
+
+/* -------------------------------------------------------------------------- */
+/*                              Convenience getters                           */
+/* -------------------------------------------------------------------------- */
+
+export function getLang(phone: string): Lang {
+  return getSession(phone).lang;
+}
+
+export function getExpecting(phone: string): Expecting {
+  return getSession(phone).expecting;
+}
+
+export function getSelectedDistrict(phone: string): string | null | undefined {
+  return getSession(phone).selectedDistrict;
+}
+
+export function getSelectedWard(phone: string): string | null | undefined {
+  return getSession(phone).selectedWard;
+}
+
+export function getSelectedStreet(phone: string): string | null | undefined {
+  return getSession(phone).selectedStreet;
+}
+
+export function getStreetPage(phone: string): number {
+  return getSession(phone).streetPage ?? 0;
+}
+
+/* -------------------------------------------------------------------------- */
+/*                                 Debug utils                                */
+/* -------------------------------------------------------------------------- */
+
+export function _dumpSession(phone: string): SessionData {
+  return getSession(phone);
+}
+
+export function _count(): number {
+  return SESSIONS.size;
+}
+
+export function _resetAll() {
+  SESSIONS.clear();
 }

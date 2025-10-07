@@ -1,65 +1,110 @@
-import fs from "fs/promises";
-import path from "path";
+// src/delivery.ts
+// Distance → fare (Bolt-like), tuned cheaper for business use.
+// - base + per-km + minimum fare
+// - gentle long-distance discounts
+// - optional surge
+// - **rounds to nearest 500 TSh by default** (matches: 2900→3000, 11800→12000, 15100→15000)
 
-type DeliveryRules = {
-  version: number;
-  tiers: { km_min: number; km_max: number; fee_tzs: number }[];
-  overrides?: Record<string, number>;
-  surcharges?: { type: string; applies_to?: string[]; fee_tzs: number }[];
+export type Service = "standard" | "express";
+export type RoundingMode = "nearest" | "ceil" | "floor";
+
+export type PriceOptions = {
+  service?: Service;         // default: "standard"
+  surge?: number;            // 1.0 = no surge; e.g., 1.15 = +15%
+  baseOverride?: number;     // override base
+  perKmOverride?: number;    // override per-km
+  minFareOverride?: number;  // override minimum fare
+  roundTo?: number;          // rounding step (TZS). default 500
+  roundMode?: RoundingMode;  // "nearest" | "ceil" | "floor" (default: "nearest")
 };
 
-let RULES: DeliveryRules | null = null;
+// Cheaper defaults
+const PRICING: Record<Service, { base: number; perKm: number; minFare: number }> = {
+  // ~2.4 km ≈ 2,900 → rounds to 3,000; 6 km ≈ 5,800; 10 km ≈ 9,000
+  standard: { base: 1000, perKm: 800,  minFare: 2500 },
+  // Slightly higher but still affordable
+  express:  { base: 1500, perKm: 1000, minFare: 3500 },
+};
 
-async function readJson<T = any>(...rel: string[]): Promise<T | null> {
-  for (const p of rel) {
-    try {
-      const full = path.resolve(process.cwd(), p);
-      const raw = await fs.readFile(full, "utf8");
-      return JSON.parse(raw) as T;
-    } catch { /* try next */ }
-  }
-  return null;
+// Long-distance relief (cheaper per-km as trips get longer)
+const RELIEF_1_KM = 12;      // after 12 km
+const RELIEF_2_KM = 25;      // after 25 km
+const RELIEF_1_FACTOR = 0.75; // -25%
+const RELIEF_2_FACTOR = 0.55; // -45%
+
+function roundStep(value: number, step = 500, mode: RoundingMode = "nearest") {
+  const s = Math.max(1, Math.floor(step));
+  if (mode === "ceil")  return Math.ceil(value / s) * s;
+  if (mode === "floor") return Math.floor(value / s) * s;
+  return Math.round(value / s) * s; // nearest
 }
 
-export async function loadDeliveryRules(): Promise<DeliveryRules> {
-  if (RULES) return RULES;
-  const r = await readJson<DeliveryRules>(
-    "src/app/delivery_rules.json",
-    "src/data/delivery_rules.json",
-    "delivery_rules.json"
-  );
-  if (!r) throw new Error("delivery_rules.json not found");
-  RULES = r;
-  return RULES;
+export function quoteFare(kmInput: number, opts: PriceOptions = {}) {
+  const service: Service = opts.service ?? "standard";
+  const cfg = PRICING[service];
+
+  // sanitize distance (round up to 0.1 km like a meter)
+  const km = Math.max(0, Math.ceil((kmInput ?? 0) * 10) / 10);
+
+  // defaults (overridable)
+  let base    = opts.baseOverride    ?? cfg.base;
+  let perKm   = opts.perKmOverride   ?? cfg.perKm;
+  let minFare = opts.minFareOverride ?? cfg.minFare;
+
+  // apply long-distance relief
+  let perKmEffective = perKm;
+  if (km > RELIEF_2_KM) perKmEffective = perKm * RELIEF_2_FACTOR;
+  else if (km > RELIEF_1_KM) perKmEffective = perKm * RELIEF_1_FACTOR;
+
+  const distanceCharge = perKmEffective * km;
+  let subtotal = base + distanceCharge;
+
+  // minimum fare guard
+  if (subtotal < minFare) subtotal = minFare;
+
+  // surge (safe clamp)
+  const surge = Math.min(Math.max(opts.surge ?? 1.0, 1.0), 2.0);
+  let total = subtotal * surge;
+
+  // rounding (default nearest 500 TSh)
+  const step = Math.max(1, Math.floor(opts.roundTo ?? 500));
+  const mode = (opts.roundMode ?? "nearest") as RoundingMode;
+  total = roundStep(total, step, mode);
+
+  return {
+    service,
+    km,
+    base,
+    perKm,
+    perKmEffective,
+    distanceCharge: Math.round(distanceCharge),
+    minFare,
+    surge,
+    subtotal,
+    total,
+    rounding: { step, mode },
+  };
 }
 
-/** keyPath can be "District::Ward" or "District::Ward::Street" */
-export async function quoteDelivery(distanceKm: number, keyPath?: string | null) {
-  const r = await loadDeliveryRules();
-  let base = 0;
-  let from = "tier";
+// Backward-compatible facade
+export function calcDeliveryFareTZS(km: number, opts?: PriceOptions): number {
+  return quoteFare(km, opts).total;
+}
 
-  // 1) overrides
-  if (keyPath && r.overrides && (keyPath in r.overrides)) {
-    base = r.overrides[keyPath]!;
-    from = "override";
-  } else {
-    // 2) tiers
-    const tier = r.tiers.find(t => distanceKm >= t.km_min && distanceKm <= t.km_max);
-    base = tier ? tier.fee_tzs : r.tiers[r.tiers.length - 1].fee_tzs;
-  }
+// Formatting helpers
+export function formatTZS(n: number): string {
+  return n.toLocaleString("en-TZ");
+}
 
-  // 3) surcharges (optional; basic district apply)
-  const surcharges: { type: string; fee_tzs: number }[] = [];
-  if (r.surcharges?.length && keyPath) {
-    const [district] = keyPath.split("::");
-    for (const s of r.surcharges) {
-      if (!s.applies_to || s.applies_to.includes(district)) {
-        surcharges.push({ type: s.type, fee_tzs: s.fee_tzs });
-      }
-    }
-  }
-
-  const total = base + surcharges.reduce((a, b) => a + b.fee_tzs, 0);
-  return { base_fee_tzs: base, surcharges, total_fee_tzs: total, base_from: from };
+export function buildQuoteLine(
+  place: string,
+  km: number,
+  fee: number,
+  i18nLine: (params: Record<string, string | number>) => string
+) {
+  return i18nLine({
+    place,
+    km: km.toFixed(1),
+    fee: formatTZS(fee),
+  });
 }

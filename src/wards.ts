@@ -1,206 +1,403 @@
-import fs from "fs/promises";
-import path from "path";
+// src/wards.ts
+// Smart lookup for Dar es Salaam delivery distances.
+// Works with flexible JSON at: src/data/dar_location.json
+//
+// Supported shapes:
+//
+// 1) Object style (recommended)
+// {
+//   "Kariakoo": 2.45,
+//   "Mabibo": { "distance_km": 6.1, "aliases": ["Mabibo Hostel"],
+//               "streets": {
+//                 "Swahili": 2.9,
+//                 "Msimbazi": { "distance_km": 2.7, "aliases": ["Msimbazi St"] }
+//               }
+//   }
+// }
+//
+// 2) Array style
+// [
+//   { "ward": "Kariakoo", "km": 2.45,
+//     "streets": [ { "name": "Swahili", "km": 2.9 },
+//                  { "name": "Msimbazi", "distance_km": 2.7, "aliases": ["Msimbazi St"] } ],
+//     "aliases": ["Kariako"]
+//   }
+// ]
+//
+// Public API:
+// - loadLocations(): Promise<void>   // optional; preloads the JSON
+// - resolveDarLocation(input: string): ResolveResult
+// - lookupWardAndStreet(ward: string, street?: string): ResolveResult
+// - getDistanceKm(query: string): number | null        // backward-compatible
+// - listWards(): string[]
+// - listStreets(ward: string): string[]
+// - isLoaded(): boolean
+//
+// The helpers are synchronous to call; they lazy-load the JSON on first use.
+// If you want to guarantee data is loaded at boot, call loadLocations() once.
 
-/** Data shapes */
-export interface Street { name: string; distance_km?: number; lat?: number; lon?: number; }
-export interface Ward   { name: string; km?: number; streets?: Street[] }
-export interface District { name: string; wards: Ward[] }
-export interface Locations { region?: string; districts: District[] }
+import * as fsSync from "node:fs";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
 
-export type MatchType = "street_exact" | "street_fuzzy" | "nearest_location" | "ward_only" | "derived_min_street";
+/* ------------------------------- Types ----------------------------------- */
 
-/** Runtime cache */
-let LOC: Locations | null = null;
+export type ResolveResult = {
+  km: number | null;
+  used: "street_exact" | "ward_only" | "nearest_location" | "unknown";
+  confidence: number;
+  resolvedStreet?: string | null;
+  ward?: string | null;
+  district?: string | null; // optional free text (e.g., "Ilala")
+};
 
-/** Utility: canonicalize names for matching */
-function canon(s: string) {
-  return s
+type AnyRec = Record<string, any>;
+type DarRoot = AnyRec | AnyRec[];
+
+/* ----------------------------- Module state ------------------------------ */
+
+let DB: DarRoot | null = null;
+let LOADED = false;
+
+const CANDIDATES = [
+  "src/data/dar_location.json",
+  "src/app/dar_location.json",
+  "dar_location.json",
+].map((p) => path.resolve(process.cwd(), p));
+
+/* ------------------------------- Utils ----------------------------------- */
+
+const norm = (s: string) =>
+  s
     .toLowerCase()
-    .normalize("NFKD")
-    .replace(/[’'`]/g, "")
-    .replace(/\s+/g, " ")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
     .trim();
+
+const isObj = (v: any): v is Record<string, any> =>
+  v != null && typeof v === "object" && !Array.isArray(v);
+
+function readWardName(w: any): string {
+  if (typeof w === "string") return w;
+  return w?.ward ?? w?.name ?? w?.ward_name ?? "";
 }
 
-/** Simple Levenshtein distance */
-function lev(a: string, b: string) {
-  const m = a.length, n = b.length;
-  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
-  for (let i = 0; i <= m; i++) dp[i][0] = i;
-  for (let j = 0; j <= n; j++) dp[0][j] = j;
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      dp[i][j] = Math.min(
-        dp[i - 1][j] + 1,
-        dp[i][j - 1] + 1,
-        dp[i - 1][j - 1] + cost
-      );
-    }
-  }
-  return dp[m][n];
-}
-function similarity(a: string, b: string) {
-  const ca = canon(a), cb = canon(b);
-  const dist = lev(ca, cb);
-  const maxLen = Math.max(ca.length, cb.length) || 1;
-  return 1 - dist / maxLen; // 0..1
-}
-
-/** Haversine (meters) */
-function haversine(lat1: number, lon1: number, lat2: number, lon2: number) {
-  const R = 6371000;
-  const toRad = (d: number) => (d * Math.PI) / 180;
-  const dLat = toRad(lat2 - lat1);
-  const dLon = toRad(lon2 - lon1);
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(a));
-}
-
-/** Try multiple paths for a JSON */
-async function tryReadJson<T = any>(...relPaths: string[]): Promise<T | null> {
-  for (const p of relPaths) {
-    try {
-      const full = path.resolve(process.cwd(), p);
-      const raw = await fs.readFile(full, "utf8");
-      return JSON.parse(raw) as T;
-    } catch {
-      /* keep trying */
-    }
+function readWardKm(entry: any): number | null {
+  if (typeof entry === "number") return entry;
+  if (isObj(entry)) {
+    if (typeof entry.km === "number") return entry.km;
+    if (typeof entry.distance_km === "number") return entry.distance_km;
   }
   return null;
 }
 
-/** Load locations
- * Priority:
- * 1) src/app/dar_wards_with_streets.json
- * 2) src/data/dar_wards_with_streets.json
- * 3) src/app/dar_wards.json (ward-only)
- * 4) src/data/dar_wards.json
- */
-export async function loadLocations(): Promise<Locations> {
-  if (LOC) return LOC;
-
-  const withStreets = await tryReadJson<Locations>(
-    "src/app/dar_wards_with_streets.json",
-    "src/data/dar_wards_with_streets.json",
-    "dar_wards_with_streets.json"
-  );
-  if (withStreets?.districts?.length) {
-    LOC = normalize(withStreets);
-    return LOC;
-  }
-
-  const wardOnly = await tryReadJson<{ districts: District[] }>(
-    "src/app/dar_wards.json",
-    "src/data/dar_wards.json",
-    "dar_wards.json"
-  );
-  if (wardOnly?.districts?.length) {
-    LOC = normalize({ region: "Dar es Salaam", districts: wardOnly.districts });
-    return LOC;
-  }
-
-  throw new Error("No location data found. Provide dar_wards_with_streets.json or dar_wards.json.");
+function readStreetName(st: any, keyName?: string): string {
+  if (typeof st === "string") return st;
+  return st?.name ?? keyName ?? "";
 }
 
-/** Normalize: ensure arrays/fields exist */
-function normalize(src: Locations): Locations {
-  for (const d of src.districts) {
-    d.wards ||= [];
-    for (const w of d.wards) {
-      w.streets ||= [];
+function readStreetKm(wardEntry: any, streetEntry: any, wardKm: number | null): number | null {
+  if (typeof streetEntry === "number") return streetEntry;
+  if (isObj(streetEntry)) {
+    if (typeof streetEntry.km === "number") return streetEntry.km;
+    if (typeof streetEntry.distance_km === "number") return streetEntry.distance_km;
+    if (typeof streetEntry.extra_km === "number" && typeof wardKm === "number") {
+      return wardKm + streetEntry.extra_km;
     }
   }
-  return src;
+  return wardKm;
 }
 
-/** Getters */
-export function listDistricts(): string[] {
-  if (!LOC) throw new Error("Locations not loaded");
-  return LOC.districts.map(d => d.name);
-}
-export function listWards(district: string): string[] {
-  if (!LOC) throw new Error("Locations not loaded");
-  const d = LOC.districts.find(x => canon(x.name) === canon(district));
-  return d ? d.wards.map(w => w.name) : [];
-}
-export function listStreets(district: string, ward: string): string[] {
-  if (!LOC) throw new Error("Locations not loaded");
-  const d = LOC.districts.find(x => canon(x.name) === canon(district));
-  const w = d?.wards.find(x => canon(x.name) === canon(ward));
-  return w ? (w.streets || []).map(s => s.name) : [];
-}
+/* ------------------------------ Loading ---------------------------------- */
 
-/** Core resolution + distance */
-export function resolveDistanceKm(params: {
-  district: string;
-  ward: string;
-  streetName?: string | null;
-  pin?: { lat: number; lon: number } | null;
-  fuzzyThreshold?: number; // default 0.9
-}): {
-  km: number | null;
-  used: MatchType;
-  confidence: number;
-  resolvedStreet?: string;
-} {
-  if (!LOC) throw new Error("Locations not loaded");
-  const { district, ward, streetName, pin } = params;
-  const fuzzyThreshold = params.fuzzyThreshold ?? 0.9;
-
-  const d = LOC.districts.find(x => canon(x.name) === canon(district));
-  const w = d?.wards.find(x => canon(x.name) === canon(ward));
-
-  if (!d || !w) return { km: null, used: "ward_only", confidence: 0 };
-
-  // 1) If a street was provided, try exact then fuzzy
-  if (streetName && w.streets && w.streets.length) {
-    const exact = w.streets.find(s => canon(s.name) === canon(streetName));
-    if (exact?.distance_km != null) {
-      return { km: exact.distance_km, used: "street_exact", confidence: 1, resolvedStreet: exact.name };
-    }
-    // fuzzy
-    let best: { s: Street; sim: number } | null = null;
-    for (const s of w.streets) {
-      const sim = similarity(s.name, streetName);
-      if (!best || sim > best.sim) best = { s, sim };
-    }
-    if (best && best.sim >= fuzzyThreshold && best.s.distance_km != null) {
-      return { km: best.s.distance_km, used: "street_fuzzy", confidence: best.sim, resolvedStreet: best.s.name };
+function tryLoadSync(): boolean {
+  for (const p of CANDIDATES) {
+    try {
+      if (fsSync.existsSync(p)) {
+        const raw = fsSync.readFileSync(p, "utf8");
+        DB = JSON.parse(raw);
+        LOADED = true;
+        return true;
+      }
+    } catch {
+      // try next candidate
     }
   }
+  return false;
+}
 
-  // 2) If a pin is provided and we have coords on streets, pick nearest within ~400m
-  if (pin && w.streets && w.streets.length) {
-    let nearest: { s: Street; m: number } | null = null;
-    for (const s of w.streets) {
-      if (s.lat == null || s.lon == null) continue;
-      const m = haversine(pin.lat, pin.lon, s.lat, s.lon);
-      if (!nearest || m < nearest.m) nearest = { s, m };
+export async function loadLocations(): Promise<void> {
+  if (LOADED && DB) return;
+  for (const p of CANDIDATES) {
+    try {
+      const raw = await fs.readFile(p, "utf8");
+      DB = JSON.parse(raw);
+      LOADED = true;
+      return;
+    } catch {
+      // try next
     }
-    if (nearest && nearest.s.distance_km != null) {
-      // Consider within 400m "confident"
-      const conf = Math.max(0, Math.min(1, 1 - nearest.m / 400));
+  }
+  // final attempt sync (for environments that dislike async fs in cold start)
+  tryLoadSync();
+}
+
+export function isLoaded() {
+  return LOADED && !!DB;
+}
+
+/* ------------------------------ Iterators -------------------------------- */
+
+function* iterateWards(): Generator<{ wardName: string; wardEntry: any }> {
+  if (!DB) return;
+
+  // Object style
+  if (isObj(DB) && !Array.isArray(DB)) {
+    for (const [wardName, wardEntry] of Object.entries(DB)) {
+      yield { wardName, wardEntry };
+    }
+    return;
+  }
+
+  // Array style
+  if (Array.isArray(DB)) {
+    for (const w of DB) {
+      const wardName = readWardName(w);
+      if (!wardName) continue;
+      yield { wardName, wardEntry: w };
+    }
+  }
+}
+
+function getWardAliases(w: any): string[] {
+  if (!isObj(w)) return [];
+  const a = w.aliases;
+  return Array.isArray(a) ? a.filter((x) => typeof x === "string") : [];
+}
+
+function getWardStreetsArray(w: any): any[] {
+  if (!isObj(w)) return [];
+  // allowed: array OR object map
+  if (Array.isArray(w.streets)) return w.streets;
+  if (isObj(w.streets)) {
+    return Object.entries(w.streets).map(([name, v]) =>
+      isObj(v) ? { ...v, name } : { name, km: v }
+    );
+  }
+  return [];
+}
+
+function getStreetAliases(st: any): string[] {
+  if (!isObj(st)) return [];
+  const a = st.aliases;
+  return Array.isArray(a) ? a.filter((x) => typeof x === "string") : [];
+}
+
+/* --------------------------- Public functions ---------------------------- */
+
+/** High-level: resolve from a string like "Kariakoo, Ilala" or "Swahili, Ilala" or "Kariakoo" */
+export function resolveDarLocation(input: string): ResolveResult {
+  if (!isLoaded()) tryLoadSync();
+
+  if (!DB) {
+    return { km: null, used: "unknown", confidence: 0 };
+  }
+
+  // Split by comma: left = ward/street/area, right = district(wilaya) (optional)
+  const parts = input.split(/[，,]/).map((s) => s?.trim()).filter(Boolean);
+  const leftRaw = parts[0] ?? "";
+  const rightRaw = parts[1] ?? "";
+  const left = norm(leftRaw);
+  const district = rightRaw || null;
+
+  // 1) Try to match ward (by name or alias)
+  for (const { wardName, wardEntry } of iterateWards()) {
+    const wn = norm(wardName);
+    const aliases = getWardAliases(wardEntry);
+    const wardHit = left && (left === wn || aliases.some((a) => norm(a) === left));
+
+    const wardKm = readWardKm(wardEntry);
+
+    if (wardHit) {
+      // If user actually typed a street as left, try streets
+      const streets = getWardStreetsArray(wardEntry);
+      for (const st of streets) {
+        const stName = readStreetName(st);
+        const stn = norm(stName);
+        const als = getStreetAliases(st);
+        if (left === stn || als.some((a) => norm(a) === left)) {
+          const km = readStreetKm(wardEntry, st, wardKm);
+          return {
+            km,
+            used: "street_exact",
+            confidence: 0.98,
+            resolvedStreet: stName,
+            ward: wardName,
+            district,
+          };
+        }
+      }
+
+      // Otherwise, ward-only
       return {
-        km: nearest.s.distance_km,
-        used: "nearest_location",
-        confidence: conf,
-        resolvedStreet: nearest.s.name
+        km: wardKm,
+        used: "ward_only",
+        confidence: wardKm != null ? 0.9 : 0.2,
+        resolvedStreet: null,
+        ward: wardName,
+        district,
       };
     }
   }
 
-  // 3) Fall back to ward.km, else derive min(street.distance_km)
-  if (w.km != null) return { km: w.km, used: "ward_only", confidence: 0.75 };
-  if (w.streets?.length) {
-    const dists = w.streets.map(s => s.distance_km).filter((x): x is number => x != null);
-    if (dists.length) {
-      const min = Math.min(...dists);
-      return { km: min, used: "derived_min_street", confidence: 0.6 };
+  // 2) If not a ward hit, try global street match (treat left as street)
+  if (left) {
+    for (const { wardName, wardEntry } of iterateWards()) {
+      const wardKm = readWardKm(wardEntry);
+      const streets = getWardStreetsArray(wardEntry);
+      for (const st of streets) {
+        const stName = readStreetName(st);
+        const stn = norm(stName);
+        const als = getStreetAliases(st);
+        if (left === stn || als.some((a) => norm(a) === left)) {
+          const km = readStreetKm(wardEntry, st, wardKm);
+          return {
+            km,
+            used: "nearest_location",
+            confidence: 0.7,
+            resolvedStreet: stName,
+            ward: wardName,
+            district,
+          };
+        }
+      }
     }
   }
-  return { km: null, used: "ward_only", confidence: 0 };
+
+  // 3) Unknown
+  return { km: null, used: "unknown", confidence: 0, district };
+}
+
+/** Direct resolver when you already have them separated */
+export function lookupWardAndStreet(
+  wardInput: string,
+  streetInput?: string
+): ResolveResult {
+  if (!isLoaded()) tryLoadSync();
+
+  if (!DB) {
+    return { km: null, used: "unknown", confidence: 0, resolvedStreet: null, ward: null };
+  }
+
+  const wKey = norm(wardInput || "");
+  const sKey = streetInput ? norm(streetInput) : null;
+
+  // 1) Find the ward
+  for (const { wardName, wardEntry } of iterateWards()) {
+    const wn = norm(wardName);
+    const aliases = getWardAliases(wardEntry);
+    const isWard = wKey && (wKey === wn || aliases.some((a) => norm(a) === wKey));
+
+    const wardKm = readWardKm(wardEntry);
+
+    if (isWard) {
+      if (sKey) {
+        // 1a) street inside this ward
+        const streets = getWardStreetsArray(wardEntry);
+        for (const st of streets) {
+          const stName = readStreetName(st);
+          const stn = norm(stName);
+          const als = getStreetAliases(st);
+          if (sKey === stn || als.some((a) => norm(a) === sKey)) {
+            const km = readStreetKm(wardEntry, st, wardKm);
+            return {
+              km,
+              used: "street_exact",
+              confidence: 0.98,
+              resolvedStreet: stName,
+              ward: wardName,
+            };
+          }
+        }
+        // no street hit → ward-only
+        return {
+          km: wardKm,
+          used: "ward_only",
+          confidence: wardKm != null ? 0.9 : 0.2,
+          resolvedStreet: null,
+          ward: wardName,
+        };
+      }
+
+      // 1b) no street provided → ward-only
+      return {
+        km: wardKm,
+        used: "ward_only",
+        confidence: wardKm != null ? 0.9 : 0.2,
+        resolvedStreet: null,
+        ward: wardName,
+      };
+    }
+  }
+
+  // 2) If ward not found but we have a street, try global street match
+  if (sKey) {
+    for (const { wardName, wardEntry } of iterateWards()) {
+      const wardKm = readWardKm(wardEntry);
+      const streets = getWardStreetsArray(wardEntry);
+      for (const st of streets) {
+        const stName = readStreetName(st);
+        const stn = norm(stName);
+        const als = getStreetAliases(st);
+        if (sKey === stn || als.some((a) => norm(a) === sKey)) {
+          const km = readStreetKm(wardEntry, st, wardKm);
+          return {
+            km,
+            used: "nearest_location",
+            confidence: 0.7,
+            resolvedStreet: stName,
+            ward: wardName,
+          };
+        }
+      }
+    }
+  }
+
+  // 3) unknown
+  return { km: null, used: "unknown", confidence: 0, resolvedStreet: null, ward: null };
+}
+
+/** Backward-compatible helper: try to resolve a single free-form query to km */
+export function getDistanceKm(query: string): number | null {
+  const r = resolveDarLocation(query);
+  return r?.km ?? null;
+}
+
+/** Convenience listings (for UI lists, optional) */
+export function listWards(): string[] {
+  if (!isLoaded()) tryLoadSync();
+  const names: string[] = [];
+  for (const { wardName } of iterateWards()) names.push(wardName);
+  // natural sort
+  return names.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
+}
+
+export function listStreets(ward: string): string[] {
+  if (!isLoaded()) tryLoadSync();
+  const out: string[] = [];
+  const wKey = norm(ward);
+  for (const { wardName, wardEntry } of iterateWards()) {
+    const wn = norm(wardName);
+    const aliases = getWardAliases(wardEntry);
+    if (wKey === wn || aliases.some((a) => norm(a) === wKey)) {
+      const streets = getWardStreetsArray(wardEntry);
+      for (const st of streets) {
+        const name = readStreetName(st);
+        if (name) out.push(name);
+      }
+      break;
+    }
+  }
+  return out.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
 }
