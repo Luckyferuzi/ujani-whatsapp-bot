@@ -123,8 +123,8 @@ export const i18n: Record<Lang, Dict> = {
     ask_full_name: "Tuma *majina matatu kamili* ya mteja. 🧾",
     ask_in_out_dar:
       "Je, uko *ndani ya Dar es Salaam* au *nje ya Dar es Salaam*? 🚚",
-    btn_inside_dar: "Ndani ya Dar es Salaam",
-    btn_outside_dar: "Nje ya Dar es Salaam",
+    btn_inside_dar: "Ndani ya Dar",
+    btn_outside_dar: "Nje ya Dar",
     ask_phone_in_dar: "Weka *namba ya simu* ya kupokelea mzigo. ☎️",
     ask_address_in_dar:
       "Weka *anuani ya Dar* kwa *format*: *mtaa/eneo, wilaya* — mfano: *Kariakoo, Ilala*. 🏷️\n• Kwanza: mtaa/eneo (au ward)\n• Pili: wilaya (Ilala, Kinondoni, Temeke, Kigamboni, Ubungo)",
@@ -261,8 +261,8 @@ export const i18n: Record<Lang, Dict> = {
     ask_full_name: "Send the customer's *full name (three names)*. 🧾",
     ask_in_out_dar:
       "Are you *inside Dar es Salaam* or *outside Dar es Salaam*? 🚚",
-    btn_inside_dar: "Inside Dar es Salaam",
-    btn_outside_dar: "Outside Dar es Salaam",
+    btn_inside_dar: "Inside Dar",
+    btn_outside_dar: "Outside Dar",
     ask_phone_in_dar: "Enter the *phone number* for delivery. ☎️",
     ask_address_in_dar:
       "Send your *Dar address* in the format *area/street, district* — e.g. *Kariakoo, Ilala*. 🏷️",

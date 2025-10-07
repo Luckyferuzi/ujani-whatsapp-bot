@@ -172,12 +172,13 @@ async function handleMessage(m: InMsg) {
   if (!s.expecting || s.expecting === "full_name") {
     setFullName(from, text);
     setExpecting(from, "in_out_dar");
+    const cap20 = (s: string) => (s || "").slice(0, 20);
     await sendInteractiveButtons({
       to: from,
       body: t(lang, "ask_in_out_dar"),
       buttons: [
-        { id: "in_dar", title: t(lang, "btn_inside_dar") },
-        { id: "out_dar", title: t(lang, "btn_outside_dar") },
+        { id: "in_dar", title: cap20(t(lang, "btn_inside_dar") )},
+        { id: "out_dar", title: cap20(t(lang, "btn_outside_dar")) },
       ],
     });
     return;
