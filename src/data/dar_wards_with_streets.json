@@ -1,0 +1,2357 @@
+{
+  "region": "DAR-ES-SALAAM",
+  "districts": [
+    {
+      "name": "ILALA",
+      "wards": [
+        {
+          "name": "BONYOKWA",
+          "km": null,
+          "streets": [
+            {
+              "name": "BONYOKWA"
+            },
+            {
+              "name": "KISIWANI"
+            },
+            {
+              "name": "MSINGWA"
+            }
+          ]
+        },
+        {
+          "name": "BUGURUNI",
+          "km": null,
+          "streets": [
+            {
+              "name": "KISIWANI"
+            },
+            {
+              "name": "MADENGE"
+            },
+            {
+              "name": "MALAPA"
+            },
+            {
+              "name": "MVINJENI"
+            }
+          ]
+        },
+        {
+          "name": "BUYUNI",
+          "km": null,
+          "streets": [
+            {
+              "name": "KIGEZI"
+            },
+            {
+              "name": "KIGEZI CHINI"
+            },
+            {
+              "name": "MGEULE"
+            },
+            {
+              "name": "MGEULE JUU"
+            },
+            {
+              "name": "NYEBURU"
+            },
+            {
+              "name": "TALIANI"
+            },
+            {
+              "name": "ZAVALA"
+            }
+          ]
+        },
+        {
+          "name": "CHANIKA",
+          "km": null,
+          "streets": [
+            {
+              "name": "KIDUGALO"
+            },
+            {
+              "name": "LUKOMI"
+            },
+            {
+              "name": "LUKOONI"
+            },
+            {
+              "name": "NGUVU MPYA"
+            },
+            {
+              "name": "NGWALE"
+            },
+            {
+              "name": "TUNGINI"
+            },
+            {
+              "name": "VIKONGORO"
+            },
+            {
+              "name": "VIROBO"
+            },
+            {
+              "name": "YONGWE"
+            }
+          ]
+        },
+        {
+          "name": "GONGO LA MBOTO",
+          "km": null,
+          "streets": [
+            {
+              "name": "GONGO LA MBOTO"
+            },
+            {
+              "name": "GULUKA KWALALA"
+            },
+            {
+              "name": "ULONGONI A"
+            },
+            {
+              "name": "ULONGONI B"
+            }
+          ]
+        },
+        {
+          "name": "ILALA",
+          "km": null,
+          "streets": [
+            {
+              "name": "AMANA"
+            },
+            {
+              "name": "KARUME"
+            },
+            {
+              "name": "KASULU"
+            },
+            {
+              "name": "MAFURIKO"
+            },
+            {
+              "name": "SHARIFF SHAMBA"
+            }
+          ]
+        },
+        {
+          "name": "KIMANGA",
+          "km": null,
+          "streets": [
+            {
+              "name": "BANEBANE"
+            },
+            {
+              "name": "KIHIMBWA"
+            },
+            {
+              "name": "KIMANGA"
+            },
+            {
+              "name": "KIMANGA DARAJANI"
+            },
+            {
+              "name": "SOKOINE"
+            },
+            {
+              "name": "TEMBOMGWAZA"
+            },
+            {
+              "name": "TWIGA"
+            }
+          ]
+        },
+        {
+          "name": "KINYEREZI",
+          "km": null,
+          "streets": [
+            {
+              "name": "KANGA"
+            },
+            {
+              "name": "KIBAGA"
+            },
+            {
+              "name": "KICHANGANI"
+            },
+            {
+              "name": "KIFURU"
+            },
+            {
+              "name": "KINYEREZI"
+            },
+            {
+              "name": "KWALIMBAGA"
+            }
+          ]
+        },
+        {
+          "name": "KIPAWA",
+          "km": null,
+          "streets": [
+            {
+              "name": "KARAKATA"
+            },
+            {
+              "name": "KIPUNGUNI"
+            },
+            {
+              "name": "MJIMPYA"
+            },
+            {
+              "name": "MOGO"
+            },
+            {
+              "name": "STAKISHARI"
+            },
+            {
+              "name": "UWANJA WA NDEGE"
+            }
+          ]
+        },
+        {
+          "name": "KIPUNGUNI",
+          "km": null,
+          "streets": [
+            {
+              "name": "AMANI"
+            },
+            {
+              "name": "KIPUNGUNI B"
+            },
+            {
+              "name": "KITINYE"
+            },
+            {
+              "name": "MACHIMBO"
+            }
+          ]
+        },
+        {
+          "name": "KISUKULU",
+          "km": null,
+          "streets": [
+            {
+              "name": "KISUKULU"
+            },
+            {
+              "name": "LUHANGA"
+            },
+            {
+              "name": "MIANZINI"
+            }
+          ]
+        },
+        {
+          "name": "KITUNDA",
+          "km": null,
+          "streets": [
+            {
+              "name": "KIPERA"
+            },
+            {
+              "name": "KITUNDA"
+            },
+            {
+              "name": "KIYOMBO"
+            },
+            {
+              "name": "RELINI"
+            }
+          ]
+        },
+        {
+          "name": "KIVULE",
+          "km": null,
+          "streets": [
+            {
+              "name": "BOMBAMBILI"
+            },
+            {
+              "name": "KAREZANGE"
+            },
+            {
+              "name": "KIVULE"
+            },
+            {
+              "name": "MAGORE A"
+            }
+          ]
+        },
+        {
+          "name": "KIWALANI",
+          "km": null,
+          "streets": [
+            {
+              "name": "KIGILAGILA"
+            },
+            {
+              "name": "KIWALANI"
+            },
+            {
+              "name": "YOMBO"
+            }
+          ]
+        },
+        {
+          "name": "LIWITI",
+          "km": null,
+          "streets": [
+            {
+              "name": "AMANI"
+            },
+            {
+              "name": "LIWITI"
+            },
+            {
+              "name": "MACHIMBO"
+            },
+            {
+              "name": "MISEWE"
+            }
+          ]
+        },
+        {
+          "name": "MAJOHE",
+          "km": null,
+          "streets": [
+            {
+              "name": "KICHANGANI"
+            },
+            {
+              "name": "KIVULE"
+            },
+            {
+              "name": "MJI MPYA"
+            },
+            {
+              "name": "RADA"
+            },
+            {
+              "name": "VIWEGE"
+            }
+          ]
+        },
+        {
+          "name": "MINAZI MIREFU",
+          "km": null,
+          "streets": [
+            {
+              "name": "MIGOMBANI"
+            },
+            {
+              "name": "MINAZI MIREFU"
+            },
+            {
+              "name": "MWALE"
+            }
+          ]
+        },
+        {
+          "name": "MNYAMANI",
+          "km": null,
+          "streets": [
+            {
+              "name": "FARU"
+            },
+            {
+              "name": "MALUZUKU"
+            },
+            {
+              "name": "MJI MPYA"
+            },
+            {
+              "name": "MNYAMANI"
+            }
+          ]
+        },
+        {
+          "name": "MSONGOLA",
+          "km": null,
+          "streets": [
+            {
+              "name": "KIBOGA"
+            },
+            {
+              "name": "KIDOLE"
+            },
+            {
+              "name": "KITONGA"
+            },
+            {
+              "name": "MBONDOLE"
+            },
+            {
+              "name": "MKERA"
+            },
+            {
+              "name": "MVULENI"
+            },
+            {
+              "name": "SANGARA"
+            },
+            {
+              "name": "UWANJA WA NYANI"
+            },
+            {
+              "name": "YANGEYANGE"
+            }
+          ]
+        },
+        {
+          "name": "MZINGA",
+          "km": null,
+          "streets": [
+            {
+              "name": "MAGOLE"
+            },
+            {
+              "name": "MWANAGATI"
+            },
+            {
+              "name": "MZINGA"
+            }
+          ]
+        },
+        {
+          "name": "PUGU",
+          "km": null,
+          "streets": [
+            {
+              "name": "BOMBANI"
+            },
+            {
+              "name": "KIGOGO FRESH 'A'"
+            },
+            {
+              "name": "KIGOGO FRESH 'B'"
+            },
+            {
+              "name": "KINYAMWEZI"
+            },
+            {
+              "name": "MUSTAPHA"
+            }
+          ]
+        },
+        {
+          "name": "PUGU STATION",
+          "km": null,
+          "streets": [
+            {
+              "name": "BANGULO"
+            },
+            {
+              "name": "KICHANGANI"
+            },
+            {
+              "name": "PUGU STATION"
+            }
+          ]
+        },
+        {
+          "name": "SEGEREA",
+          "km": null,
+          "streets": [
+            {
+              "name": "MFAUME"
+            },
+            {
+              "name": "MGOMBANI"
+            },
+            {
+              "name": "SEGEREA"
+            },
+            {
+              "name": "UGOMBOLWA"
+            }
+          ]
+        },
+        {
+          "name": "TABATA",
+          "km": null,
+          "streets": [
+            {
+              "name": "KISIWANI"
+            },
+            {
+              "name": "MANDELA"
+            },
+            {
+              "name": "MATUMBI"
+            },
+            {
+              "name": "MSIMBAZI"
+            },
+            {
+              "name": "MSIMBAZI MAGHARIBI"
+            },
+            {
+              "name": "MTAMBANI"
+            },
+            {
+              "name": "TABATA"
+            },
+            {
+              "name": "TENGE"
+            }
+          ]
+        },
+        {
+          "name": "UKONGA",
+          "km": null,
+          "streets": [
+            {
+              "name": "MARKAZ"
+            },
+            {
+              "name": "MAZIZINI"
+            },
+            {
+              "name": "MONGO LA NDEGE"
+            },
+            {
+              "name": "MWEMBE MADAFU"
+            },
+            {
+              "name": "SABASABA"
+            }
+          ]
+        },
+        {
+          "name": "VINGUNGUTI",
+          "km": null,
+          "streets": [
+            {
+              "name": "BUTIAMA"
+            },
+            {
+              "name": "KOMBO"
+            },
+            {
+              "name": "MAJENGO"
+            },
+            {
+              "name": "MIEMBENI"
+            },
+            {
+              "name": "MTAKUJA"
+            },
+            {
+              "name": "MTAMBANI"
+            }
+          ]
+        },
+        {
+          "name": "ZINGIZIWA",
+          "km": null,
+          "streets": [
+            {
+              "name": "GOGO"
+            },
+            {
+              "name": "KIMWANI"
+            },
+            {
+              "name": "LUBAKAYA"
+            },
+            {
+              "name": "NGOBEDI"
+            },
+            {
+              "name": "NZASA"
+            },
+            {
+              "name": "SOMELO"
+            },
+            {
+              "name": "ZINGIZIWA"
+            },
+            {
+              "name": "ZOGOALI"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "ILALA CBD",
+      "wards": [
+        {
+          "name": "GEREZANI",
+          "km": null,
+          "streets": [
+            {
+              "name": "GEREZANI MAGHARIBI"
+            },
+            {
+              "name": "GEREZANI MASHARIKI"
+            }
+          ]
+        },
+        {
+          "name": "JANGWANI",
+          "km": null,
+          "streets": [
+            {
+              "name": "MNAZI MMOJA"
+            },
+            {
+              "name": "MTAMBANI \"A\""
+            },
+            {
+              "name": "MTAMBANI \"B\""
+            },
+            {
+              "name": "UKOMBOZI"
+            }
+          ]
+        },
+        {
+          "name": "KARIAKOO",
+          "km": null,
+          "streets": [
+            {
+              "name": "KARIAKOO KASKAZINI"
+            },
+            {
+              "name": "KARIAKOO MAGHARIBI"
+            },
+            {
+              "name": "KARIAKOO MASHARIKI"
+            }
+          ]
+        },
+        {
+          "name": "KISUTU",
+          "km": null,
+          "streets": [
+            {
+              "name": "KISUTU"
+            },
+            {
+              "name": "MTENDENI"
+            }
+          ]
+        },
+        {
+          "name": "KIVUKONI",
+          "km": null,
+          "streets": [
+            {
+              "name": "KIVUKONI"
+            },
+            {
+              "name": "SEA VIEW"
+            }
+          ]
+        },
+        {
+          "name": "MCHAFUKOGE",
+          "km": null,
+          "streets": [
+            {
+              "name": "KITUMBINI"
+            },
+            {
+              "name": "MCHAFUKOGE"
+            }
+          ]
+        },
+        {
+          "name": "MCHIKICHINI",
+          "km": null,
+          "streets": [
+            {
+              "name": "ILALA KOTA"
+            },
+            {
+              "name": "MISSION QUARTER"
+            },
+            {
+              "name": "MSIMBAZI BONDENI"
+            }
+          ]
+        },
+        {
+          "name": "UPANGA MAGHARIBI",
+          "km": null,
+          "streets": [
+            {
+              "name": "CHARAMBE"
+            },
+            {
+              "name": "FIRE"
+            },
+            {
+              "name": "MFAUME"
+            }
+          ]
+        },
+        {
+          "name": "UPANGA MASHARIKI",
+          "km": null,
+          "streets": [
+            {
+              "name": "KIBASILA"
+            },
+            {
+              "name": "KITONGA"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "KIGAMBONI",
+      "wards": [
+        {
+          "name": "KIBADA",
+          "km": null,
+          "streets": [
+            {
+              "name": "KICHANGANI"
+            },
+            {
+              "name": "KIFURUKWE"
+            },
+            {
+              "name": "KIZIZA"
+            },
+            {
+              "name": "NYAKWALE"
+            },
+            {
+              "name": "SOKONI"
+            },
+            {
+              "name": "UVUMBA"
+            }
+          ]
+        },
+        {
+          "name": "KIGAMBONI",
+          "km": null,
+          "streets": [
+            {
+              "name": "FERRY"
+            },
+            {
+              "name": "KIGAMBONI"
+            },
+            {
+              "name": "TUAMOYO"
+            }
+          ]
+        },
+        {
+          "name": "KIMBIJI",
+          "km": null,
+          "streets": [
+            {
+              "name": "GOLANI"
+            },
+            {
+              "name": "KIJAKA"
+            },
+            {
+              "name": "KIZITO HUONJWA"
+            },
+            {
+              "name": "KWA CHALE"
+            },
+            {
+              "name": "MIKENGE"
+            },
+            {
+              "name": "NGOBANYA"
+            }
+          ]
+        },
+        {
+          "name": "KISARAWE II",
+          "km": null,
+          "streets": [
+            {
+              "name": "KICHANGANI"
+            },
+            {
+              "name": "KIGOGO"
+            },
+            {
+              "name": "LINGATO"
+            },
+            {
+              "name": "MADEGE"
+            },
+            {
+              "name": "MKAMBA"
+            },
+            {
+              "name": "MWANINGA"
+            },
+            {
+              "name": "MWASONGA"
+            },
+            {
+              "name": "NGOMA MAPINDUZI"
+            },
+            {
+              "name": "SHARIFU"
+            },
+            {
+              "name": "TUMAINI"
+            },
+            {
+              "name": "VUMILIA UKOONI"
+            }
+          ]
+        },
+        {
+          "name": "MJIMWEMA",
+          "km": null,
+          "streets": [
+            {
+              "name": "KIBUGUMO"
+            },
+            {
+              "name": "MAWENI"
+            },
+            {
+              "name": "MJIMWEMA"
+            },
+            {
+              "name": "UNGINDONI"
+            }
+          ]
+        },
+        {
+          "name": "PEMBAMNAZI",
+          "km": null,
+          "streets": [
+            {
+              "name": "BUYUNI CENTRE"
+            },
+            {
+              "name": "CHAMBEWA"
+            },
+            {
+              "name": "GULUBWIDA"
+            },
+            {
+              "name": "KIBUNGO"
+            },
+            {
+              "name": "KICHANGANI"
+            },
+            {
+              "name": "KWA MORISI"
+            },
+            {
+              "name": "MAHENGE"
+            },
+            {
+              "name": "MTIMWEUPE"
+            },
+            {
+              "name": "MUHIMBILI"
+            },
+            {
+              "name": "NYANGE"
+            },
+            {
+              "name": "PEMBA CENTRE"
+            },
+            {
+              "name": "POTEA"
+            },
+            {
+              "name": "PU CENTRE"
+            },
+            {
+              "name": "SONGANI CENTRE"
+            },
+            {
+              "name": "TUNDWI CENTRE"
+            }
+          ]
+        },
+        {
+          "name": "SOMANGILA",
+          "km": null,
+          "streets": [
+            {
+              "name": "BAMBA"
+            },
+            {
+              "name": "DEGE"
+            },
+            {
+              "name": "KICHANGANI"
+            },
+            {
+              "name": "KIZANI"
+            },
+            {
+              "name": "MALIMBIKA"
+            },
+            {
+              "name": "MBWAMAJI"
+            },
+            {
+              "name": "MINONDO"
+            },
+            {
+              "name": "MKWAJUNI"
+            },
+            {
+              "name": "MWANZO MGUMU"
+            },
+            {
+              "name": "MWERA"
+            },
+            {
+              "name": "SARA"
+            },
+            {
+              "name": "SHIRIKISHO"
+            },
+            {
+              "name": "VISIKINI"
+            }
+          ]
+        },
+        {
+          "name": "TUNGI",
+          "km": null,
+          "streets": [
+            {
+              "name": "MAGOGONI"
+            },
+            {
+              "name": "MUUNGANO"
+            },
+            {
+              "name": "TUNGI"
+            }
+          ]
+        },
+        {
+          "name": "VIJIBWENI",
+          "km": null,
+          "streets": [
+            {
+              "name": "KIBENE"
+            },
+            {
+              "name": "KISIWANI"
+            },
+            {
+              "name": "MAJENGO"
+            },
+            {
+              "name": "MKWAJUNI"
+            },
+            {
+              "name": "UPENDO"
+            },
+            {
+              "name": "VIJIBWENI"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "KINONDONI",
+      "wards": [
+        {
+          "name": "BUNJU",
+          "km": null,
+          "streets": [
+            {
+              "name": "BOKO"
+            },
+            {
+              "name": "BUNJU \"A\""
+            },
+            {
+              "name": "BUSIHAYA"
+            },
+            {
+              "name": "DOVYA"
+            },
+            {
+              "name": "KILUNGULE"
+            },
+            {
+              "name": "MKOANI"
+            }
+          ]
+        },
+        {
+          "name": "HANANASIF",
+          "km": null,
+          "streets": [
+            {
+              "name": "HANANASIF"
+            },
+            {
+              "name": "KAWAWA"
+            },
+            {
+              "name": "KISUTU"
+            },
+            {
+              "name": "MKUNGUNI A"
+            },
+            {
+              "name": "MKUNGUNI B"
+            }
+          ]
+        },
+        {
+          "name": "KAWE",
+          "km": null,
+          "streets": [
+            {
+              "name": "MBEZI  BEACH  \"A\""
+            },
+            {
+              "name": "MBEZI  BEACH  \"B\""
+            },
+            {
+              "name": "MZIMUNI"
+            },
+            {
+              "name": "UKWAMANI"
+            }
+          ]
+        },
+        {
+          "name": "KIGOGO",
+          "km": null,
+          "streets": [
+            {
+              "name": "KIGOGO KATI"
+            },
+            {
+              "name": "KIGOGO MBUYUNI"
+            },
+            {
+              "name": "KIGOGO MKWAJUNI"
+            }
+          ]
+        },
+        {
+          "name": "KIJITONYAMA",
+          "km": null,
+          "streets": [
+            {
+              "name": "ALIMAUA \"A\""
+            },
+            {
+              "name": "ALIMAUA \"B\""
+            },
+            {
+              "name": "BWAWANI"
+            },
+            {
+              "name": "KIJITONYAMA"
+            },
+            {
+              "name": "MPAKANI \"A\""
+            },
+            {
+              "name": "MPAKANI \"B\""
+            },
+            {
+              "name": "MWENGE"
+            },
+            {
+              "name": "NZASA"
+            }
+          ]
+        },
+        {
+          "name": "KINONDONI",
+          "km": null,
+          "streets": [
+            {
+              "name": "ADA ESTATE"
+            },
+            {
+              "name": "KINONDONI MJINI"
+            },
+            {
+              "name": "KINONDONI SHAMBA"
+            },
+            {
+              "name": "KUMBUKUMBU"
+            }
+          ]
+        },
+        {
+          "name": "KUNDUCHI",
+          "km": null,
+          "streets": [
+            {
+              "name": "KILONGAWIMA"
+            },
+            {
+              "name": "KONDO"
+            },
+            {
+              "name": "MTONGANI"
+            },
+            {
+              "name": "PWANI"
+            },
+            {
+              "name": "TEGETA"
+            },
+            {
+              "name": "UNUNIO"
+            }
+          ]
+        },
+        {
+          "name": "MABWEPANDE",
+          "km": null,
+          "streets": [
+            {
+              "name": "BUNJU \"B'"
+            },
+            {
+              "name": "KIHONZILE"
+            },
+            {
+              "name": "MABWE PANDE"
+            },
+            {
+              "name": "MBOPO"
+            },
+            {
+              "name": "MJIMPYA"
+            }
+          ]
+        },
+        {
+          "name": "MAGOMENI",
+          "km": null,
+          "streets": [
+            {
+              "name": "DOSSI"
+            },
+            {
+              "name": "IDRISA"
+            },
+            {
+              "name": "MAKUTI \"A\""
+            },
+            {
+              "name": "MAKUTI \"B\""
+            },
+            {
+              "name": "SUNA"
+            }
+          ]
+        },
+        {
+          "name": "MAKONGO",
+          "km": null,
+          "streets": [
+            {
+              "name": "CHANGANYIKENI"
+            },
+            {
+              "name": "MAKONGO"
+            },
+            {
+              "name": "MBUYUNI"
+            },
+            {
+              "name": "MLALAKUWA"
+            }
+          ]
+        },
+        {
+          "name": "MAKUMBUSHO",
+          "km": null,
+          "streets": [
+            {
+              "name": "KISIWANI"
+            },
+            {
+              "name": "MAKUMBUSHO"
+            },
+            {
+              "name": "MBUYUNI"
+            },
+            {
+              "name": "MCHANGANI"
+            },
+            {
+              "name": "MINAZINI"
+            },
+            {
+              "name": "SINGANO"
+            }
+          ]
+        },
+        {
+          "name": "MBEZI JUU",
+          "km": null,
+          "streets": [
+            {
+              "name": "JOGOO"
+            },
+            {
+              "name": "MBEZI JUU"
+            },
+            {
+              "name": "MBEZI KATI"
+            },
+            {
+              "name": "MBEZI MTONI"
+            },
+            {
+              "name": "NDUMBWI"
+            }
+          ]
+        },
+        {
+          "name": "MBWENI",
+          "km": null,
+          "streets": [
+            {
+              "name": "MALINDI ESTATE"
+            },
+            {
+              "name": "MAPUTO"
+            },
+            {
+              "name": "MBWENI"
+            },
+            {
+              "name": "MPIJI MBWENI"
+            },
+            {
+              "name": "TETA"
+            }
+          ]
+        },
+        {
+          "name": "MIKOCHENI",
+          "km": null,
+          "streets": [
+            {
+              "name": "ALLY H. MWINYI"
+            },
+            {
+              "name": "DARAJANI"
+            },
+            {
+              "name": "MIKOCHENI \"A\""
+            },
+            {
+              "name": "MIKOCHENI \"B\""
+            },
+            {
+              "name": "REGENT ESTATE"
+            },
+            {
+              "name": "TPDC"
+            }
+          ]
+        },
+        {
+          "name": "MSASANI",
+          "km": null,
+          "streets": [
+            {
+              "name": "BONDE LA MPUNGA"
+            },
+            {
+              "name": "MAKANGIRA"
+            },
+            {
+              "name": "MASAKI"
+            },
+            {
+              "name": "MIKOROSHONI"
+            },
+            {
+              "name": "OYSTERBAY"
+            }
+          ]
+        },
+        {
+          "name": "MWANANYAMALA",
+          "km": null,
+          "streets": [
+            {
+              "name": "BWAWANI"
+            },
+            {
+              "name": "KAMBANGWA"
+            },
+            {
+              "name": "KWA KOPA"
+            },
+            {
+              "name": "MSISIRI \"A\""
+            },
+            {
+              "name": "MSISIRI \"B\""
+            },
+            {
+              "name": "MSOLOMI"
+            },
+            {
+              "name": "MWINJUMA"
+            }
+          ]
+        },
+        {
+          "name": "MZIMUNI",
+          "km": null,
+          "streets": [
+            {
+              "name": "IDRISA"
+            },
+            {
+              "name": "MAKUMBUSHO"
+            },
+            {
+              "name": "MTAMBANI"
+            },
+            {
+              "name": "MWINYIMKUU"
+            }
+          ]
+        },
+        {
+          "name": "NDUGUMBI",
+          "km": null,
+          "streets": [
+            {
+              "name": "MAKANYA"
+            },
+            {
+              "name": "MIKOROSHINI"
+            },
+            {
+              "name": "MPAKANI"
+            },
+            {
+              "name": "VIGAENI"
+            }
+          ]
+        },
+        {
+          "name": "TANDALE",
+          "km": null,
+          "streets": [
+            {
+              "name": "KWA TUMBO"
+            },
+            {
+              "name": "MKUNDUGE"
+            },
+            {
+              "name": "MTOGOLE"
+            },
+            {
+              "name": "MUHALTANI"
+            },
+            {
+              "name": "PAKACHA"
+            },
+            {
+              "name": "SOKONI"
+            }
+          ]
+        },
+        {
+          "name": "WAZO",
+          "km": null,
+          "streets": [
+            {
+              "name": "KILIMAHEWA"
+            },
+            {
+              "name": "KILIMAHEWA JUU"
+            },
+            {
+              "name": "KISANGA"
+            },
+            {
+              "name": "MADALE"
+            },
+            {
+              "name": "MIVUMONI"
+            },
+            {
+              "name": "NAKASANGWE"
+            },
+            {
+              "name": "SALASALA"
+            },
+            {
+              "name": "WAZO"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "TEMEKE",
+      "wards": [
+        {
+          "name": "AZIMIO",
+          "km": null,
+          "streets": [
+            {
+              "name": "AZIMIO KASKAZINI"
+            },
+            {
+              "name": "AZIMIO KUSINI"
+            },
+            {
+              "name": "KICHANGANI"
+            },
+            {
+              "name": "MBUYUNI"
+            },
+            {
+              "name": "MJI MPYA"
+            },
+            {
+              "name": "MTONGANI"
+            },
+            {
+              "name": "MTONI UNGUJA"
+            },
+            {
+              "name": "TAMBUKARELI"
+            }
+          ]
+        },
+        {
+          "name": "BUZA",
+          "km": null,
+          "streets": [
+            {
+              "name": "AMANI"
+            },
+            {
+              "name": "BUZA"
+            },
+            {
+              "name": "KIDAGAA"
+            },
+            {
+              "name": "MASHINE YA MAJI"
+            },
+            {
+              "name": "MJI MPYA"
+            }
+          ]
+        },
+        {
+          "name": "CHAMAZI",
+          "km": null,
+          "streets": [
+            {
+              "name": "DOVYA"
+            },
+            {
+              "name": "KIPONZA"
+            },
+            {
+              "name": "KISEWE"
+            },
+            {
+              "name": "MAGENGENI"
+            },
+            {
+              "name": "MKONDOGWA"
+            },
+            {
+              "name": "MSUFINI"
+            },
+            {
+              "name": "MWEMBEBAMIA"
+            },
+            {
+              "name": "RUFU"
+            },
+            {
+              "name": "VIGOA"
+            }
+          ]
+        },
+        {
+          "name": "CHANG’OMBE",
+          "km": null,
+          "streets": [
+            {
+              "name": "BORA"
+            },
+            {
+              "name": "CHANG'OMBE \"A\""
+            },
+            {
+              "name": "CHANG'OMBE \"B\""
+            },
+            {
+              "name": "TOROLI"
+            }
+          ]
+        },
+        {
+          "name": "CHARAMBE",
+          "km": null,
+          "streets": [
+            {
+              "name": "KURASINI MJI MPYA"
+            },
+            {
+              "name": "MACHINJIONI A"
+            },
+            {
+              "name": "NZASA \"B\""
+            },
+            {
+              "name": "RANGI TATU"
+            }
+          ]
+        },
+        {
+          "name": "KEKO",
+          "km": null,
+          "streets": [
+            {
+              "name": "KEKO \"B\""
+            },
+            {
+              "name": "KEKO MAGURUMBASI \"A\""
+            },
+            {
+              "name": "KEKO MAGURUMBASI \"B\""
+            },
+            {
+              "name": "KEKO MWANGA \"A\""
+            },
+            {
+              "name": "KEKO MWANGA \"B\""
+            }
+          ]
+        },
+        {
+          "name": "KIBONDEMAJI",
+          "km": null,
+          "streets": [
+            {
+              "name": "KIBONDEMAJI A"
+            },
+            {
+              "name": "KIMBANGULILE"
+            },
+            {
+              "name": "MAJIMATITU"
+            },
+            {
+              "name": "MCHIKICHINI"
+            }
+          ]
+        },
+        {
+          "name": "KIBURUGWA",
+          "km": null,
+          "streets": [
+            {
+              "name": "BARABARA YA MWINYI"
+            },
+            {
+              "name": "JUHUDI"
+            },
+            {
+              "name": "KIBURUGWA"
+            },
+            {
+              "name": "KIBURUGWA NAMBA3"
+            },
+            {
+              "name": "KINGUGI"
+            },
+            {
+              "name": "KWANYOKA"
+            }
+          ]
+        },
+        {
+          "name": "KIJICHI",
+          "km": null,
+          "streets": [
+            {
+              "name": "BUTIAMA"
+            },
+            {
+              "name": "MGENI NANI"
+            },
+            {
+              "name": "MISHENI"
+            },
+            {
+              "name": "MTONI KIJICHI"
+            },
+            {
+              "name": "MWANAMTOTI"
+            }
+          ]
+        },
+        {
+          "name": "KILAKALA",
+          "km": null,
+          "streets": [
+            {
+              "name": "BARABARA YA MWINYI"
+            },
+            {
+              "name": "KIEMBESAMAKI"
+            },
+            {
+              "name": "KIGUNGA"
+            },
+            {
+              "name": "KILAKALA"
+            },
+            {
+              "name": "YOMBO RELI"
+            }
+          ]
+        },
+        {
+          "name": "KILUNGULE",
+          "km": null,
+          "streets": [
+            {
+              "name": "KILUNGULE"
+            },
+            {
+              "name": "KWA MZUNGU"
+            },
+            {
+              "name": "MAJIMATITU B"
+            },
+            {
+              "name": "NZASA A"
+            },
+            {
+              "name": "UZOMBOKONI"
+            }
+          ]
+        },
+        {
+          "name": "KURASINI",
+          "km": null,
+          "streets": [
+            {
+              "name": "KIUNGANI"
+            },
+            {
+              "name": "KURASINI"
+            },
+            {
+              "name": "MINAZINI"
+            },
+            {
+              "name": "MIVINJENI"
+            },
+            {
+              "name": "SHIMO LA UDONGO"
+            }
+          ]
+        },
+        {
+          "name": "MAKANGARAWE",
+          "km": null,
+          "streets": [
+            {
+              "name": "MAKANGARAWE"
+            },
+            {
+              "name": "MBONDE"
+            },
+            {
+              "name": "MSAKALA"
+            },
+            {
+              "name": "UWAZI"
+            },
+            {
+              "name": "YOMBO DOVYA"
+            }
+          ]
+        },
+        {
+          "name": "MBAGALA",
+          "km": null,
+          "streets": [
+            {
+              "name": "BUGHUDADI"
+            },
+            {
+              "name": "KIZINGA"
+            },
+            {
+              "name": "MANGAYA"
+            },
+            {
+              "name": "MBAGALA"
+            },
+            {
+              "name": "MORINGE"
+            },
+            {
+              "name": "SERENGE"
+            }
+          ]
+        },
+        {
+          "name": "MBAGALA KUU",
+          "km": null,
+          "streets": [
+            {
+              "name": "JESHI LA WOKOVU"
+            },
+            {
+              "name": "KIBONDE MAJI \"B\""
+            },
+            {
+              "name": "KICHEMCHEM"
+            },
+            {
+              "name": "KIZUIANI"
+            },
+            {
+              "name": "MAKUKA KASKAZINI"
+            },
+            {
+              "name": "MAKUKA KUSINI"
+            },
+            {
+              "name": "MBAGALA KUU KASKAZINI"
+            },
+            {
+              "name": "MBAGALA KUU MAGHARIBI"
+            },
+            {
+              "name": "MBAGALA KUU MASHARIKI"
+            },
+            {
+              "name": "MPAKANI"
+            }
+          ]
+        },
+        {
+          "name": "MIANZINI",
+          "km": null,
+          "streets": [
+            {
+              "name": "MACHINJIONI"
+            },
+            {
+              "name": "MAJIMATITU A"
+            },
+            {
+              "name": "MIANZINI"
+            },
+            {
+              "name": "MPONDA"
+            }
+          ]
+        },
+        {
+          "name": "MIBURANI",
+          "km": null,
+          "streets": [
+            {
+              "name": "KEKO MACHUNGWA"
+            },
+            {
+              "name": "MGULANI (KEKO JUU)"
+            },
+            {
+              "name": "MIBURANI"
+            },
+            {
+              "name": "UWANJA WA TAIFA"
+            },
+            {
+              "name": "WAILES"
+            }
+          ]
+        },
+        {
+          "name": "MTONI",
+          "km": null,
+          "streets": [
+            {
+              "name": "BOKORANI"
+            },
+            {
+              "name": "BUSTANI"
+            },
+            {
+              "name": "CHAUREMBO"
+            },
+            {
+              "name": "MTONI"
+            },
+            {
+              "name": "RELINI"
+            },
+            {
+              "name": "SABASABA"
+            }
+          ]
+        },
+        {
+          "name": "SANDALI",
+          "km": null,
+          "streets": [
+            {
+              "name": "KIMBUNGA"
+            },
+            {
+              "name": "KISIWANI"
+            },
+            {
+              "name": "MAMBOLEO \"A\""
+            },
+            {
+              "name": "MAMBOLEO \"B\""
+            },
+            {
+              "name": "MKWIDA"
+            },
+            {
+              "name": "MPOGO"
+            },
+            {
+              "name": "MWEMBELADU"
+            },
+            {
+              "name": "MWEMBEMNOFU"
+            },
+            {
+              "name": "SANDALI"
+            },
+            {
+              "name": "TINDWA"
+            },
+            {
+              "name": "USALAMA"
+            },
+            {
+              "name": "VETERINARY"
+            }
+          ]
+        },
+        {
+          "name": "TANDIKA",
+          "km": null,
+          "streets": [
+            {
+              "name": "KILIMAHEWA"
+            },
+            {
+              "name": "MABATINI"
+            },
+            {
+              "name": "MAGURUWE"
+            },
+            {
+              "name": "NYAMBWERA"
+            },
+            {
+              "name": "TAMLA"
+            },
+            {
+              "name": "TANDIKA"
+            }
+          ]
+        },
+        {
+          "name": "TEMEKE",
+          "km": null,
+          "streets": [
+            {
+              "name": "MAGANGA"
+            },
+            {
+              "name": "MATUMBI"
+            },
+            {
+              "name": "NJARO"
+            },
+            {
+              "name": "TEMEKE"
+            }
+          ]
+        },
+        {
+          "name": "TOANGOMA",
+          "km": null,
+          "streets": [
+            {
+              "name": "CHANGANYIKENI"
+            },
+            {
+              "name": "GOROKA 'A'"
+            },
+            {
+              "name": "GOROKA 'B'"
+            },
+            {
+              "name": "KONGOWE"
+            },
+            {
+              "name": "MALELA"
+            },
+            {
+              "name": "MASAKI"
+            },
+            {
+              "name": "MASULIZA"
+            },
+            {
+              "name": "MIKWAMBE"
+            },
+            {
+              "name": "MWAPEMBA"
+            },
+            {
+              "name": "MZINGA 'A'"
+            },
+            {
+              "name": "MZINGA 'B'"
+            },
+            {
+              "name": "PONDE"
+            },
+            {
+              "name": "TOANGOMA"
+            },
+            {
+              "name": "VIKUNAI"
+            }
+          ]
+        },
+        {
+          "name": "YOMBO VITUKA",
+          "km": null,
+          "streets": [
+            {
+              "name": "MACHIMBO"
+            },
+            {
+              "name": "MAGOGONI"
+            },
+            {
+              "name": "MZAMBARAUNI"
+            },
+            {
+              "name": "SIGARA"
+            },
+            {
+              "name": "YOMBO VITUKA"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "UBUNGO",
+      "wards": [
+        {
+          "name": "GOBA",
+          "km": null,
+          "streets": [
+            {
+              "name": "GOBA"
+            },
+            {
+              "name": "KIBULULU"
+            },
+            {
+              "name": "KINZUDI"
+            },
+            {
+              "name": "KULANGWA"
+            },
+            {
+              "name": "KUNGURU"
+            },
+            {
+              "name": "MATOSA"
+            },
+            {
+              "name": "MUUNGANO"
+            },
+            {
+              "name": "TEGETA A"
+            }
+          ]
+        },
+        {
+          "name": "KIBAMBA",
+          "km": null,
+          "streets": [
+            {
+              "name": "GOGONI"
+            },
+            {
+              "name": "HONDOGO"
+            },
+            {
+              "name": "KIBAMBA"
+            },
+            {
+              "name": "KIBWEGERE"
+            },
+            {
+              "name": "KILUVYA"
+            }
+          ]
+        },
+        {
+          "name": "KIMARA",
+          "km": null,
+          "streets": [
+            {
+              "name": "BARUTI"
+            },
+            {
+              "name": "GOLANI"
+            },
+            {
+              "name": "KILUNGULE  \"B\""
+            },
+            {
+              "name": "KILUNGULE \"A\""
+            },
+            {
+              "name": "KIMARA BARUTI"
+            },
+            {
+              "name": "MAVURUNZA"
+            }
+          ]
+        },
+        {
+          "name": "KWEMBE",
+          "km": null,
+          "streets": [
+            {
+              "name": "KING'AZI"
+            },
+            {
+              "name": "KING'AZI B"
+            },
+            {
+              "name": "KISOPWA"
+            },
+            {
+              "name": "KWEMBE"
+            },
+            {
+              "name": "LUGURUNI"
+            },
+            {
+              "name": "MJIMPYA"
+            },
+            {
+              "name": "MLONGAZILA"
+            },
+            {
+              "name": "MPAKANI"
+            },
+            {
+              "name": "MSAKUZI"
+            },
+            {
+              "name": "NJETENI"
+            }
+          ]
+        },
+        {
+          "name": "MABIBO",
+          "km": null,
+          "streets": [
+            {
+              "name": "AZIMIO"
+            },
+            {
+              "name": "JITEGEMEE"
+            },
+            {
+              "name": "KANUNI"
+            },
+            {
+              "name": "MABIBO"
+            },
+            {
+              "name": "MABIBO FARASI"
+            },
+            {
+              "name": "MATOKEO"
+            }
+          ]
+        },
+        {
+          "name": "MAKUBURI",
+          "km": null,
+          "streets": [
+            {
+              "name": "KAJIMA"
+            },
+            {
+              "name": "KIBANGU"
+            },
+            {
+              "name": "MAKOKA"
+            },
+            {
+              "name": "MAKUBURI KIBANGU"
+            },
+            {
+              "name": "MWONGOZO"
+            }
+          ]
+        },
+        {
+          "name": "MAKURUMLA",
+          "km": null,
+          "streets": [
+            {
+              "name": "KAGERA"
+            },
+            {
+              "name": "KILIMAHEWA"
+            },
+            {
+              "name": "KIMAMBA"
+            },
+            {
+              "name": "KWA JONGO"
+            },
+            {
+              "name": "MIANZINI"
+            },
+            {
+              "name": "SISI KWA SISI"
+            }
+          ]
+        },
+        {
+          "name": "MANZESE",
+          "km": null,
+          "streets": [
+            {
+              "name": "CHAKULA BORA"
+            },
+            {
+              "name": "KILIMANI"
+            },
+            {
+              "name": "MFEREJINI"
+            },
+            {
+              "name": "MIDIZINI"
+            },
+            {
+              "name": "MNAZI MMOJA"
+            },
+            {
+              "name": "MUUNGANO"
+            },
+            {
+              "name": "MVULENI"
+            },
+            {
+              "name": "MWEMBENI"
+            },
+            {
+              "name": "TUPENDANE"
+            },
+            {
+              "name": "UZURI"
+            }
+          ]
+        },
+        {
+          "name": "MBEZI",
+          "km": null,
+          "streets": [
+            {
+              "name": "LUIS"
+            },
+            {
+              "name": "MAKABE"
+            },
+            {
+              "name": "MBEZI LUIS"
+            },
+            {
+              "name": "MPIJI MAGOHE"
+            },
+            {
+              "name": "MSAKUZI"
+            },
+            {
+              "name": "MSAKUZI KUSINI"
+            },
+            {
+              "name": "MSHIKAMANO"
+            },
+            {
+              "name": "MSUMI"
+            }
+          ]
+        },
+        {
+          "name": "MBURAHATI",
+          "km": null,
+          "streets": [
+            {
+              "name": "BARAFU"
+            },
+            {
+              "name": "KISIWANI"
+            },
+            {
+              "name": "NATIONAL HOUSING CORP"
+            }
+          ]
+        },
+        {
+          "name": "MSIGANI",
+          "km": null,
+          "streets": [
+            {
+              "name": "KWA YUSUPH"
+            },
+            {
+              "name": "MALAMBA MAWILI"
+            },
+            {
+              "name": "MSIGANI"
+            },
+            {
+              "name": "MSINGWA"
+            },
+            {
+              "name": "TEMBONI"
+            }
+          ]
+        },
+        {
+          "name": "SARANGA",
+          "km": null,
+          "streets": [
+            {
+              "name": "KIMARA\"B\""
+            },
+            {
+              "name": "KING'ONGO"
+            },
+            {
+              "name": "MATANGINI"
+            },
+            {
+              "name": "MICHUNGWANI"
+            },
+            {
+              "name": "MJI MPYA"
+            },
+            {
+              "name": "SARANGA"
+            },
+            {
+              "name": "STOP OVER"
+            },
+            {
+              "name": "UKOMBOZI"
+            },
+            {
+              "name": "UPENDO"
+            }
+          ]
+        },
+        {
+          "name": "SINZA",
+          "km": null,
+          "streets": [
+            {
+              "name": "SINZA \"A\""
+            },
+            {
+              "name": "SINZA \"B\""
+            },
+            {
+              "name": "SINZA \"C\""
+            },
+            {
+              "name": "SINZA \"D\""
+            },
+            {
+              "name": "SINZA \"E\""
+            }
+          ]
+        },
+        {
+          "name": "UBUNGO",
+          "km": null,
+          "streets": [
+            {
+              "name": "CHUO KIKUU"
+            },
+            {
+              "name": "KIBO"
+            },
+            {
+              "name": "KISIWANI"
+            },
+            {
+              "name": "MSEWE"
+            },
+            {
+              "name": "NATIONAL HOUSING CORP."
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "meta": {
+    "source": "dar-es-salaam-updated.csv",
+    "generated_at": "2025-10-07T20:52:10.369125+00:00Z",
+    "columns_detected": [
+      "region",
+      "regioncode",
+      "district",
+      "districtcode",
+      "ward",
+      "wardcode",
+      "street",
+      "places",
+      "distance_from_keko_magurumbasi_km"
+    ]
+  }
+}

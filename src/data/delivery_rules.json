@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "generated_at": "2025-10-08T00:00:00Z",
+  "tiers": [
+    { "km_min": 0,  "km_max": 3,  "fee_tzs": 3000 },
+    { "km_min": 3,  "km_max": 7,  "fee_tzs": 5000 },
+    { "km_min": 7,  "km_max": 12, "fee_tzs": 7000 },
+    { "km_min": 12, "km_max": 20, "fee_tzs": 10000 },
+    { "km_min": 20, "km_max": 999, "fee_tzs": 15000 }
+  ],
+  "overrides": {
+    
+  },
+  "surcharges": [
+    
+  ]
+}
