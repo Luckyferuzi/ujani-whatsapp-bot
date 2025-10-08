@@ -119,8 +119,8 @@ function normalizePhone(s: string): string | null {
 
 async function sendMainMenu(to: string, lang: "sw" | "en") {
   const productsRows = [
-    { id: "product_kiboko", title: clampTitle("Ujani Kiboko"), description: clampDesc("120,000 TSh") },
-    { id: "product_furaha", title: clampTitle("Ujani Furaha"), description: clampDesc("85,000 TSh") },
+    { id: "product_kiboko", title: clampTitle("Ujani Kiboko"), description: clampDesc("140,000 TSh") },
+    { id: "product_furaha", title: clampTitle("Ujani Furaha"), description: clampDesc("110,000 TSh") },
     { id: "product_promax", title: clampTitle(productTitle("product_promax", lang)), description: clampDesc(promaxPackageTitle("promax_a", lang)) },
   ];
   const settingsRow = { id: "change_language", title: clampTitle(lang === "sw" ? "English 🇬🇧" : "Kiswahili 🇹🇿"), description: "" };
@@ -209,7 +209,7 @@ async function sendWardPickerAllDar(to: string, lang: "sw" | "en", pageIndex = 0
 
   await sendInteractiveList({
     to,
-    header: clampHeader(lang === "sw" ? "Chagua *Sehemu unayoishi*" : "Pick your ward"),
+    header: clampHeader(lang === "sw" ? "Chagua Sehemu unayoishi" : "Pick your ward"),
     body: clampBody(lang === "sw" ? "Chagua sehemu (KATA) unayoishi ndani ya Dar es Salaam." : "Choose your ward (within Dar es Salaam)."),
     buttonText: clampTitle(lang === "sw" ? "Fungua" : "Open"),
     sections: [{ title: clampSection(lang === "sw" ? "Kata (Sehemu)" : "Wards"), rows }],
