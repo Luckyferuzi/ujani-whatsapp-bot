@@ -1,161 +1,352 @@
 // src/orders.ts
-// Supports multi-item orders (cart) and single-item orders.
+// In-memory Orders store compatible with the current webhook + status routes.
+// - createOrder({ items, lang, customerPhone, customerName, addressStreet, addressCity, addressCountry })
+// - getOrder(orderId), updateOrderAddress, attachTxnMessage, attachTxnImage
+// - listOrders, getOrdersSnapshot, updateOrderStatus, setOrderNotes, __seedOrder
 
-import { productTitle, promaxPackageTitle, isProMaxPackageId } from './menu.js';
+import crypto from "crypto";
 
-export type OrderStatus = 'awaiting' | 'partial' | 'paid';
-export type Fulfillment = 'pickup' | 'delivery';
+// ----------------------------- Types ---------------------------------
 
-export type OrderItem = { productId: string; title: string; qty: number; priceTZS: number };
+export type Lang = "sw" | "en";
 
-export type Order = {
-  orderId: string;
-  items: OrderItem[];
-  productId?: string; // for backward compatibility
-  title: string;      // convenient display (single item or summary)
-  lang: 'en' | 'sw';
-  customerPhone: string;
-  contactPhone?: string;
-  fulfillment: Fulfillment;
-  totalTZS: number;
-  createdAt: string;
+export type OrderStatus =
+  | "created"
+  | "confirmed"
+  | "packed"
+  | "dispatched"
+  | "delivered"
+  | "closed"
+  | "cancelled";
 
-  customerName?: string;
-
-  addressStreet?: string;
-  addressCity?: string;
-  addressCountry?: string;
-
-  txnMessage?: string;
-  txnImageId?: string;
-  txnImageCaption?: string;
-};
-
-const ordersById = new Map<string, Order>();
-const paymentsByOrderId = new Map<string, number>();
-
-let seq = 0;
-function nextOrderId(): string {
-  const y = new Date().getFullYear();
-  seq = (seq + 1) % 10000;
-  const n = String(seq).padStart(4, '0');
-  return `UJANI-${y}-${n}`;
+export interface OrderItem {
+  productId: string;
+  title: string;
+  qty: number;
+  priceTZS: number;
 }
 
-export function createOrder(params: {
-  // Either provide items[] OR productId+title+price via totalTZS
-  items?: OrderItem[];
-  productId?: string;
-  lang: 'en' | 'sw';
-  customerPhone: string;
-  contactPhone?: string;
-  fulfillment: Fulfillment;
-  totalTZS?: number;       // used if single-item
+export interface OrderAttachmentMessage {
+  ts: number; // epoch ms
+  text: string;
+}
+
+export interface OrderAttachmentImage {
+  ts: number; // epoch ms
+  imageId: string; // WhatsApp media id
+  caption?: string;
+}
+
+export interface Order {
+  orderId: string;            // e.g., UJANI-2025-0001
+  status: OrderStatus;
+
+  lang: Lang;
+  currency: "TZS";
+
+  // Financials
+  subtotalTZS: number;        // products only (no delivery)
+  deliveryFeeTZS: number;     // aggregated from delivery line items
+  totalTZS: number;           // subtotal + delivery
+  paidTZS?: number;           // optional running total of received payments
+
+  // Items snapshot
+  items: OrderItem[];
+  title?: string;             // convenience title when a single main item
+
+  // Customer & address
+  customerPhone: string;      // WA id / phone
   customerName?: string;
   addressStreet?: string;
-  addressCity?: string;
-  addressCountry?: string;
-}): Order {
-  const orderId = nextOrderId();
+  addressWard?: string;
+  addressCity?: string;       // District for Inside Dar
+  addressCountry?: string;    // "Dar es Salaam" | "OUTSIDE_DAR" | ...
 
-  let items: OrderItem[] = params.items ?? [];
-  let title = '';
-  let total = 0;
-
-  if (!items.length && params.productId) {
-    // Single item
-    const t = isProMaxPackageId(params.productId)
-      ? `${productTitle('product_promax', params.lang)} — ${promaxPackageTitle(params.productId, params.lang)}`
-      : productTitle(params.productId, params.lang);
-    const price = Math.max(0, Math.floor(params.totalTZS ?? 0));
-    items = [{ productId: params.productId, title: t, qty: 1, priceTZS: price }];
-  }
-
-  total = items.reduce((s, it) => s + it.priceTZS * it.qty, 0);
-  title = items.length === 1 ? items[0].title : (params.lang === 'sw' ? `Bidhaa nyingi (${items.length})` : `Multiple items (${items.length})`);
-
-  const order: Order = {
-    orderId,
-    items,
-    productId: params.productId,
-    title,
-    lang: params.lang,
-    customerPhone: params.customerPhone,
-    contactPhone: params.contactPhone,
-    fulfillment: params.fulfillment,
-    totalTZS: total,
-    createdAt: new Date().toISOString(),
-    customerName: params.customerName,
-    addressStreet: params.addressStreet,
-    addressCity: params.addressCity,
-    addressCountry: params.addressCountry,
+  // Attachments (manual proof of payment etc.)
+  attachments?: {
+    messages: OrderAttachmentMessage[];
+    images: OrderAttachmentImage[];
   };
 
-  ordersById.set(orderId, order);
-  paymentsByOrderId.set(orderId, 0);
-  return order;
+  // Misc
+  notes?: string;
+  createdAt: number;
+  updatedAt: number;
+  requestId?: string;         // optional tracing id
 }
 
-function deriveStatus(total: number, paid: number): OrderStatus {
-  if (paid <= 0) return 'awaiting';
-  if (paid < total) return 'partial';
-  return 'paid';
+// ----------------------------- Store ---------------------------------
+
+const orders = new Map<string, Order>();
+
+let seqYear = new Date().getFullYear();
+let seqCounter = 0;
+
+function nextOrderId(): string {
+  const y = new Date().getFullYear();
+  if (y !== seqYear) {
+    seqYear = y;
+    seqCounter = 0;
+  }
+  seqCounter += 1;
+  return `UJANI-${y}-${String(seqCounter).padStart(4, "0")}`;
 }
 
-export function getOrder(orderId: string): (Order & {
-  status: OrderStatus;
-  paidTZS: number;
-  balanceTZS: number;
-}) | undefined {
-  const o = ordersById.get(orderId);
-  if (!o) return undefined;
-  const paid = Math.max(0, Math.floor(paymentsByOrderId.get(orderId) ?? 0));
-  const balance = Math.max(0, o.totalTZS - paid);
-  const status = deriveStatus(o.totalTZS, paid);
-  return { ...o, status, paidTZS: paid, balanceTZS: balance };
+// --------------------------- Calculations -----------------------------
+
+function isDeliveryLine(it: OrderItem): boolean {
+  const id = (it.productId || "").toLowerCase();
+  return id === "delivery_fee" || id.startsWith("delivery");
 }
 
-export function listOrders(): Array<Order & {
-  status: OrderStatus;
-  paidTZS: number;
-  balanceTZS: number;
-}> {
-  return Array.from(ordersById.values()).map(o => {
-    const paid = Math.max(0, Math.floor(paymentsByOrderId.get(o.orderId) ?? 0));
-    const balance = Math.max(0, o.totalTZS - paid);
-    const status = deriveStatus(o.totalTZS, paid);
-    return { ...o, status, paidTZS: paid, balanceTZS: balance };
+function computeTotals(items: OrderItem[]): {
+  subtotalTZS: number;
+  deliveryFeeTZS: number;
+  totalTZS: number;
+} {
+  let subtotal = 0;
+  let delivery = 0;
+  for (const it of items) {
+    const line = Math.max(0, Math.round((it.priceTZS || 0) * (it.qty || 0)));
+    if (isDeliveryLine(it)) delivery += line;
+    else subtotal += line;
+  }
+  return { subtotalTZS: subtotal, deliveryFeeTZS: delivery, totalTZS: subtotal + delivery };
+}
+
+// --------------------------- Public API --------------------------------
+
+/**
+ * Create an order from caller-provided items and lightweight customer/address fields.
+ * NOTE: Delivery can be passed either as a separate line item (recommended),
+ *       or you can omit it and handle delivery externally.
+ */
+export function createOrder(input: {
+  items: OrderItem[];
+  lang: Lang;
+  customerPhone: string;
+  customerName?: string;
+  addressStreet?: string;
+  addressWard?: string;
+  addressCity?: string;
+  addressCountry?: string;
+  requestId?: string;
+}): Order {
+  const items = (input.items || []).map((i) => ({
+    productId: i.productId,
+    title: i.title,
+    qty: Math.max(1, Math.round(i.qty || 1)),
+    priceTZS: Math.max(0, Math.round(i.priceTZS || 0)),
+  }));
+
+  const { subtotalTZS, deliveryFeeTZS, totalTZS } = computeTotals(items);
+  const singleMainItem = items.filter((i) => !isDeliveryLine(i));
+  const title = singleMainItem.length === 1 ? singleMainItem[0].title : undefined;
+
+  const order: Order = {
+    orderId: nextOrderId(),
+    status: "created",
+    lang: input.lang === "en" ? "en" : "sw",
+    currency: "TZS",
+
+    subtotalTZS,
+    deliveryFeeTZS,
+    totalTZS,
+    paidTZS: 0,
+
+    items,
+    title,
+
+    customerPhone: input.customerPhone,
+    customerName: input.customerName,
+    addressStreet: input.addressStreet,
+    addressWard: input.addressWard,
+    addressCity: input.addressCity,
+    addressCountry: input.addressCountry,
+
+    attachments: { messages: [], images: [] },
+
+    notes: undefined,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    requestId: input.requestId,
+  };
+
+  orders.set(order.orderId, order);
+  return clone(order);
+}
+
+/** Read an order by id (alias for getOrderById). */
+export function getOrder(orderId: string): Order | null {
+  return getOrderById(orderId);
+}
+
+/** Read an order by id. */
+export function getOrderById(orderId: string): Order | null {
+  const o = orders.get((orderId || "").trim());
+  return o ? clone(o) : null;
+}
+
+/** Update the free-form address text (used by "Edit Address" flow). */
+export function updateOrderAddress(orderId: string, addressText: string): Order | null {
+  const o = orders.get((orderId || "").trim());
+  if (!o) return null;
+  const text = (addressText || "").trim();
+  if (text) o.addressStreet = text;
+  o.updatedAt = Date.now();
+  return clone(o);
+}
+
+/** Attach the payer's textual proof (free-form). */
+export function attachTxnMessage(orderId: string, text: string): Order | null {
+  const o = orders.get((orderId || "").trim());
+  if (!o) return null;
+  const msg: OrderAttachmentMessage = { ts: Date.now(), text: (text || "").trim() };
+  if (!o.attachments) o.attachments = { messages: [], images: [] };
+  o.attachments.messages.push(msg);
+  o.updatedAt = Date.now();
+  return clone(o);
+}
+
+/** Attach a screenshot/image proof (WhatsApp media id + caption). */
+export function attachTxnImage(orderId: string, imageId: string, caption?: string): Order | null {
+  const o = orders.get((orderId || "").trim());
+  if (!o) return null;
+  const img: OrderAttachmentImage = { ts: Date.now(), imageId: (imageId || "").trim(), caption: (caption || "").trim() || undefined };
+  if (!o.attachments) o.attachments = { messages: [], images: [] };
+  o.attachments.images.push(img);
+  o.updatedAt = Date.now();
+  return clone(o);
+}
+
+/** Update order status (guarding terminal states lightly). */
+export function updateOrderStatus(orderId: string, next: OrderStatus): Order | null {
+  const o = orders.get((orderId || "").trim());
+  if (!o) return null;
+
+  const terminal: OrderStatus[] = ["closed", "cancelled"];
+  if (terminal.includes(o.status)) return clone(o);
+
+  const valid: OrderStatus[] = [
+    "created", "confirmed", "packed", "dispatched", "delivered", "closed", "cancelled",
+  ];
+  if (!valid.includes(next)) return clone(o);
+
+  o.status = next;
+  o.updatedAt = Date.now();
+  return clone(o);
+}
+
+/** Set/replace order notes (admin or agent). */
+export function setOrderNotes(orderId: string, notes: string): Order | null {
+  const o = orders.get((orderId || "").trim());
+  if (!o) return null;
+  o.notes = (notes || "").trim();
+  o.updatedAt = Date.now();
+  return clone(o);
+}
+
+/** List orders with optional filters. */
+export function listOrders(filter?: {
+  userId?: string; // alias: customerPhone
+  status?: OrderStatus;
+  since?: number; // epoch ms
+  until?: number; // epoch ms
+}): Order[] {
+  const arr = Array.from(orders.values());
+  const out = arr.filter((o) => {
+    if (filter?.userId && o.customerPhone !== filter.userId) return false;
+    if (filter?.status && o.status !== filter.status) return false;
+    if (filter?.since && o.createdAt < filter.since) return false;
+    if (filter?.until && o.createdAt > filter.until) return false;
+    return true;
   });
+  out.sort((a, b) => b.createdAt - a.createdAt);
+  return out.map(clone);
 }
 
-export function updateOrderAddress(orderId: string, street: string, city: string, country: string) {
-  const o = ordersById.get(orderId);
-  if (!o) return undefined;
-  o.addressStreet = street;
-  o.addressCity = city;
-  o.addressCountry = country;
-  return getOrder(orderId);
+/** Compact snapshot for dashboards/tables. */
+export function getOrdersSnapshot(): Array<{
+  orderId: string;
+  userId: string;
+  status: OrderStatus;
+  subtotal: number;
+  deliveryFee: number;
+  total: number;
+  createdAt: number;
+  district?: string;
+  ward?: string;
+  street?: string;
+  distanceKm?: number; // optional if you choose to populate it elsewhere
+}> {
+  const data = Array.from(orders.values()).map((o) => ({
+    orderId: o.orderId,
+    userId: o.customerPhone,
+    status: o.status,
+    subtotal: o.subtotalTZS,
+    deliveryFee: o.deliveryFeeTZS,
+    total: o.totalTZS,
+    createdAt: o.createdAt,
+    district: o.addressCity,
+    ward: o.addressWard,
+    street: o.addressStreet,
+    distanceKm: undefined,
+  }));
+  data.sort((a, b) => b.createdAt - a.createdAt);
+  return data;
 }
 
-export function attachTxnMessage(orderId: string, msg: string) {
-  const o = ordersById.get(orderId);
-  if (!o) return undefined;
-  o.txnMessage = msg;
-  return getOrder(orderId);
+// --------------------------- Dev / Testing -------------------------------
+
+/** Danger: clear all orders (tests). */
+export function __dangerouslyClearAllOrders(): void {
+  orders.clear();
+  seqCounter = 0;
 }
 
-export function attachTxnImage(orderId: string, imageId: string, caption?: string) {
-  const o = ordersById.get(orderId);
-  if (!o) return undefined;
-  o.txnImageId = imageId;
-  o.txnImageCaption = caption;
-  return getOrder(orderId);
+/** Seed a fake order for local/status UI testing. */
+export function __seedOrder(partial?: Partial<Order>): Order {
+  const baseItems: OrderItem[] =
+    partial?.items ??
+    [{ productId: "product_kiboko", title: "Ujani Kiboko", qty: 1, priceTZS: 120000 }];
+
+  const { subtotalTZS, deliveryFeeTZS, totalTZS } = computeTotals(baseItems);
+
+  const o: Order = {
+    orderId: nextOrderId(),
+    status: partial?.status ?? "created",
+    lang: partial?.lang ?? "sw",
+    currency: "TZS",
+
+    subtotalTZS,
+    deliveryFeeTZS,
+    totalTZS,
+    paidTZS: partial?.paidTZS ?? 0,
+
+    items: baseItems,
+    title: baseItems.length === 1 ? baseItems[0].title : undefined,
+
+    customerPhone: partial?.customerPhone ?? "+255700000000",
+    customerName: partial?.customerName ?? "Test Buyer",
+    addressStreet: partial?.addressStreet ?? "Msimbazi",
+    addressWard: partial?.addressWard ?? "Kivukoni",
+    addressCity: partial?.addressCity ?? "Ilala",
+    addressCountry: partial?.addressCountry ?? "Dar es Salaam",
+
+    attachments: { messages: [], images: [] },
+
+    notes: partial?.notes,
+    createdAt: partial?.createdAt ?? Date.now(),
+    updatedAt: partial?.updatedAt ?? Date.now(),
+    requestId: partial?.requestId ?? crypto.randomUUID(),
+  };
+
+  orders.set(o.orderId, o);
+  return clone(o);
 }
 
-export function markPaid(orderId: string, amountTZS: number) {
-  const o = ordersById.get(orderId);
-  if (!o) return getOrder(orderId);
-  const amt = Math.max(0, Math.floor(amountTZS || 0));
-  paymentsByOrderId.set(orderId, Math.max(0, (paymentsByOrderId.get(orderId) ?? 0) + amt));
-  return getOrder(orderId);
+// ------------------------------ Utils ---------------------------------
+
+function clone<T>(x: T): T {
+  return JSON.parse(JSON.stringify(x));
 }

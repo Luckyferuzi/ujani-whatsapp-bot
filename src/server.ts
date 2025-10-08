@@ -2,7 +2,7 @@ import express from 'express';
 import pinoHttp from 'pino-http';
 import { env } from './config.js';
 import { webhook } from './routes/webhook.js';
-import { statusRouter } from './routes/status.js';
+import statusRouter from './routes/status.js';
 
 const app = express();
 

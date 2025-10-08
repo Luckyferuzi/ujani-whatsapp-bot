@@ -1,403 +1,288 @@
 // src/wards.ts
-// Smart lookup for Dar es Salaam delivery distances.
-// Works with flexible JSON at: src/data/dar_location.json
-//
-// Supported shapes:
-//
-// 1) Object style (recommended)
-// {
-//   "Kariakoo": 2.45,
-//   "Mabibo": { "distance_km": 6.1, "aliases": ["Mabibo Hostel"],
-//               "streets": {
-//                 "Swahili": 2.9,
-//                 "Msimbazi": { "distance_km": 2.7, "aliases": ["Msimbazi St"] }
-//               }
-//   }
-// }
-//
-// 2) Array style
-// [
-//   { "ward": "Kariakoo", "km": 2.45,
-//     "streets": [ { "name": "Swahili", "km": 2.9 },
-//                  { "name": "Msimbazi", "distance_km": 2.7, "aliases": ["Msimbazi St"] } ],
-//     "aliases": ["Kariako"]
-//   }
-// ]
-//
-// Public API:
-// - loadLocations(): Promise<void>   // optional; preloads the JSON
-// - resolveDarLocation(input: string): ResolveResult
-// - lookupWardAndStreet(ward: string, street?: string): ResolveResult
-// - getDistanceKm(query: string): number | null        // backward-compatible
-// - listWards(): string[]
-// - listStreets(ward: string): string[]
-// - isLoaded(): boolean
-//
-// The helpers are synchronous to call; they lazy-load the JSON on first use.
-// If you want to guarantee data is loaded at boot, call loadLocations() once.
+// District/Ward utilities for Dar es Salaam delivery flows.
+// - JSON-first: src/data/dar_location.json (array of street rows)
+// - CSV fallback (optional): src/data/ward_distance.csv (district,ward,km)
+// - Exposes: listDistricts, listWardsByDistrict, getDistanceKm
 
-import * as fsSync from "node:fs";
-import * as fs from "node:fs/promises";
-import * as path from "node:path";
+import fs from "node:fs";
+import path from "node:path";
 
-/* ------------------------------- Types ----------------------------------- */
+/* ------------------------------- Types -------------------------------- */
 
-export type ResolveResult = {
-  km: number | null;
-  used: "street_exact" | "ward_only" | "nearest_location" | "unknown";
-  confidence: number;
-  resolvedStreet?: string | null;
-  ward?: string | null;
-  district?: string | null; // optional free text (e.g., "Ilala")
+type StreetRowRaw = {
+  REGION?: string;
+  DISTRICT?: string;
+  WARD?: string;
+  STREET?: string;
+  PLACES?: string;
+  DISTANCE_FROM_KEKO_MAGURUMBASI_KM?: number;
 };
 
-type AnyRec = Record<string, any>;
-type DarRoot = AnyRec | AnyRec[];
+type StreetRow = {
+  region: string;
+  district: string;
+  ward: string;
+  street: string;
+  km: number; // distance from Keko (km)
+};
 
-/* ----------------------------- Module state ------------------------------ */
+type WardKey = string; // `${district.toLowerCase()}|${ward.toLowerCase()}`
 
-let DB: DarRoot | null = null;
-let LOADED = false;
+/* ------------------------------- Cache -------------------------------- */
 
-const CANDIDATES = [
-  "src/data/dar_location.json",
-  "src/app/dar_location.json",
-  "dar_location.json",
-].map((p) => path.resolve(process.cwd(), p));
+let __loaded = false;
 
-/* ------------------------------- Utils ----------------------------------- */
+const districtsSet = new Set<string>();
+const wardsByDistrict = new Map<string, Set<string>>(); // district -> wards
+const wardKmSamples = new Map<WardKey, number[]>();     // wardKey -> km samples
+const wardKmMedian = new Map<WardKey, number>();        // wardKey -> median km
 
-const norm = (s: string) =>
-  s
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
+/* ------------------------------ Helpers ------------------------------- */
 
-const isObj = (v: any): v is Record<string, any> =>
-  v != null && typeof v === "object" && !Array.isArray(v);
-
-function readWardName(w: any): string {
-  if (typeof w === "string") return w;
-  return w?.ward ?? w?.name ?? w?.ward_name ?? "";
+function norm(s: string | undefined | null): string {
+  return (s || "").toString().trim();
+}
+function lc(s: string | undefined | null): string {
+  return norm(s).toLowerCase();
+}
+function wardKey(district: string, ward: string): WardKey {
+  return `${lc(district)}|${lc(ward)}`;
+}
+function median(nums: number[]): number {
+  if (!nums.length) return 0;
+  const a = [...nums].sort((x, y) => x - y);
+  const mid = Math.floor(a.length - 1) / 2;
+  const lo = a[Math.floor(mid)];
+  const hi = a[Math.ceil(mid)];
+  return (lo + hi) / 2;
+}
+function addDistrict(d: string) {
+  const dd = norm(d);
+  if (!dd) return;
+  districtsSet.add(dd);
+}
+function addWard(district: string, ward: string) {
+  const dd = norm(district);
+  const ww = norm(ward);
+  if (!dd || !ww) return;
+  if (!wardsByDistrict.has(dd)) wardsByDistrict.set(dd, new Set());
+  wardsByDistrict.get(dd)!.add(ww);
 }
 
-function readWardKm(entry: any): number | null {
-  if (typeof entry === "number") return entry;
-  if (isObj(entry)) {
-    if (typeof entry.km === "number") return entry.km;
-    if (typeof entry.distance_km === "number") return entry.distance_km;
-  }
-  return null;
+/* ------------------------- Dataset: JSON-first ------------------------ */
+
+function candidateJsonPaths(): string[] {
+  return [
+    path.resolve(process.cwd(), "src/data/dar_location.json"),
+    path.resolve(process.cwd(), "data/dar_location.json"),
+    path.resolve(process.cwd(), "dar_location.json"),
+  ];
 }
 
-function readStreetName(st: any, keyName?: string): string {
-  if (typeof st === "string") return st;
-  return st?.name ?? keyName ?? "";
-}
-
-function readStreetKm(wardEntry: any, streetEntry: any, wardKm: number | null): number | null {
-  if (typeof streetEntry === "number") return streetEntry;
-  if (isObj(streetEntry)) {
-    if (typeof streetEntry.km === "number") return streetEntry.km;
-    if (typeof streetEntry.distance_km === "number") return streetEntry.distance_km;
-    if (typeof streetEntry.extra_km === "number" && typeof wardKm === "number") {
-      return wardKm + streetEntry.extra_km;
-    }
-  }
-  return wardKm;
-}
-
-/* ------------------------------ Loading ---------------------------------- */
-
-function tryLoadSync(): boolean {
-  for (const p of CANDIDATES) {
+function loadStreetsJSON(): StreetRow[] {
+  for (const p of candidateJsonPaths()) {
     try {
-      if (fsSync.existsSync(p)) {
-        const raw = fsSync.readFileSync(p, "utf8");
-        DB = JSON.parse(raw);
-        LOADED = true;
-        return true;
+      if (fs.existsSync(p)) {
+        const raw = fs.readFileSync(p, "utf8");
+        const arr = JSON.parse(raw) as StreetRowRaw[];
+        if (Array.isArray(arr)) {
+          const rows: StreetRow[] = [];
+          for (const r of arr) {
+            const km = Number(r?.DISTANCE_FROM_KEKO_MAGURUMBASI_KM);
+            if (!isFinite(km)) continue;
+            rows.push({
+              region: norm(r?.REGION),
+              district: norm(r?.DISTRICT),
+              ward: norm(r?.WARD),
+              street: norm(r?.STREET),
+              km: Math.max(0, km),
+            });
+          }
+          return rows;
+        }
       }
     } catch {
-      // try next candidate
+      // try next path
     }
-  }
-  return false;
-}
-
-export async function loadLocations(): Promise<void> {
-  if (LOADED && DB) return;
-  for (const p of CANDIDATES) {
-    try {
-      const raw = await fs.readFile(p, "utf8");
-      DB = JSON.parse(raw);
-      LOADED = true;
-      return;
-    } catch {
-      // try next
-    }
-  }
-  // final attempt sync (for environments that dislike async fs in cold start)
-  tryLoadSync();
-}
-
-export function isLoaded() {
-  return LOADED && !!DB;
-}
-
-/* ------------------------------ Iterators -------------------------------- */
-
-function* iterateWards(): Generator<{ wardName: string; wardEntry: any }> {
-  if (!DB) return;
-
-  // Object style
-  if (isObj(DB) && !Array.isArray(DB)) {
-    for (const [wardName, wardEntry] of Object.entries(DB)) {
-      yield { wardName, wardEntry };
-    }
-    return;
-  }
-
-  // Array style
-  if (Array.isArray(DB)) {
-    for (const w of DB) {
-      const wardName = readWardName(w);
-      if (!wardName) continue;
-      yield { wardName, wardEntry: w };
-    }
-  }
-}
-
-function getWardAliases(w: any): string[] {
-  if (!isObj(w)) return [];
-  const a = w.aliases;
-  return Array.isArray(a) ? a.filter((x) => typeof x === "string") : [];
-}
-
-function getWardStreetsArray(w: any): any[] {
-  if (!isObj(w)) return [];
-  // allowed: array OR object map
-  if (Array.isArray(w.streets)) return w.streets;
-  if (isObj(w.streets)) {
-    return Object.entries(w.streets).map(([name, v]) =>
-      isObj(v) ? { ...v, name } : { name, km: v }
-    );
   }
   return [];
 }
 
-function getStreetAliases(st: any): string[] {
-  if (!isObj(st)) return [];
-  const a = st.aliases;
-  return Array.isArray(a) ? a.filter((x) => typeof x === "string") : [];
+/* ----------------------- Dataset: CSV (fallback) ---------------------- */
+
+function candidateCsvPaths(): string[] {
+  return [
+    path.resolve(process.cwd(), "src/data/ward_distance.csv"),
+    path.resolve(process.cwd(), "data/ward_distance.csv"),
+    path.resolve(process.cwd(), "ward_distance.csv"),
+  ];
 }
 
-/* --------------------------- Public functions ---------------------------- */
+/**
+ * CSV expected columns (case-insensitive):
+ *   district, ward, km
+ */
+function loadWardCSV(): Array<{ district: string; ward: string; km: number }> {
+  for (const p of candidateCsvPaths()) {
+    try {
+      if (!fs.existsSync(p)) continue;
+      const raw = fs.readFileSync(p, "utf8");
+      const lines = raw.split(/\r?\n/).filter((l) => l.trim().length > 0);
+      if (!lines.length) continue;
 
-/** High-level: resolve from a string like "Kariakoo, Ilala" or "Swahili, Ilala" or "Kariakoo" */
-export function resolveDarLocation(input: string): ResolveResult {
-  if (!isLoaded()) tryLoadSync();
+      const header = lines[0].split(",").map((h) => lc(h));
+      const idxDistrict = header.findIndex((h) => h === "district");
+      const idxWard = header.findIndex((h) => h === "ward");
+      const idxKm = header.findIndex((h) => h === "km");
+      if (idxDistrict < 0 || idxWard < 0 || idxKm < 0) continue;
 
-  if (!DB) {
-    return { km: null, used: "unknown", confidence: 0 };
-  }
-
-  // Split by comma: left = ward/street/area, right = district(wilaya) (optional)
-  const parts = input.split(/[，,]/).map((s) => s?.trim()).filter(Boolean);
-  const leftRaw = parts[0] ?? "";
-  const rightRaw = parts[1] ?? "";
-  const left = norm(leftRaw);
-  const district = rightRaw || null;
-
-  // 1) Try to match ward (by name or alias)
-  for (const { wardName, wardEntry } of iterateWards()) {
-    const wn = norm(wardName);
-    const aliases = getWardAliases(wardEntry);
-    const wardHit = left && (left === wn || aliases.some((a) => norm(a) === left));
-
-    const wardKm = readWardKm(wardEntry);
-
-    if (wardHit) {
-      // If user actually typed a street as left, try streets
-      const streets = getWardStreetsArray(wardEntry);
-      for (const st of streets) {
-        const stName = readStreetName(st);
-        const stn = norm(stName);
-        const als = getStreetAliases(st);
-        if (left === stn || als.some((a) => norm(a) === left)) {
-          const km = readStreetKm(wardEntry, st, wardKm);
-          return {
-            km,
-            used: "street_exact",
-            confidence: 0.98,
-            resolvedStreet: stName,
-            ward: wardName,
-            district,
-          };
-        }
+      const out: Array<{ district: string; ward: string; km: number }> = [];
+      for (let i = 1; i < lines.length; i++) {
+        const cols = lines[i].split(",");
+        const d = norm(cols[idxDistrict]);
+        const w = norm(cols[idxWard]);
+        const k = Number(cols[idxKm]);
+        if (!d || !w || !isFinite(k)) continue;
+        out.push({ district: d, ward: w, km: Math.max(0, k) });
       }
-
-      // Otherwise, ward-only
-      return {
-        km: wardKm,
-        used: "ward_only",
-        confidence: wardKm != null ? 0.9 : 0.2,
-        resolvedStreet: null,
-        ward: wardName,
-        district,
-      };
+      if (out.length) return out;
+    } catch {
+      // ignore and try next file
     }
   }
+  return [];
+}
 
-  // 2) If not a ward hit, try global street match (treat left as street)
-  if (left) {
-    for (const { wardName, wardEntry } of iterateWards()) {
-      const wardKm = readWardKm(wardEntry);
-      const streets = getWardStreetsArray(wardEntry);
-      for (const st of streets) {
-        const stName = readStreetName(st);
-        const stn = norm(stName);
-        const als = getStreetAliases(st);
-        if (left === stn || als.some((a) => norm(a) === left)) {
-          const km = readStreetKm(wardEntry, st, wardKm);
-          return {
-            km,
-            used: "nearest_location",
-            confidence: 0.7,
-            resolvedStreet: stName,
-            ward: wardName,
-            district,
-          };
-        }
-      }
+/* ------------------------------ Loader -------------------------------- */
+
+function ensureLoaded() {
+  if (__loaded) return;
+
+  // 1) JSON streets → aggregate by ward (median km)
+  const streets = loadStreetsJSON();
+  for (const r of streets) {
+    if (!r.district || !r.ward) continue;
+    addDistrict(r.district);
+    addWard(r.district, r.ward);
+    const key = wardKey(r.district, r.ward);
+    if (!wardKmSamples.has(key)) wardKmSamples.set(key, []);
+    wardKmSamples.get(key)!.push(r.km);
+  }
+
+  // 2) If no JSON rows, or to supplement missing wards, load CSV fallback
+  const csv = loadWardCSV();
+  for (const row of csv) {
+    addDistrict(row.district);
+    addWard(row.district, row.ward);
+    const key = wardKey(row.district, row.ward);
+    if (!wardKmSamples.has(key)) wardKmSamples.set(key, []);
+    wardKmSamples.get(key)!.push(row.km);
+  }
+
+  // 3) Compute per-ward median
+  for (const [key, samples] of wardKmSamples.entries()) {
+    wardKmMedian.set(key, median(samples));
+  }
+
+  __loaded = true;
+}
+
+/* ------------------------------- API ---------------------------------- */
+
+/**
+ * Return all districts (sorted, unique, case-preserved from source).
+ */
+export function listDistricts(): string[] {
+  ensureLoaded();
+  return Array.from(districtsSet.values()).sort((a, b) => a.localeCompare(b));
+}
+
+/**
+ * Return wards for a given district (sorted). Case-insensitive district match.
+ */
+export function listWardsByDistrict(district: string): string[] {
+  ensureLoaded();
+  if (!district) return [];
+  // try exact district first
+  if (wardsByDistrict.has(district)) {
+    return Array.from(wardsByDistrict.get(district)!).sort((a, b) => a.localeCompare(b));
+  }
+  // case-insensitive match
+  const dLow = lc(district);
+  for (const d of wardsByDistrict.keys()) {
+    if (lc(d) === dLow) {
+      return Array.from(wardsByDistrict.get(d)!).sort((a, b) => a.localeCompare(b));
     }
   }
-
-  // 3) Unknown
-  return { km: null, used: "unknown", confidence: 0, district };
+  return [];
 }
 
-/** Direct resolver when you already have them separated */
-export function lookupWardAndStreet(
-  wardInput: string,
-  streetInput?: string
-): ResolveResult {
-  if (!isLoaded()) tryLoadSync();
+/**
+ * Get a typical distance (km) from Keko → {district, ward}.
+ * Uses the median of street distances in that ward (or CSV value).
+ * Returns undefined if no info is found.
+ */
+export function getDistanceKm(district: string, ward: string): number | undefined {
+  ensureLoaded();
+  if (!district || !ward) return undefined;
 
-  if (!DB) {
-    return { km: null, used: "unknown", confidence: 0, resolvedStreet: null, ward: null };
+  // direct
+  let key = wardKey(district, ward);
+  if (wardKmMedian.has(key)) return wardKmMedian.get(key);
+
+  // case-insensitive search
+  const dLow = lc(district);
+  const wLow = lc(ward);
+
+  for (const [k, v] of wardKmMedian.entries()) {
+    const [kd, kw] = k.split("|");
+    if (kd === dLow && kw === wLow) return v;
   }
 
-  const wKey = norm(wardInput || "");
-  const sKey = streetInput ? norm(streetInput) : null;
-
-  // 1) Find the ward
-  for (const { wardName, wardEntry } of iterateWards()) {
-    const wn = norm(wardName);
-    const aliases = getWardAliases(wardEntry);
-    const isWard = wKey && (wKey === wn || aliases.some((a) => norm(a) === wKey));
-
-    const wardKm = readWardKm(wardEntry);
-
-    if (isWard) {
-      if (sKey) {
-        // 1a) street inside this ward
-        const streets = getWardStreetsArray(wardEntry);
-        for (const st of streets) {
-          const stName = readStreetName(st);
-          const stn = norm(stName);
-          const als = getStreetAliases(st);
-          if (sKey === stn || als.some((a) => norm(a) === sKey)) {
-            const km = readStreetKm(wardEntry, st, wardKm);
-            return {
-              km,
-              used: "street_exact",
-              confidence: 0.98,
-              resolvedStreet: stName,
-              ward: wardName,
-            };
-          }
-        }
-        // no street hit → ward-only
-        return {
-          km: wardKm,
-          used: "ward_only",
-          confidence: wardKm != null ? 0.9 : 0.2,
-          resolvedStreet: null,
-          ward: wardName,
-        };
-      }
-
-      // 1b) no street provided → ward-only
-      return {
-        km: wardKm,
-        used: "ward_only",
-        confidence: wardKm != null ? 0.9 : 0.2,
-        resolvedStreet: null,
-        ward: wardName,
-      };
-    }
+  // last resort: district matched + ward "startsWith" or "includes"
+  for (const [k, v] of wardKmMedian.entries()) {
+    const [kd, kw] = k.split("|");
+    if (kd !== dLow) continue;
+    if (kw.startsWith(wLow) || kw.includes(wLow)) return v;
   }
 
-  // 2) If ward not found but we have a street, try global street match
-  if (sKey) {
-    for (const { wardName, wardEntry } of iterateWards()) {
-      const wardKm = readWardKm(wardEntry);
-      const streets = getWardStreetsArray(wardEntry);
-      for (const st of streets) {
-        const stName = readStreetName(st);
-        const stn = norm(stName);
-        const als = getStreetAliases(st);
-        if (sKey === stn || als.some((a) => norm(a) === sKey)) {
-          const km = readStreetKm(wardEntry, st, wardKm);
-          return {
-            km,
-            used: "nearest_location",
-            confidence: 0.7,
-            resolvedStreet: stName,
-            ward: wardName,
-          };
-        }
-      }
-    }
-  }
-
-  // 3) unknown
-  return { km: null, used: "unknown", confidence: 0, resolvedStreet: null, ward: null };
+  return undefined;
 }
 
-/** Backward-compatible helper: try to resolve a single free-form query to km */
-export function getDistanceKm(query: string): number | null {
-  const r = resolveDarLocation(query);
-  return r?.km ?? null;
+/**
+ * Development-only: clear and reload caches (hot reload).
+ */
+export function __reloadWards(): void {
+  __loaded = false;
+  districtsSet.clear();
+  wardsByDistrict.clear();
+  wardKmSamples.clear();
+  wardKmMedian.clear();
+  ensureLoaded();
 }
 
-/** Convenience listings (for UI lists, optional) */
-export function listWards(): string[] {
-  if (!isLoaded()) tryLoadSync();
-  const names: string[] = [];
-  for (const { wardName } of iterateWards()) names.push(wardName);
-  // natural sort
-  return names.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
+/**
+ * Debug snapshot (for troubleshooting).
+ */
+export function __debugSnapshot(): {
+  districtCount: number;
+  wardCount: number;
+  withKmCount: number;
+} {
+  ensureLoaded();
+  let wardCount = 0;
+  for (const set of wardsByDistrict.values()) wardCount += set.size;
+  return {
+    districtCount: districtsSet.size,
+    wardCount,
+    withKmCount: wardKmMedian.size,
+  };
 }
 
-export function listStreets(ward: string): string[] {
-  if (!isLoaded()) tryLoadSync();
-  const out: string[] = [];
-  const wKey = norm(ward);
-  for (const { wardName, wardEntry } of iterateWards()) {
-    const wn = norm(wardName);
-    const aliases = getWardAliases(wardEntry);
-    if (wKey === wn || aliases.some((a) => norm(a) === wKey)) {
-      const streets = getWardStreetsArray(wardEntry);
-      for (const st of streets) {
-        const name = readStreetName(st);
-        if (name) out.push(name);
-      }
-      break;
-    }
-  }
-  return out.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
-}
+export default {
+  listDistricts,
+  listWardsByDistrict,
+  getDistanceKm,
+  __reloadWards,
+  __debugSnapshot,
+};

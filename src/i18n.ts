@@ -1,297 +1,286 @@
 // src/i18n.ts
-// Bilingual strings (Swahili/English) + tiny emoji polish.
-// Use: t(lang, 'key', { param: 'value' })
+// Uses Lang type from session.ts and provides translations for all keys used in webhook & flows.
 
-export type Lang = "sw" | "en";
-type Dict = Record<string, string>;
+import type { Lang } from "./session.js";
 
-export const i18n: Record<Lang, Dict> = {
-  /* ============================== KISWAHILI ============================== */
+type Dict = Record<Lang, Record<string, string>>;
+
+const dict: Dict = {
   sw: {
-    /* App / common */
-    app_name: "UJANI",
-    hello: "Habari! 👋",
-    ok: "Sawa ✅",
-    yes: "Ndiyo",
-    no: "Hapana",
-    open: "Fungua",
-    back: "🔙 Rudi",
-    back_menu: "🔙 Rudi menyu",
-    invalid_choice: "⚠️ Samahani, chaguo si sahihi. Jaribu tena.",
-    invalid_text: "⚠️ Tafadhali tuma maandishi sahihi.",
-
-    /* Main menu */
-    menu_body: "UJANI\nTunawezaje kukusaidia leo? Chagua chaguo hapa chini. ⬇️",
+    // Main menu
+    menu_body: "Tunawezaje kukusaidia leo?\nChagua chaguo hapa chini.",
     menu_button: "Fungua",
-    section_products: "🛍️ Bidhaa",
-    section_help: "🆘 Msaada",
-    section_settings: "⚙️ Mipangilio",
+    section_products: "Bidhaa",
+    section_help: "Msaada",
+    section_settings: "Mipangilio",
+    track_order_title: "Fuatilia Oda",
+    track_order_desc: "Angalia hali ya oda yako",
+    talk_agent_title: "Ongea na Wakala",
+    talk_agent_desc: "Pata msaada wa haraka kutoka kwa timu yetu",
 
-    /* Products list */
-    products_title: "Bidhaa",
-    products_pick: "Chagua bidhaa unayohitaji. 🛍️",
+    // Language (informational)
+    change_lang_prompt: "Chagua lugha:",
+    lang_sw: "Kiswahili",
+    lang_en: "English",
+    lang_changed_to: "Lugha imebadilishwa kuwa: {lang}",
 
-    /* Product titles / taglines */
-    product_kiboko_title: "Ujani Kiboko — Kiboko ya Kibamia",
-    product_kiboko_tagline: "Ya kupaka • TSh 140,000",
-    product_furaha_title: "Ujani Furaha ya Ndoa",
-    product_furaha_tagline: "Ya kunywa • TSh 110,000",
-    product_promax_a_title: "Ujani Pro Max — A",
-    product_promax_b_title: "Ujani Pro Max — B",
-    product_promax_c_title: "Ujani Pro Max — C",
-    product_promax_tagline: "A/B/C • TSh 350,000",
+    // Pro Max (descriptions referenced by product/menu helpers)
+    promax_pick_package: "Ujani Pro Max — chagua pakiti A, B au C.",
+    section_promax: "Pakiti za Pro Max",
+    promax_note_bottom: "Bei jumla {price}. Chagua pakiti yako, kisha kamilisha oda.",
 
-    /* Product details (bullets) */
-    product_kiboko_points:
-      [
-        "Kama unahitaji matokeo ya haraka kwaajili ya kukuza na kunenepesha zaidi ya Nchi Saba tumia Ujani — Kiboko ya Kibamia. 💪",
-        "Dawa hii ni ya *kupaka*.",
-        "Imetengenezwa ili hata mtu mwenye urefu wa Nchi tatu afike Nchi Saba na zaidi.",
-        "Matokeo ni ya *uhakika* na ya *kudumu*.",
-        "Haichagui kama ni tatizo la muda mrefu au muda mfupi — bado inafanya kazi. ⏱️",
-        "Ingredients zimezingatia *hormones* zilizopo mwilini.",
-        "Matumizi ni *siku 21*; matokeo ndani ya *siku 14* mara nyingi.",
-        "Delivery ndani na nje ya Nchi tunafanya.",
-        "Maelekezo ya matumizi yameainishwa kwenye dawa yako. 📦",
-      ].join("\n"),
-    product_furaha_points:
-      [
-        "Husaidia kuimarisha *misuli ya uume* na kuufanya kuwa *imara zaidi*. 💪",
-        "Huboresha *mzunguko wa damu* kwenye uume.",
-        "Huongeza *hamu ya tendo la ndoa* na uzalishaji wa mbegu nyingi zenye uwezo wa kutungisha mimba.",
-        "Husaidia kumudu tendo la ndoa kwa muda mrefu — hadi *dakika 45+* na kuunganisha bao la kwanza na la pili. ⏳",
-        "Dozi: *vijiko viwili* asubuhi, *viwili* mchana, na *viwili* jioni.",
-        "Ni nzuri pia kwa waathirika wa *punyeto*.",
-      ].join("\n"),
-    product_promax_a_points:
-      [
-        "Toleo A la Ujani Pro Max.",
-        "Muundo ulioboreshwa kwa ufanisi wa haraka.",
-        "Tathmini ya usalama na maelekezo kamili kwenye kifurushi.",
-      ].join("\n"),
-    product_promax_b_points:
-      [
-        "Toleo B la Ujani Pro Max.",
-        "Linalenga uimara na uendelevu wa matokeo.",
-        "Maelekezo ya matumizi yapo kwenye kifurushi.",
-      ].join("\n"),
-    product_promax_c_points:
-      [
-        "Toleo C la Ujani Pro Max.",
-        "Chaguo mbadala kulingana na mahitaji ya mtumiaji.",
-        "Soma maelekezo kabla ya kutumia.",
-      ].join("\n"),
+    // Product actions
+    product_actions_body_prefix: "Umechagua:",
+    opt_section: "Chaguo",
+    row_buy: "Nunua sasa",
+    row_info: "Maelezo zaidi",
+    row_add: "Ongeza kikapuni",
+    row_view_cart: "Angalia kikapu",
+    row_back_menu: "Rudi menyu",
 
-    /* Product actions */
-    btn_add_to_cart: "➕ Ongeza Kikapuni",
-    btn_buy_now: "🛒 Nunua sasa",
-    back_to_menu: "🔙 Rudi menyu",
+    // Cart
+    cart_added: "✅ *{title}* limeongezwa kwenye kikapu.",
+    cart_empty: "🧺 Kikapu chako kipo tupu.",
+    cart_title: "Kikapu chako",
+    cart_cleared: "🧺 Kikapu kimesafishwa.",
+    cart_summary_header: "🧺 Kikapu chako:",
+    cart_summary_line: "• {title} ×{qty} — {price}",
+    cart_summary_total: "Jumla: {total}",
+    cart_actions: "Chagua hatua kwa kikapu:",
+    btn_cart_checkout: "Kamilisha oda",
+    btn_cart_clear: "Futa kikapu",
+    btn_cart_back: "Rudi menyu",
 
-    /* Cart */
-    cart_empty: "🧺 Kikapu chako ni tupu kwa sasa.",
-    cart_summary_title: "🧺 Muhtasari wa Kikapu",
-    cart_summary_line: "• {title} ×{qty} — TSh {price}",
-    cart_summary_total: "Jumla: *TSh {total}*",
-    cart_actions: "Chagua hatua ifuatayo.",
-    btn_cart_checkout: "✅ Endelea na malipo",
-    btn_cart_back: "🔙 Rudi Bidhaa",
+    // Fulfillment choice
+    choose_fulfillment: "Ungependa kuipata vipi bidhaa?",
+    btn_pickup: "Chukua ofisini",
+    btn_delivery: "Letewa (Delivery)",
+    btn_back_menu: "Rudi menyu",
 
-    /* Fulfillment */
-    choose_fulfillment: "Ungependa *kukusanya* mwenyewe au tufanye *delivery*? 🚚",
-    btn_pickup: "Chukua mwenyewe",
-    btn_delivery: "Delivery",
+    // Product details (bullets)
+    kiboko_more_bullets: [
+      "• Kama unahitaji matokeo ya haraka kwa ajili ya kukuza na...nenepesha zaidi ya nchi saba, tumia *Ujani Kiboko ya Kibamia*.",
+      "• Dawa hii ni ya kupaka.",
+      "• Imetengenezwa walau mtu mwenye urefu wa nchi tatu afike nchi saba na zaidi.",
+      "• Matokeo ya dawa hii ni ya uhakika na ya kudumu.",
+      "• Haichagui kama ni tatizo la muda mrefu au la muda mfupi; hakuna kikwazo kitakachopelekea dawa kushindwa kufanya kazi.",
+      "• Sababu: zimetengenezwa kwa kuzingatia viambato vinavyoendana na hormones zilizopo mwilini.",
+      "• Matumizi ni ya siku 21; matokeo ndani ya siku ~14.",
+      "• Tunafanya delivery ndani na nje ya nchi.",
+      "• Matumizi yameainishwa kwenye dawa yako."
+    ].join("\n"),
+    furaha_more_bullets: [
+      "• *Furaha ya Ndoa* (dawa ya kunywa) huimarisha misuli ya uume na kufanya uume kuwa imara zaidi.",
+      "• Huarahisisha mzunguko wa damu kwenye uume.",
+      "• Huongeza hamu ya tendo la ndoa na/au uzalishaji wa mbegu zenye uwezo wa kutungisha mimba.",
+      "• Husaidia kudumu muda mrefu — dakika ~45+ na kuunganisha bao la kwanza na la pili.",
+      "• Matumizi: vijiko viwili asubuhi, viwili mchana, viwili jioni.",
+      "• Pia ni nzuri kwa waathirika wa punyeto."
+    ].join("\n"),
+    promax_detail_promax_a: "Kipakeji hiki kina dawa tatu za kunywa ambacho bei yake ni TSh 350,000.",
 
-    /* Contact / phone */
-    ask_delivery_phone: "Weka *namba ya simu* ya kupokelea mzigo. ☎️",
+    // Address / contact
+    ask_full_name: "Tuma *majina matatu kamili* ya mpokeaji/mteja.",
+    ask_address_structured:
+      "Weka *anuani* kama: *mtaa/mitaa, jiji, nchi* (mf. Keko Furniture, Dar es Salaam, Tanzania).",
+    address_invalid:
+      "Tafadhali weka anuani katika muundo: *mtaa/mitaa, jiji, nchi* (mf. Keko Furniture, Dar es Salaam, Tanzania).",
+    ask_phone: "Weka namba ya simu inayopatikana sasa (mfano: +2557XXXXXXXX au 07XXXXXXXX).",
+    phone_invalid: "Hiyo siyo namba sahihi. Jaribu tena (mfano: +2557XXXXXXXX au 07XXXXXXXX).",
 
-    /* Location pickers (district/ward/street) */
-    pick_district_title: "Wilaya",
-    pick_district_body: "Chagua *wilaya* yako. 🏙️",
-    pick_ward_title: "Ward",
-    pick_ward_body: "Chagua *ward* uliyo karibu zaidi. 📍",
-    pick_street_body:
-      "Chagua *mtaa* (au tuma *location*). Unaweza pia kuandika jina la mtaa moja kwa moja. 🏷️",
-    street_selected: "✅ *{ward}* — *{street}* imechaguliwa.",
-    street_skipped: "⏭️ Umeruka mtaa kwa *{ward}*.",
-    send_location_hint:
-      "Tuma *location* ya Whatsapp (📎 ➜ Location) ili tutathmini umbali kwa usahihi. 🗺️",
+    // Area (info)
+    choose_area: "Je, uko *ndani ya Dar es Salaam* au *nje ya Dar es Salaam*?",
+    btn_area_dar: "Ndani ya Dar es Salaam",
+    btn_area_outside: "Nje ya Dar es Salaam",
 
-    /* Smart delivery quote */
-    delivery_quote: "🚚 Gharama ya delivery: ~{km} km ➜ *TSh {fee}*",
+    // Order summaries
+    order_created_title: "Muhtasari wa Oda",
+    order_created_body_single:
+      "Oda yako ya *{title}* ya *{total}* imehifadhiwa.\n*Order ID:* {orderId}\n*Mahali:* {city} {country}\n\nUnaweza *Hariri anwani* au *Lipia sasa* hapa chini.",
+    order_created_body_total:
+      "Oda yako ya *kiasi {total}* imehifadhiwa.\n*Order ID:* {orderId}\n*Mahali:* {city} {country}\n\nUnaweza *Hariri anwani* au *Lipia sasa* hapa chini.",
+    order_next_actions: "Chagua hatua inayofuata:",
+    btn_pay_now: "Lipa sasa",
+    btn_edit_address: "Hariri anwani",
 
-    /* NEW – Order flow per your request (Full name → Inside Dar → Phone → Address) */
-    ask_full_name: "Tuma *majina matatu kamili* ya mteja. 🧾",
-    ask_in_out_dar:
-      "Je, uko *ndani ya Dar es Salaam* au *nje ya Dar es Salaam*? 🚚",
-    btn_inside_dar: "Ndani ya Dar",
-    btn_outside_dar: "Nje ya Dar",
-    ask_phone_in_dar: "Weka *namba ya simu* ya kupokelea mzigo. ☎️",
-    ask_address_in_dar:
-      "Weka *anuani ya Dar* kwa *format*: *mtaa/eneo, wilaya* — mfano: *Kariakoo, Ilala*. 🏷️\n• Kwanza: mtaa/eneo (au ward)\n• Pili: wilaya (Ilala, Kinondoni, Temeke, Kigamboni, Ubungo)",
-    invalid_address_format:
-      "⚠️ Tumia format *mtaa/eneo, wilaya* (mfano: *Kariakoo, Ilala*).",
-    delivery_quote_title: "📦 Muhtasari wa Delivery",
-    delivery_quote_line:
-      "📍 *Mahali*: {place}\n📏 *Umbali*: ~{km} km\n💵 *Gharama*: TSh {fee}",
-    delivery_unknown:
-      "⚠️ Hatukuweza kuthibitisha umbali. Taja *mtaa/eneo, wilaya* (mfano: *Kariakoo, Ilala*).",
+    edit_address_prompt: "Weka anuani mpya: *mitaa, jiji, nchi*.",
+    edit_address_ok: "Anuani imesasishwa.",
 
-    /* Outside Dar */
-    ask_region_outside:
-      "Taja *mkoa* uliopo. 🗺️ (Tutakutumia makadirio ya gharama kwa nje ya Dar.)",
+    // Pickup completion
+    pickup_thanks: "Habari {customerName}, karibu ofisini kwetu Keko Furniture karibu na Omax Bar.",
 
-    /* Language */
-    switch_to_english: "Switch to English 🇬🇧",
-    switch_to_swahili: "Rudi Kiswahili 🇹🇿",
+    // Transactions
+    prompt_txn_message:
+      "Tuma ujumbe wa malipo kwa oda *{orderId}*: *jina la mlipaji*, *kiasi*, na *muda*. Unaweza pia kutuma *screenshot*.",
+    txn_message_ok: "Maelezo ya malipo yamepokelewa. Asante!",
+    txn_image_ok: "Screenshot ya malipo imepokelewa. Asante!",
+
+    // Tracking
+    prompt_order_id: "Tafadhali andika *OrderID* (mfano: UJANI-2025-0001).",
+    status_not_found: "Samahani, hatukupata oda hiyo.",
+    status_card:
+      "*Oda:* {orderId}\n*Kichwa:* {title}\n*Jumla:* {total}\n*Hali ya sasa:* {status}\n*Uliolipa:* {paid}\n*Baki:* {balance}",
+    status_awaiting: "Inasubiri malipo",
+    status_partial: "Malipo ya sehemu",
+    status_paid: "Imelipwa kikamilifu",
+
+    // Agent
+    agent_contact_question: "Ungependa kuwasiliana na wakala kwa njia ipi?",
+    agent_list_title: "Wasiliana na Wakala",
+    agent_row_text: "Ujumbe (WhatsApp)",
+    agent_row_wa_call: "WhatsApp Call",
+    agent_row_normal_call: "Simu ya kawaida",
+    agent_text_ack: "Sawa! Tuma ujumbe wako hapa WhatsApp — tupo tayari kukusaidia.",
+    agent_wa_call_ack: "Tutakupigia kwenye WhatsApp muda si mrefu 🙏",
+    agent_prompt_phone: "Weka namba ya simu inayopatikana sasa (mfano: 2557XXXXXXX au 07XXXXXXX).",
+    agent_phone_ack: "Tutakupigia sasa hivi kwenye: {phone}. Asante!",
+    agent_phone_invalid: "Hiyo siyo namba sahihi. Jaribu tena (mfano: 2557XXXXXXX au 07XXXXXXX).",
+
+    // Generic
+    not_found: "Samahani, haijapatikana.",
   },
 
-  /* ================================ ENGLISH ================================ */
   en: {
-    /* App / common */
-    app_name: "UJANI",
-    hello: "Hello! 👋",
-    ok: "Okay ✅",
-    yes: "Yes",
-    no: "No",
-    open: "Open",
-    back: "🔙 Back",
-    back_menu: "🔙 Back to menu",
-    invalid_choice: "⚠️ Sorry, that’s not a valid choice. Please try again.",
-    invalid_text: "⚠️ Please send valid text.",
-
-    /* Main menu */
-    menu_body:
-      "UJANI\nHow can we help you today? Choose an option below. ⬇️",
+    // Main menu
+    menu_body: "How can we help you today?\nPick an option below.",
     menu_button: "Open",
-    section_products: "🛍️ Products",
-    section_help: "🆘 Help",
-    section_settings: "⚙️ Settings",
+    section_products: "Products",
+    section_help: "Help",
+    section_settings: "Settings",
+    track_order_title: "Track Order",
+    track_order_desc: "Check the status of your order",
+    talk_agent_title: "Talk to an Agent",
+    talk_agent_desc: "Get quick help from our team",
 
-    /* Products list */
-    products_title: "Products",
-    products_pick: "Pick the product you need. 🛍️",
+    // Language (informational)
+    change_lang_prompt: "Choose a language:",
+    lang_sw: "Kiswahili",
+    lang_en: "English",
+    lang_changed_to: "Language changed to: {lang}",
 
-    /* Product titles / taglines */
-    product_kiboko_title: "Ujani Kiboko — ‘Kiboko ya Kibamia’",
-    product_kiboko_tagline: "Topical • TSh 140,000",
-    product_furaha_title: "Ujani Furaha ya Ndoa",
-    product_furaha_tagline: "Drinkable • TSh 110,000",
-    product_promax_a_title: "Ujani Pro Max — A",
-    product_promax_b_title: "Ujani Pro Max — B",
-    product_promax_c_title: "Ujani Pro Max — C",
-    product_promax_tagline: "A/B/C • TSh 350,000",
+    // Pro Max
+    promax_pick_package: "Ujani Pro Max — choose package A, B or C.",
+    section_promax: "Pro Max Packages",
+    promax_note_bottom: "Total price {price}. Pick your package, then complete the order.",
 
-    /* Product details (bullets) */
-    product_kiboko_points:
-      [
-        "If you need fast results to increase size beyond seven inches, use Ujani — ‘Kiboko ya Kibamia’. 💪",
-        "This is a *topical* product (applied on skin).",
-        "Formulated so even someone at three inches can reach seven and above.",
-        "Results are *reliable* and *long-lasting*.",
-        "Works for both long-standing and recent issues. ⏱️",
-        "Ingredients align with the body’s *hormones*.",
-        "Use for *21 days*; results often visible within *14 days*.",
-        "We deliver inside and outside the country.",
-        "Usage instructions are included in your package. 📦",
-      ].join("\n"),
-    product_furaha_points:
-      [
-        "Helps strengthen *penile muscles* and improve firmness. 💪",
-        "Improves *blood circulation* in the penis.",
-        "Boosts *libido* and sperm production with better fertility potential.",
-        "Helps you last longer — *45+ minutes* and combine round one and two. ⏳",
-        "Dosage: *two teaspoons* morning, *two* at noon, and *two* in the evening.",
-        "Also supportive for those affected by *masturbation* side effects.",
-      ].join("\n"),
-    product_promax_a_points:
-      [
-        "Ujani Pro Max — Variant A.",
-        "Optimized formulation for fast effectiveness.",
-        "Full safety notes and instructions in the package.",
-      ].join("\n"),
-    product_promax_b_points:
-      [
-        "Ujani Pro Max — Variant B.",
-        "Aims for stronger and longer-lasting results.",
-        "Follow the included instructions before use.",
-      ].join("\n"),
-    product_promax_c_points:
-      [
-        "Ujani Pro Max — Variant C.",
-        "Alternative profile depending on user needs.",
-        "Please read instructions before use.",
-      ].join("\n"),
+    // Product actions
+    product_actions_body_prefix: "You selected:",
+    opt_section: "Options",
+    row_buy: "Buy now",
+    row_info: "More details",
+    row_add: "Add to cart",
+    row_view_cart: "View cart",
+    row_back_menu: "Back to menu",
 
-    /* Product actions */
-    btn_add_to_cart: "➕ Add to cart",
-    btn_buy_now: "🛒 Buy now",
-    back_to_menu: "🔙 Back to menu",
-
-    /* Cart */
+    // Cart
+    cart_added: "✅ *{title}* added to your cart.",
     cart_empty: "🧺 Your cart is empty.",
-    cart_summary_title: "🧺 Cart summary",
-    cart_summary_line: "• {title} ×{qty} — TSh {price}",
-    cart_summary_total: "Total: *TSh {total}*",
-    cart_actions: "Choose the next action.",
-    btn_cart_checkout: "✅ Checkout",
-    btn_cart_back: "🔙 Back to products",
+    cart_title: "Your cart",
+    cart_cleared: "🧺 Cart cleared.",
+    cart_summary_header: "🧺 Your cart:",
+    cart_summary_line: "• {title} ×{qty} — {price}",
+    cart_summary_total: "Total: {total}",
+    cart_actions: "Choose a cart action:",
+    btn_cart_checkout: "Checkout",
+    btn_cart_clear: "Clear cart",
+    btn_cart_back: "Back to menu",
 
-    /* Fulfillment */
-    choose_fulfillment: "Would you like *pickup* or *delivery*? 🚚",
-    btn_pickup: "Pickup",
-    btn_delivery: "Delivery",
-    ask_delivery_phone: "Enter the *phone number* for delivery. ☎️",
+    // Fulfillment choice
+    choose_fulfillment: "How would you like to receive the product?",
+    btn_pickup: "Pick up at office",
+    btn_delivery: "Get it delivered",
+    btn_back_menu: "Back to menu",
 
-    /* Location pickers (district/ward/street) */
-    pick_district_title: "District",
-    pick_district_body: "Choose your *district*. 🏙️",
-    pick_ward_title: "Ward",
-    pick_ward_body: "Choose the nearest *ward*. 📍",
-    pick_street_body:
-      "Choose the *street* (or send your *location*). You may also type the street name. 🏷️",
-    street_selected: "✅ *{ward}* — *{street}* selected.",
-    street_skipped: "⏭️ You skipped street for *{ward}*.",
-    send_location_hint:
-      "Send a WhatsApp *location* (📎 ➜ Location) so we can measure distance accurately. 🗺️",
+    // Product details (EN bullets)
+    kiboko_more_bullets: [
+      "• If you need fast results to increase length and girth beyond seven inches, use *Ujani Kiboko ya Kibamia*.",
+      "• This is a topical medicine (apply on skin).",
+      "• Designed to help someone from about three inches reach seven inches and beyond.",
+      "• Results are reliable and long-lasting.",
+      "• Works for both long-term and short-term issues; no blockers preventing effectiveness.",
+      "• Reason: formulated with ingredients aligned to the body’s natural hormones.",
+      "• A 21-day regimen; results usually within ~14 days.",
+      "• We deliver inside and outside Tanzania.",
+      "• Usage instructions are provided with your medicine."
+    ].join("\n"),
+    furaha_more_bullets: [
+      "• *Furaha ya Ndoa* (oral medicine) helps strengthen penile muscles and increase firmness.",
+      "• Improves blood circulation to the penis.",
+      "• Boosts libido and/or sperm quality for conception.",
+      "• Helps you last longer — about ~45+ minutes and combine first and second rounds.",
+      "• Usage: two teaspoons morning, two noon, two evening.",
+      "• Also helpful for those recovering from masturbation effects."
+    ].join("\n"),
+    promax_detail_promax_a: "This package has three oral medicines priced at TSh 350,000.",
 
-    /* Smart delivery quote */
-    delivery_quote: "🚚 Delivery charge: ~{km} km ➜ *TSh {fee}*",
+    // Address / contact
+    ask_full_name: "Send the *full name (three parts)* of the receiver/customer.",
+    ask_address_structured:
+      "Enter your *address* as: *street(s), city, country* (e.g., Keko Furniture, Dar es Salaam, Tanzania).",
+    address_invalid:
+      "Please type your address in the form: *street(s), city, country* (e.g., Keko Furniture, Dar es Salaam, Tanzania).",
+    ask_phone: "Enter a phone number we can reach you on now (e.g., +2557XXXXXXXX or 07XXXXXXXX).",
+    phone_invalid: "That phone number doesn’t look valid. Please try again (e.g., +2557XXXXXXXX or 07XXXXXXXX).",
 
-    /* NEW – Order flow (Full name → Inside Dar → Phone → Address) */
-    ask_full_name: "Send the customer's *full name (three names)*. 🧾",
-    ask_in_out_dar:
-      "Are you *inside Dar es Salaam* or *outside Dar es Salaam*? 🚚",
-    btn_inside_dar: "Inside Dar",
-    btn_outside_dar: "Outside Dar",
-    ask_phone_in_dar: "Enter the *phone number* for delivery. ☎️",
-    ask_address_in_dar:
-      "Send your *Dar address* in the format *area/street, district* — e.g. *Kariakoo, Ilala*. 🏷️",
-    invalid_address_format:
-      "⚠️ Use the format *area/street, district* (e.g. *Kariakoo, Ilala*).",
-    delivery_quote_title: "📦 Delivery Summary",
-    delivery_quote_line:
-      "📍 *Place*: {place}\n📏 *Distance*: ~{km} km\n💵 *Charge*: TSh {fee}",
-    delivery_unknown:
-      "⚠️ Couldn’t resolve your distance. Please send *area/street, district* (e.g. *Kariakoo, Ilala*).",
+    // Area (info)
+    choose_area: "Are you *within Dar es Salaam* or *outside Dar es Salaam*?",
+    btn_area_dar: "Within Dar es Salaam",
+    btn_area_outside: "Outside Dar es Salaam",
 
-    /* Outside Dar */
-    ask_region_outside:
-      "Tell us your *region*. 🗺️ (We’ll share an estimate for outside Dar.)",
+    // Order summaries
+    order_created_title: "Order Summary",
+    order_created_body_single:
+      "Your order for *{title}* of *{total}* has been saved.\n*Order ID:* {orderId}\n*Address:* {city} {country}\n\nYou can *Edit address* or *Pay now* below.",
+    order_created_body_total:
+      "Your order totaling *{total}* has been saved.\n*Order ID:* {orderId}\n*Address:* {city} {country}\n\nYou can *Edit address* or *Pay now* below.",
+    order_next_actions: "Choose your next step:",
+    btn_pay_now: "Pay now",
+    btn_edit_address: "Edit address",
 
-    /* Language */
-    switch_to_english: "Switch to English 🇬🇧",
-    switch_to_swahili: "Back to Kiswahili 🇹🇿",
-  },
+    edit_address_prompt: "Enter a new address: *street(s), city, country*.",
+    edit_address_ok: "Address updated.",
+
+    // Pickup completion
+    pickup_thanks: "Hello {customerName}, you’re welcome to our office located at Keko Furniture near Omax Bar.",
+
+    // Transactions
+    prompt_txn_message:
+      "Send a payment message for order *{orderId}*: *payer name*, *amount*, and *time*. You can also send a *screenshot*.",
+    txn_message_ok: "Payment details received. Thank you!",
+    txn_image_ok: "Payment screenshot received. Thank you!",
+
+    // Tracking
+    prompt_order_id: "Please enter your *OrderID* (e.g., UJANI-2025-0001).",
+    status_not_found: "Sorry, we couldn’t find that order.",
+    status_card:
+      "*Order:* {orderId}\n*Title:* {title}\n*Total:* {total}\n*Status:* {status}\n*Paid:* {paid}\n*Balance:* {balance}",
+    status_awaiting: "Awaiting payment",
+    status_partial: "Partially paid",
+    status_paid: "Fully paid",
+
+    // Agent
+    agent_contact_question: "How would you like to contact an agent?",
+    agent_list_title: "Contact an Agent",
+    agent_row_text: "Via text (WhatsApp)",
+    agent_row_wa_call: "Via WhatsApp Call",
+    agent_row_normal_call: "Via normal call",
+    agent_text_ack: "Great! Send us messages here on WhatsApp — we’re ready to assist.",
+    agent_wa_call_ack: "We’ll call you on WhatsApp shortly 🙏",
+    agent_prompt_phone: "Please enter a phone number that is currently reachable; we’ll call you.",
+    agent_phone_ack: "We’ll call you now on: {phone}. Thank you!",
+    agent_phone_invalid: "That doesn’t look like a valid phone number. Please try again (e.g., 2557XXXXXXXX or 07XXXXXXXX).",
+
+    // Generic
+    not_found: "Sorry, not found.",
+  }
 };
 
-/** Tiny templating helper */
-export function t(
-  lang: Lang,
-  key: keyof typeof i18n["sw"],
-  params?: Record<string, string | number>
-): string {
-  const dict = i18n[lang] || i18n.sw;
-  const template = (dict[key] ?? i18n.en[key] ?? key) as string;
+function interpolate(template: string, params?: Record<string, string | number>): string {
   if (!params) return template;
-  return template.replace(/\{(\w+)\}/g, (_, k) => String(params[k] ?? ""));
+  return template.replace(/\{(\w+)\}/g, (_, k) => String(params[k] ?? `{${k}}`));
+}
+
+export function t(lang: Lang, key: string, params?: Record<string, string | number>): string {
+  const s = (dict[lang] && dict[lang][key]) ?? (dict.en && dict.en[key]) ?? key;
+  return interpolate(s, params);
 }
