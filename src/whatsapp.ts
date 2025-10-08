@@ -9,7 +9,7 @@
 // - Sensible clamping to WhatsApp limits to avoid rejections.
 
 import { request } from "undici";
-import crypto from "crypto";
+import crypto from "node:crypto";
 
 /* ------------------------------ Env ------------------------------ */
 
@@ -19,13 +19,13 @@ const ACCESS_TOKEN =
   "";
 
 const PHONE_NUMBER_ID =
-  process.env.PHONE_NUMBER_ID ||
+  process.env.PHONE_NUMBER_ID ||                 // ✅ added support for your ZIP's key
   process.env.WHATSAPP_PHONE_NUMBER_ID ||
   process.env.WHATSAPP_PHONE_ID ||
   process.env.WHATSAPP_SENDER_ID ||
   "";
 
-const GRAPH_VERSION = "v20.0"; // fixed default; no new env required
+const GRAPH_VERSION = process.env.WHATSAPP_API_VERSION || "v20.0"; // default OK
 
 /* ----------------------------- Guards ----------------------------- */
 
@@ -55,12 +55,27 @@ function clamp(str: any, max: number): string {
   return s.length <= max ? s : s.slice(0, max - 1) + "…";
 }
 
+/** Ensure non-empty text for interactive body. */
+function nonEmptyBodyText(body?: string, header?: string): string {
+  const b = clamp(body ?? "", MAX_BODY_TEXT).trim();
+  if (b) return b;
+  const h = clamp(header ?? "", MAX_HEADER_TEXT).trim();
+  if (h) return h;
+  return "Please choose an option"; // minimal, safe default if both are empty
+}
+
+/** Ensure non-empty button title. */
+function nonEmptyButtonText(text?: string): string {
+  const t = clamp(text ?? "", MAX_BUTTON_TITLE).trim();
+  return t || "Open";
+}
+
 /* ------------------------- Low-level call ------------------------- */
 
 async function callGraph(body: Record<string, any>): Promise<void> {
   requiredEnv("WHATSAPP_ACCESS_TOKEN/WHATSAPP_TOKEN", ACCESS_TOKEN);
   requiredEnv(
-    "WHATSAPP_PHONE_NUMBER_ID/WHATSAPP_PHONE_ID/WHATSAPP_SENDER_ID",
+    "PHONE_NUMBER_ID/WHATSAPP_PHONE_NUMBER_ID/WHATSAPP_PHONE_ID/WHATSAPP_SENDER_ID", // ✅ include PHONE_NUMBER_ID in error
     PHONE_NUMBER_ID
   );
 
@@ -115,7 +130,7 @@ export async function sendText(args: { to: string; body: string }): Promise<void
 export async function sendInteractiveList(args: {
   to: string;
   header?: string;
-  body: string;
+  body?: string; // made optional; we’ll ensure non-empty payload below
   buttonText?: string;
   sections: {
     title?: string;
@@ -136,17 +151,19 @@ export async function sendInteractiveList(args: {
     })),
   }));
 
+  const headerText = args.header ? clamp(args.header, MAX_HEADER_TEXT) : undefined;
+  const bodyText = nonEmptyBodyText(args.body, headerText); // ✅ always non-empty
+  const buttonText = nonEmptyButtonText(args.buttonText);    // ✅ always non-empty
+
   await callGraph({
     to,
     type: "interactive",
     interactive: {
       type: "list",
-      header: args.header
-        ? { type: "text", text: clamp(args.header, MAX_HEADER_TEXT) }
-        : undefined,
-      body: { text: clamp(args.body, MAX_BODY_TEXT) },
+      header: headerText ? { type: "text", text: headerText } : undefined,
+      body: { text: bodyText }, // ✅ guaranteed non-empty
       action: {
-        button: clamp(args.buttonText || "Open", MAX_BUTTON_TITLE),
+        button: buttonText,     // ✅ guaranteed non-empty
         sections: safeSections,
       },
     },
@@ -164,10 +181,14 @@ export async function sendInteractiveList(args: {
  */
 export async function sendInteractiveButtons(args: {
   to: string;
-  body: string;
+  body?: string; // may come empty; we’ll fallback
+  header?: string;
   buttons: { id: string; title: string }[];
 }): Promise<void> {
   const to = normalizeTo(args.to);
+  const headerText = args.header ? clamp(args.header, MAX_HEADER_TEXT) : undefined;
+  const bodyText = nonEmptyBodyText(args.body, headerText); // ✅ fallback if empty
+
   const safeButtons = (args.buttons || []).slice(0, 3).map((b) => ({
     type: "reply" as const,
     reply: { id: b.id, title: clamp(b.title || "", MAX_BUTTON_TITLE) },
@@ -178,7 +199,8 @@ export async function sendInteractiveButtons(args: {
     type: "interactive",
     interactive: {
       type: "button",
-      body: { text: clamp(args.body, MAX_BODY_TEXT) },
+      header: headerText ? { type: "text", text: headerText } : undefined,
+      body: { text: bodyText }, // ✅ guaranteed non-empty
       action: { buttons: safeButtons },
     },
   });
