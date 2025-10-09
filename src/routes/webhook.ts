@@ -229,25 +229,55 @@ async function sendWardPickerAllDar(to: string, lang: "sw" | "en", pageIndex = 0
   setCheckoutStage(to, "asked_ward_global" as any);
 }
 
-async function sendDistrictConfirmAfterWard(to: string, lang: "sw" | "en", ward: string) {
-  const idx = buildWardIndex();
-  const hit = idx.find((r) => r.ward.toLowerCase() === ward.toLowerCase());
-  const district = hit?.district || "";
-  updateCheckout(to, { addressWard: ward, addressCity: district, addressCountry: "Dar es Salaam" } as any);
+// Helper: get 1+ candidate districts for a ward, with safe fallbacks.
+function districtsForWard(ward: string): string[] {
+  const idx = buildWardIndex(); // existing index [{ward,district}, ...]
+  const wNorm = norm(ward);
+  const hits = idx
+    .filter(r => norm(r.ward) === wNorm)
+    .map(r => toStringStrict(r.district))
+    .filter(Boolean);
 
-  // We present district as a "choice" (often a single option, per your flow).
-  const rows = [{ id: `confirm_district_after_ward::${district}`, title: clampTitle(district), description: "" }];
+  const uniq = Array.from(new Set(hits));
+  if (uniq.length > 0) return uniq;
+
+  // Fallback: list all Dar districts (from wards.ts if available)
+  const fromModule = (listDistricts() || [])
+    .map(d => toStringStrict(d))
+    .filter(Boolean);
+
+  if (fromModule.length > 0) return fromModule;
+
+  // Last-resort static list to guarantee non-empty titles
+  return ["Ilala", "Kinondoni", "Temeke", "Ubungo", "Kigamboni"];
+}
+
+// ✅ REPLACE your existing function with this version
+async function sendDistrictConfirmAfterWard(to: string, lang: "sw" | "en", ward: string) {
+  const districts = districtsForWard(ward);
+
+  // Save ward & country immediately; city (district) will be set after user confirms
+  updateCheckout(to, { addressWard: ward, addressCountry: "Dar es Salaam" } as any);
+
+  // Build non-empty rows (clamp to WA limits)
+  const rows = districts.slice(0, 10).map((d) => ({
+    id: `confirm_district_after_ward::${d}`,
+    title: clampTitle(d || (lang === "sw" ? "Haijulikani" : "Unknown")), // <-- never empty
+    description: "",
+  }));
+
   await sendInteractiveList({
     to,
     header: clampHeader(lang === "sw" ? "Chagua Wilaya uliopo" : "Choose your district"),
-    body: clampBody(lang === "sw" ? `Sehemu: ${ward}` : `Ward: ${ward}`),
-    buttonText: clampTitle(lang === "sw" ? "Chagua" : "Choose"),
+    body: clampBody((lang === "sw" ? "Sehemu: " : "Ward: ") + ward),         // always non-empty
+    buttonText: clampTitle(lang === "sw" ? "Chagua" : "Choose"),              // always non-empty
     sections: [{ title: clampSection(lang === "sw" ? "Wilaya" : "District"), rows }],
   });
 
   setExpecting(to, "confirm_district_after_ward" as any);
   setCheckoutStage(to, "asked_district_after_ward" as any);
 }
+
 
 /* -------------------- Street DB + quoting (Dar) -------------------- */
 
