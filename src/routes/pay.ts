@@ -1,48 +1,63 @@
-import type { Request, Response } from 'express';
-import { Router } from 'express';
-import { getOrder, markPaid } from '../orders.js';
-import { buildWhatsAppDeeplink } from '../paylink.js';
+// src/routes/pay.ts
+// Minimal payment endpoints using existing orders helpers (no markPaid import)
 
-export const pay = Router();
+import type { Request, Response } from "express";
+import { Router } from "express";
+import pino from "pino";
 
-function page(title: string, body: string) {
-  return `<!doctype html>
-<html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>${title}</title>
-<style>
-  body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica, Arial, 'Apple Color Emoji', 'Segoe UI Emoji'; margin: 24px; }
-  .card { max-width: 560px; margin: 0 auto; padding: 20px; border: 1px solid #e5e7eb; border-radius: 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
-  h1 { font-size: 20px; margin: 0 0 12px; }
-  p { line-height: 1.5; }
-  .total { font-weight: 700; }
-  button { padding: 12px 16px; border-radius: 10px; border: 0; background: #111827; color: white; font-weight: 600; cursor: pointer; }
-  .muted { color: #6b7280; font-size: 12px; }
-</style>
-</head><body><div class="card">${body}</div></body></html>`;
-}
+import {
+  getOrder,
+  attachTxnMessage,
+  attachTxnImage,
+} from "../orders.js";
 
-pay.get('/pay/:orderId', (req: Request, res: Response) => {
-  const orderId = req.params.orderId;
-  const o = getOrder(orderId);
-  if (!o) return res.status(404).send(page('Not found', `<h1>Order not found</h1><p>Order ${orderId} was not created.</p>`));
-  const nf = new Intl.NumberFormat('sw-TZ', { style: 'currency', currency: 'TZS', maximumFractionDigits: 0 });
-  const body = `
-  <h1>Pay for ${o.title}</h1>
-  <p>Order ID: <strong>${o.orderId}</strong></p>
-  <p class="total">Total: ${nf.format(o.totalTZS)}</p>
-  <form method="POST" action="/pay/${encodeURIComponent(o.orderId)}/confirm">
-    <button type="submit">Pay now (simulate)</button>
-  </form>
-  <p class="muted">This page is for testing only. On success, you will be redirected back to WhatsApp.</p>`;
-  res.send(page(`Pay ${o.orderId}`, body));
+const logger = pino({ name: "pay" });
+export const router = Router();
+export default router;
+
+/**
+ * POST /pay/message
+ * Body: { orderId: string, message?: string, amountTZS?: number }
+ * Saves a payment note on an order.
+ */
+router.post("/message", async (req: Request, res: Response) => {
+  try {
+    const { orderId, message, amountTZS } = req.body || {};
+    if (!orderId) return res.status(400).json({ error: "orderId required" });
+    const order = getOrder(String(orderId));
+    if (!order) return res.status(404).json({ error: "Order not found" });
+
+    const note = [
+      message?.toString().trim() || "",
+      amountTZS ? `(amount: TSh ${Number(amountTZS).toLocaleString("en-US")})` : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+
+    attachTxnMessage(orderId, note || "Payment note attached.");
+    return res.json({ ok: true });
+  } catch (err) {
+    logger.error({ err }, "pay/message error");
+    return res.status(500).json({ error: "internal_error" });
+  }
 });
 
-pay.post('/pay/:orderId/confirm', (req: Request, res: Response) => {
-  const orderId = req.params.orderId;
-  const o = getOrder(orderId);
-  if (!o) return res.status(404).send(page('Not found', `<h1>Order not found</h1>`));
-  // Simulate success
-  markPaid(orderId);
-  const deeplink = buildWhatsAppDeeplink(`Paid Order ${orderId}`);
-  res.redirect(302, deeplink);
+/**
+ * POST /pay/image
+ * Body: { orderId: string, mediaId: string, caption?: string }
+ * Attaches a payment screenshot image to an order.
+ */
+router.post("/image", async (req: Request, res: Response) => {
+  try {
+    const { orderId, mediaId, caption } = req.body || {};
+    if (!orderId || !mediaId) return res.status(400).json({ error: "orderId and mediaId required" });
+    const order = getOrder(String(orderId));
+    if (!order) return res.status(404).json({ error: "Order not found" });
+
+    attachTxnImage(orderId, String(mediaId), caption ? String(caption) : "");
+    return res.json({ ok: true });
+  } catch (err) {
+    logger.error({ err }, "pay/image error");
+    return res.status(500).json({ error: "internal_error" });
+  }
 });
