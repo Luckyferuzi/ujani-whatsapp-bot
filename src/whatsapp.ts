@@ -15,6 +15,7 @@ const ACCESS_TOKEN =
   "";
 
 const PHONE_NUMBER_ID =
+  process.env.PHONE_NUMBER_ID ||
   process.env.WHATSAPP_PHONE_NUMBER_ID ||
   process.env.WHATSAPP_PHONE_ID ||
   process.env.WHATSAPP_SENDER_ID ||
