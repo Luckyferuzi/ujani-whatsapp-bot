@@ -45,7 +45,9 @@ const dict: Dict = {
       '• Pia ni nzuri kwa waathirika wa punyeto.',
     ].join('\n'),
     // Pro Max note (price handled in UI; details/variants chosen in menu)
-    'product.promax.details': 'Ujani Pro Max — chagua kifurushi A, B au C.',
+      'product.promax.package_a': 'Kipakeji A: kinakua na dawa tatu za kunywa.',
+   'product.promax.package_b': 'Kipakeji B: kinakua na dawa tatu za kupaka.',
+   'product.promax.package_c': 'Kipakeji C: kinakua na dawa za kupaka mbili na kunywa mbili.',
 
     // ===== Greeting & name-based start =====
     'flow.ask_name': 'Karibu! Tafadhali taja *jina ulilotumia* kwenye oda.',
@@ -139,7 +141,9 @@ const dict: Dict = {
       '• Helps lasting longer — ~45+ minutes.\n' +
       '• Dosage: 2tsp morning / noon / evening.\n' +
       '• Also helpful for pornography side-effects.',
-    'product.promax.details': 'Ujani Pro Max — choose package A, B or C.',
+     'product.promax.package_a': 'Package A: three oral (drink) medicines.',
+  'product.promax.package_b': 'Package B: three topical (apply) medicines.',
+  'product.promax.package_c': 'Package C: two topical and two oral medicines.',
 
     'flow.ask_name': 'Welcome! Type the *name you used* for the order.',
     'flow.name_saved': 'Thanks, *{name}*.',

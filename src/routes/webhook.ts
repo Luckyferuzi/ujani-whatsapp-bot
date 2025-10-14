@@ -26,10 +26,7 @@ import {
   getMostRecentOrderByName,
 } from '../orders.js';
 import { getSession, saveSession, resetSession } from '../session.js';
-import {
-  buildMainMenu,
-  getProductBySku,
-} from '../menu.js';
+import { buildMainMenu, getProductBySku } from '../menu.js';
 
 export const webhook = Router();
 
@@ -40,7 +37,7 @@ const TRACK_AWAITING_NAME = new Set<string>();
 type CartItem = OrderItem;
 const CART = new Map<string, CartItem[]>();
 
-// When "Nunua sasa" is chosen, hold a *pending* item for checkout only (not in cart)
+// When "Nunua sasa" is chosen, hold a pending item for checkout only (not in cart)
 const PENDING_ITEM = new Map<string, CartItem | null>();
 
 // Outside/Inside stepper
@@ -138,7 +135,7 @@ webhook.post('/webhook', async (req: Request, res: Response) => {
             }
           }
 
-          // Handle interactive replies first
+          // Interactive first
           if (interactiveId) {
             await handleInteractive(from, interactiveId, tt);
             continue;
@@ -151,7 +148,7 @@ webhook.post('/webhook', async (req: Request, res: Response) => {
             continue;
           }
 
-          // Fallback to state machine + stepper
+          // Fallback to state/stepper
           await handleMessage(from, { text: textBody, hasImage, imageId }, tt);
         }
       }
@@ -204,9 +201,11 @@ async function showMainMenu(user: string, tt: (k: string, p?: any) => string) {
   const model = buildMainMenu(k => tt(k));
   let sections = toListSections(model);
 
-  // Show opposite language + flag on the change-language row
+  // Show the opposite language on the toggle row:
+  // - If UI is Swahili -> show "Change Language"
+  // - If UI is English -> show "Badili Lugha"
   const isSw = getLang(user) === 'sw';
-  const altLabel = isSw ? 'Change Language 🇬🇧' : 'Badili Lugha 🇹🇿';
+  const altLabel = isSw ? 'Change Language' : 'Badili Lugha';
   sections = sections.map(sec => ({
     ...sec,
     rows: sec.rows.map(r => (r.id === 'ACTION_CHANGE_LANGUAGE' ? { ...r, title: altLabel } : r)),
@@ -222,29 +221,47 @@ async function showMainMenu(user: string, tt: (k: string, p?: any) => string) {
   });
 }
 
-// Pro Max: show variants first
+// Pro Max: show three packages (A/B/C) before actions
 async function showProMaxVariants(user: string) {
   const parent = getProductBySku('PROMAX');
-  if (!parent || !parent.children?.length) return;
-
-  const rows: ListRow[] = parent.children.map(ch => ({
-    id: `PRODUCT_${ch.sku}`,
-    title: ch.name.replace('Pro Max — ', 'Ujani Pro Max Kipakej '), // A/B/C
-  }));
+  const price = parent?.price ?? 0;
+  const rows: ListRow[] = [
+    { id: 'PRODUCT_PROMAX_A', title: 'Ujani Pro Max Kipakeji A', description: 'Dawa 3 za kunywa' },
+    { id: 'PRODUCT_PROMAX_B', title: 'Ujani Pro Max Kipakeji B', description: 'Dawa 3 za kupaka' },
+    { id: 'PRODUCT_PROMAX_C', title: 'Ujani Pro Max Kipakeji C', description: 'Kupaka 2, Kunywa 2' },
+  ];
 
   await sendListMessage({
     to: user,
-    header: parent.name,
-    body: 'Chagua Kipakej cha Ujani Pro Max',
+    header: parent?.name ?? 'Ujani Pro Max',
+    body: `Chagua Kipakeji cha Ujani Pro Max — ${Math.round(price).toLocaleString('sw-TZ')} TZS`,
     footer: '',
     buttonText: 'Chagua',
-    sections: [{ title: 'Kipakej', rows }],
+    sections: [{ title: 'Kipakeji', rows }],
   });
+}
+
+// Map virtual Pro Max variants to a product-like object when not in catalog
+function resolveProductForSku(sku: string) {
+  const found = getProductBySku(sku);
+  if (found) return found;
+
+  if (sku.startsWith('PROMAX_')) {
+    const base = getProductBySku('PROMAX');
+    const price = base?.price ?? 0;
+    const name =
+      sku.endsWith('_A') ? 'Ujani Pro Max Kipakeji A' :
+      sku.endsWith('_B') ? 'Ujani Pro Max Kipakeji B' :
+      sku.endsWith('_C') ? 'Ujani Pro Max Kipakeji C' :
+      base?.name ?? 'Ujani Pro Max';
+    return { sku, name, price };
+  }
+  return undefined;
 }
 
 // Trimmed product actions (4)
 async function showProductActions(user: string, sku: string) {
-  const p = getProductBySku(sku);
+  const p = resolveProductForSku(sku) || getProductBySku(sku);
   if (!p) return;
 
   const rows: ListRow[] = [
@@ -386,29 +403,24 @@ async function handleInteractive(user: string, id: string, tt: (k: string, p?: a
     return sendText(user, 'Ongea na wakala: ' + (env.BUSINESS_WA_NUMBER_E164 || ''));
   }
   if (id === 'ACTION_CHANGE_LANGUAGE') {
+    // Toggle to the other language and redraw the menu
     const next = (getLang(user) === 'sw') ? 'en' : 'sw';
     setLang(user, next as Lang);
-    await sendText(user, next === 'sw' ? 'Lugha: Kiswahili' : 'Language: English');
-    return showMainMenu(user, tt);
+    return showMainMenu(user, (k, p) => t(next as Lang, k, p));
   }
   if (id === 'ACTION_BACK') return showMainMenu(user, tt);
 
   // Products:
   if (id.startsWith('PRODUCT_')) {
     const sku = id.replace('PRODUCT_', '');
-    if (sku === 'PROMAX') return showProMaxVariants(user);  // Pro Max → variants
-    return showProductActions(user, sku);                   // normal products → actions
-  }
-
-  // Variant selected → show actions for that variant
-  if (id.startsWith('PRODUCT_PROMAX_')) {
-    const sku = id.replace('PRODUCT_', '');
+    if (sku === 'PROMAX') return showProMaxVariants(user);    // Pro Max → A/B/C
+    if (sku.startsWith('PROMAX_')) return showProductActions(user, sku);
     return showProductActions(user, sku);
   }
 
   if (id.startsWith('BUY_')) {
     const sku = id.replace('BUY_', '');
-    const p = getProductBySku(sku);
+    const p = resolveProductForSku(sku) || getProductBySku(sku);
     if (!p) return;
     setPending(user, { sku: p.sku, name: p.name, qty: 1, unitPrice: p.price }); // DO NOT add to cart
     return beginCheckout(user, tt);
@@ -416,7 +428,7 @@ async function handleInteractive(user: string, id: string, tt: (k: string, p?: a
 
   if (id.startsWith('ADD_')) {
     const sku = id.replace('ADD_', '');
-    const p = getProductBySku(sku);
+    const p = resolveProductForSku(sku) || getProductBySku(sku);
     if (!p) return;
     addToCart(user, { sku: p.sku, name: p.name, qty: 1, unitPrice: p.price });
     return sendText(user, `✅ ${p.name} imeongezwa kwenye kikapu.`);
@@ -424,25 +436,31 @@ async function handleInteractive(user: string, id: string, tt: (k: string, p?: a
 
   if (id.startsWith('DETAILS_')) {
     const sku = id.replace('DETAILS_', '');
-    const p = getProductBySku(sku);
-    if (!p) return;
-    const key =
-      p.sku === 'KIBOKO' ? 'product.kiboko.details' :
-      p.sku === 'FURAHA' ? 'product.furaha.details' :
-      p.sku.startsWith('PROMAX') || p.sku === 'PROMAX' ? 'product.promax.details' :
-      '';
-    if (key) await sendText(user, t(getLang(user), key));
-    return showProductActions(user, p.sku);
+    const isA = sku.startsWith('PROMAX_A');
+    const isB = sku.startsWith('PROMAX_B');
+    const isC = sku.startsWith('PROMAX_C');
+
+    if (isA) await sendText(user, t(getLang(user), 'product.promax.package_a'));
+    else if (isB) await sendText(user, t(getLang(user), 'product.promax.package_b'));
+    else if (isC) await sendText(user, t(getLang(user), 'product.promax.package_c'));
+    else {
+      // fallback to any existing detail key you already have
+      const p = getProductBySku(sku);
+      if (p?.sku === 'KIBOKO') await sendText(user, t(getLang(user), 'product.kiboko.details'));
+      if (p?.sku === 'FURAHA') await sendText(user, t(getLang(user), 'product.furaha.details'));
+      if (p?.sku?.startsWith('PROMAX') || p?.sku === 'PROMAX') await sendText(user, t(getLang(user), 'product.promax.package_a'));
+    }
+    return showProductActions(user, sku);
   }
 
-  // Inside/Outside Dar first
+  // Location choice
   if (id === 'INSIDE_DAR') {
     return sendButtonsMessage({
       to: user,
-      body: tt('flow.ask_inside_choice'),
+      body: t(getLang(user), 'flow.ask_inside_choice'),
       buttons: [
-        { id: 'INSIDE_PICKUP',   title: 'Chukua ofisini' },
-        { id: 'INSIDE_DELIVERY', title: 'Tuletee' },
+        { id: 'INSIDE_PICKUP',   title: t(getLang(user), 'inside.choice_office') },
+        { id: 'INSIDE_DELIVERY', title: t(getLang(user), 'inside.choice_delivery') },
         { id: 'ACTION_BACK',     title: t(getLang(user), 'menu.back_to_menu') },
       ],
     });
@@ -454,7 +472,7 @@ async function handleInteractive(user: string, id: string, tt: (k: string, p?: a
     return;
   }
 
-  // Inside Dar → branch
+  // Inside Dar branches
   if (id === 'INSIDE_PICKUP') {
     STEP.set(user, 'INSIDE_PICKUP_ASK_NAME');
     CONTACT.set(user, {});
@@ -499,7 +517,7 @@ async function handleMessage(
   const s = getSession(user);
   const text = (incoming.text ?? '').trim();
 
-  // Stepper for outside/pickup/delivery forms
+  // Stepper for outside/pickup/delivery
   const step = STEP.get(user);
   if (step) {
     const contact = CONTACT.get(user) || {};
@@ -533,7 +551,7 @@ async function handleMessage(
         await sendPaymentInstructions(user, total);
         s.state = 'WAIT_PROOF';
         saveSession(user, s);
-        STEP.delete(user); // end stepper branch
+        STEP.delete(user);
         return sendText(user, 'Tuma *screenshot ya muamala* au *majina matatu* ya mtumaji kuthibitisha.');
       }
 
@@ -559,7 +577,7 @@ async function handleMessage(
         await sendPaymentInstructions(user, subtotal);
         s.state = 'WAIT_PROOF';
         saveSession(user, s);
-        STEP.delete(user); // end stepper branch
+        STEP.delete(user);
         return sendText(user, 'Tuma *screenshot ya muamala* au *majina matatu* ya mtumaji kuthibitisha.');
       }
 
@@ -572,8 +590,7 @@ async function handleMessage(
       case 'INSIDE_DELIV_ASK_PHONE': {
         if (!text) return sendText(user, 'Tafadhali andika *namba ya simu*.');
         contact.phone = text; CONTACT.set(user, contact);
-        // hand over to Wilaya/Place flow; clear step so it doesn't loop
-        STEP.delete(user);
+        STEP.delete(user); // prevent looping
         s.state = 'ASK_DISTRICT';
         saveSession(user, s);
         return sendText(user, 'Tafadhali andika *Wilaya* (mf. Temeke, Ilala, Kinondoni, Ubungo, Kigamboni).');
