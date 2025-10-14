@@ -40,10 +40,10 @@ const TRACK_AWAITING_NAME = new Set<string>();
 type CartItem = OrderItem;
 const CART = new Map<string, CartItem[]>();
 
-// When user taps "Nunua sasa", we keep a *pending* item for checkout only (not in cart)
+// When "Nunua sasa" is chosen, hold a *pending* item for checkout only (not in cart)
 const PENDING_ITEM = new Map<string, CartItem | null>();
 
-// For the multi-step capture (name/phone/region, office/delivery branches)
+// Outside/Inside stepper
 type Step =
   | 'OUTSIDE_ASK_NAME'
   | 'OUTSIDE_ASK_PHONE'
@@ -186,7 +186,10 @@ function fitRow(titleIn: string, subtitleIn?: string) {
   desc = clip(desc, MAX_LIST_DESC);
   return { title, description: desc || undefined };
 }
-function toListSections(model: ReturnType<typeof buildMainMenu> | { sections: any[] }) {
+type ListRow = { id: string; title: string; description?: string };
+type ListSection = { title?: string; rows: ListRow[] };
+
+function toListSections(model: { sections: any[] }): ListSection[] {
   return model.sections.map((s: any) => ({
     title: s.title,
     rows: s.rows.map((r: any) => {
@@ -198,40 +201,66 @@ function toListSections(model: ReturnType<typeof buildMainMenu> | { sections: an
 
 /* ------------------------------ menu shortcuts ------------------------------ */
 async function showMainMenu(user: string, tt: (k: string, p?: any) => string) {
-  // Use existing main menu (header now says "Angalia bidhaa zetu")
   const model = buildMainMenu(k => tt(k));
+  let sections = toListSections(model);
+
+  // Show opposite language + flag on the change-language row
+  const isSw = getLang(user) === 'sw';
+  const altLabel = isSw ? 'Change Language 🇬🇧' : 'Badili Lugha 🇹🇿';
+  sections = sections.map(sec => ({
+    ...sec,
+    rows: sec.rows.map(r => (r.id === 'ACTION_CHANGE_LANGUAGE' ? { ...r, title: altLabel } : r)),
+  }));
+
   await sendListMessage({
     to: user,
     header: model.header,
-    body: tt('menu.header'),
+    body: tt('menu.header'), // "Angalia bidhaa zetu" / "Browse our products"
     footer: model.footer,
     buttonText: 'Fungua',
-    sections: toListSections(model),
+    sections,
   });
 }
 
-// Product actions (trimmed to 4 choices via LIST, not buttons (buttons max=3))
-async function showProductActions(user: string, sku: string, tt: (k: string, p?: any) => string) {
-  const p = getProductBySku(sku);
-  if (!p) return;
+// Pro Max: show variants first
+async function showProMaxVariants(user: string) {
+  const parent = getProductBySku('PROMAX');
+  if (!parent || !parent.children?.length) return;
 
-  const section = {
-    title: 'Vitendo',
-    rows: [
-      { id: `BUY_${p.sku}`,     title: 'Nunua sasa' },
-      { id: `DETAILS_${p.sku}`, title: 'Maelezo zaidi' },
-      { id: `ADD_${p.sku}`,     title: 'Ongeza kweny kikapu' }, // <= 20 chars
-      { id: 'ACTION_BACK',      title: 'Rudi menyu' },
-    ],
-  };
+  const rows: ListRow[] = parent.children.map(ch => ({
+    id: `PRODUCT_${ch.sku}`,
+    title: ch.name.replace('Pro Max — ', 'Ujani Pro Max Kipakej '), // A/B/C
+  }));
 
   await sendListMessage({
     to: user,
-    header: `${p.name}`,
+    header: parent.name,
+    body: 'Chagua Kipakej cha Ujani Pro Max',
+    footer: '',
+    buttonText: 'Chagua',
+    sections: [{ title: 'Kipakej', rows }],
+  });
+}
+
+// Trimmed product actions (4)
+async function showProductActions(user: string, sku: string) {
+  const p = getProductBySku(sku);
+  if (!p) return;
+
+  const rows: ListRow[] = [
+    { id: `BUY_${p.sku}`,     title: 'Nunua sasa' },
+    { id: `DETAILS_${p.sku}`, title: 'Maelezo zaidi' },
+    { id: `ADD_${p.sku}`,     title: 'Ongeza kweny kikapu' },
+    { id: 'ACTION_BACK',      title: 'Rudi menyu' },
+  ];
+
+  await sendListMessage({
+    to: user,
+    header: p.name,
     body: `${p.name} — ${Math.round(p.price).toLocaleString('sw-TZ')} TZS`,
     footer: '',
     buttonText: 'Chagua',
-    sections: [section],
+    sections: [{ title: 'Vitendo', rows }],
   });
 }
 
@@ -263,7 +292,7 @@ async function showCart(user: string, tt: (k: string, p?: any) => string) {
   });
 }
 
-/* ---------------- Ward-average distance (fixes Keko case & ENOENT) ---------- */
+/* ---------------- Ward-average distance (Keko case & ENOENT safe) ----------- */
 type DarRow = {
   REGION: string; REGIONCODE: number;
   DISTRICT: string; DISTRICTCODE: number;
@@ -282,6 +311,7 @@ function normalize(s: string) {
     .replace(/\s+/g, ' ')
     .trim();
 }
+
 function resolveDataPath(): string {
   const fromEnv = process.env.DATA_LOCATION_PATH || (env as any).DATA_LOCATION_PATH;
   const here = path.dirname(fileURLToPath(import.meta.url));
@@ -291,8 +321,6 @@ function resolveDataPath(): string {
     path.resolve(process.cwd(), 'data/dar_location.json'),
     path.resolve(here, '../data/dar_location.json'),
     path.resolve(here, '../../src/data/dar_location.json'),
-    '/app/src/data/dar_location.json',
-    '/app/data/dar_location.json',
   ].filter(Boolean) as string[];
 
   for (const pth of candidates) {
@@ -300,9 +328,10 @@ function resolveDataPath(): string {
   }
   throw new Error(
     `dar_location.json not found. Tried:\n${candidates.map(c => ' - ' + c).join('\n')}\n` +
-    `Set DATA_LOCATION_PATH to the correct file if needed.`
+    `Set DATA_LOCATION_PATH to the correct file path.`
   );
 }
+
 let DAR_ROWS_CACHE: DarRow[] | null = null;
 function loadDarRows(): DarRow[] {
   if (DAR_ROWS_CACHE) return DAR_ROWS_CACHE;
@@ -312,27 +341,28 @@ function loadDarRows(): DarRow[] {
   return DAR_ROWS_CACHE;
 }
 
-/** If user types a Ward like "Keko", use ward-average; else fall back to places.ts logic. */
+/** Ward average first; then exact street; then fallback (district avg / default). */
 function distanceByWardOrFallback(district: string, wardOrStreet: string): { km: number; from: 'ward_avg' | 'place' | 'district_avg' | 'default' } {
   const rows = loadDarRows();
   const nd = normalize(district);
   const np = normalize(wardOrStreet);
 
-  // Try exact STREET match first (within district) via our own quick filter
   const inDist = rows.filter(r => normalize(r.DISTRICT) === nd);
-  const streetHit = inDist.find(r => normalize(r.STREET) === np);
-  if (streetHit) {
-    return { km: streetHit.DISTANCE_FROM_KEKO_MAGURUMBASI_KM, from: 'place' };
-  }
 
-  // Try WARD average
+  // WARD average
   const wardRows = inDist.filter(r => normalize(r.WARD) === np);
   if (wardRows.length) {
     const avg = wardRows.reduce((s, r) => s + (r.DISTANCE_FROM_KEKO_MAGURUMBASI_KM || 0), 0) / wardRows.length;
     return { km: +avg.toFixed(2), from: 'ward_avg' };
   }
 
-  // Fallback to existing resolver (district avg / default)
+  // Exact STREET
+  const streetHit = inDist.find(r => normalize(r.STREET) === np);
+  if (streetHit) {
+    return { km: streetHit.DISTANCE_FROM_KEKO_MAGURUMBASI_KM, from: 'place' };
+  }
+
+  // Fallback resolver
   const r = resolveDistanceKm(district, wardOrStreet);
   return r.from === 'place'
     ? { km: r.km, from: 'place' }
@@ -363,11 +393,19 @@ async function handleInteractive(user: string, id: string, tt: (k: string, p?: a
   }
   if (id === 'ACTION_BACK') return showMainMenu(user, tt);
 
-  // Product flows (show trimmed 4 options)
+  // Products:
   if (id.startsWith('PRODUCT_')) {
     const sku = id.replace('PRODUCT_', '');
-    return showProductActions(user, sku, tt);
+    if (sku === 'PROMAX') return showProMaxVariants(user);  // Pro Max → variants
+    return showProductActions(user, sku);                   // normal products → actions
   }
+
+  // Variant selected → show actions for that variant
+  if (id.startsWith('PRODUCT_PROMAX_')) {
+    const sku = id.replace('PRODUCT_', '');
+    return showProductActions(user, sku);
+  }
+
   if (id.startsWith('BUY_')) {
     const sku = id.replace('BUY_', '');
     const p = getProductBySku(sku);
@@ -375,6 +413,7 @@ async function handleInteractive(user: string, id: string, tt: (k: string, p?: a
     setPending(user, { sku: p.sku, name: p.name, qty: 1, unitPrice: p.price }); // DO NOT add to cart
     return beginCheckout(user, tt);
   }
+
   if (id.startsWith('ADD_')) {
     const sku = id.replace('ADD_', '');
     const p = getProductBySku(sku);
@@ -382,6 +421,7 @@ async function handleInteractive(user: string, id: string, tt: (k: string, p?: a
     addToCart(user, { sku: p.sku, name: p.name, qty: 1, unitPrice: p.price });
     return sendText(user, `✅ ${p.name} imeongezwa kwenye kikapu.`);
   }
+
   if (id.startsWith('DETAILS_')) {
     const sku = id.replace('DETAILS_', '');
     const p = getProductBySku(sku);
@@ -392,18 +432,17 @@ async function handleInteractive(user: string, id: string, tt: (k: string, p?: a
       p.sku.startsWith('PROMAX') || p.sku === 'PROMAX' ? 'product.promax.details' :
       '';
     if (key) await sendText(user, t(getLang(user), key));
-    return showProductActions(user, p.sku, tt);
+    return showProductActions(user, p.sku);
   }
 
   // Inside/Outside Dar first
   if (id === 'INSIDE_DAR') {
-    // Ask "Office or Delivery"
     return sendButtonsMessage({
       to: user,
       body: tt('flow.ask_inside_choice'),
       buttons: [
-        { id: 'INSIDE_PICKUP',   title: t(getLang(user), 'inside.choice_office') }, // <= 20 chars
-        { id: 'INSIDE_DELIVERY', title: t(getLang(user), 'inside.choice_delivery') },
+        { id: 'INSIDE_PICKUP',   title: 'Chukua ofisini' },
+        { id: 'INSIDE_DELIVERY', title: 'Tuletee' },
         { id: 'ACTION_BACK',     title: t(getLang(user), 'menu.back_to_menu') },
       ],
     });
@@ -438,14 +477,14 @@ async function beginCheckout(user: string, tt: (k: string, p?: any) => string) {
   if (!items.length) return showMainMenu(user, tt);
 
   const s = getSession(user);
-  s.state = 'ASK_IF_DAR';           // Ask location BEFORE any name
+  s.state = 'ASK_IF_DAR'; // Ask location BEFORE any name
   saveSession(user, s);
   return sendButtonsMessage({
     to: user,
     body: 'Je, upo ndani ya Dar es Salaam?',
     buttons: [
-      { id: 'INSIDE_DAR',  title: 'Ndani ya Dar' }, // <= 20 chars
-      { id: 'OUTSIDE_DAR', title: 'Nje ya Dar' },   // <= 20 chars
+      { id: 'INSIDE_DAR',  title: 'Ndani ya Dar' },
+      { id: 'OUTSIDE_DAR', title: 'Nje ya Dar' },
       { id: 'ACTION_BACK', title: t(getLang(user), 'menu.back_to_menu') },
     ],
   });
@@ -480,23 +519,21 @@ async function handleMessage(
       case 'OUTSIDE_ASK_REGION': {
         if (!text) return sendText(user, 'Tafadhali andika *mkoa/sehemu*.');
         contact.region = text; CONTACT.set(user, contact);
-        // Summary with flat fee 10,000
         const items = getCheckoutItems(user);
         const subtotal = computeSubtotal(items);
-        const total = subtotal + OUTSIDE_DAR_FEE;
+        const total = subtotal + 10_000;
         await sendText(user, [
           '📦 Muhtasari wa Oda',
           `Jina: ${contact.name ?? ''}`,
           `Simu: ${contact.phone ?? ''}`,
           `Sehemu: ${contact.region ?? ''}`,
-          `Gharama ya uwasilishaji: ${OUTSIDE_DAR_FEE.toLocaleString('sw-TZ')} TZS`,
+          `Gharama ya uwasilishaji: ${Number(10_000).toLocaleString('sw-TZ')} TZS`,
           `Jumla: ${Math.round(total).toLocaleString('sw-TZ')} TZS`,
         ].join('\n'));
         await sendPaymentInstructions(user, total);
-        // move to proof
         s.state = 'WAIT_PROOF';
         saveSession(user, s);
-        STEP.delete(user);
+        STEP.delete(user); // end stepper branch
         return sendText(user, 'Tuma *screenshot ya muamala* au *majina matatu* ya mtumaji kuthibitisha.');
       }
 
@@ -509,7 +546,6 @@ async function handleMessage(
       case 'INSIDE_PICKUP_ASK_PHONE': {
         if (!text) return sendText(user, 'Tafadhali andika *namba ya simu*.');
         contact.phone = text; CONTACT.set(user, contact);
-        // Summary without delivery fee
         const items = getCheckoutItems(user);
         const subtotal = computeSubtotal(items);
         await sendText(user, [
@@ -521,10 +557,9 @@ async function handleMessage(
           `Habari ${contact.name ?? ''}, fika ofisini kwetu tupo *Keko Omax Bar*.`,
         ].join('\n'));
         await sendPaymentInstructions(user, subtotal);
-        // move to proof
         s.state = 'WAIT_PROOF';
         saveSession(user, s);
-        STEP.delete(user);
+        STEP.delete(user); // end stepper branch
         return sendText(user, 'Tuma *screenshot ya muamala* au *majina matatu* ya mtumaji kuthibitisha.');
       }
 
@@ -537,7 +572,8 @@ async function handleMessage(
       case 'INSIDE_DELIV_ASK_PHONE': {
         if (!text) return sendText(user, 'Tafadhali andika *namba ya simu*.');
         contact.phone = text; CONTACT.set(user, contact);
-        // Now continue with Wilaya → Ward/Place via ASK_DISTRICT
+        // hand over to Wilaya/Place flow; clear step so it doesn't loop
+        STEP.delete(user);
         s.state = 'ASK_DISTRICT';
         saveSession(user, s);
         return sendText(user, 'Tafadhali andika *Wilaya* (mf. Temeke, Ilala, Kinondoni, Ubungo, Kigamboni).');
@@ -553,7 +589,6 @@ async function handleMessage(
     }
 
     case 'ASK_IF_DAR': {
-      // Text fallback for "Ndani/Nje"
       const ans = text.toLowerCase();
       if (['ndani', 'ndio', 'ndiyo', 'yes', 'y'].includes(ans)) {
         return handleInteractive(user, 'INSIDE_DAR', tt);
@@ -561,7 +596,6 @@ async function handleMessage(
       if (['nje', 'hapana', 'no', 'sio', 'siyo', 'si', 'n'].includes(ans)) {
         return handleInteractive(user, 'OUTSIDE_DAR', tt);
       }
-      // Re-ask buttons
       return sendButtonsMessage({
         to: user,
         body: 'Je, upo ndani ya Dar es Salaam?',
@@ -585,14 +619,12 @@ async function handleMessage(
       if (!text) return sendText(user, 'Tafadhali andika *Sehemu/Ward/Mtaa*.');
       s.place = text;
 
-      // Distance with Ward average support
       const r = distanceByWardOrFallback(s.district!, s.place);
       const km = r.km;
       const fee = feeForDarDistance(km);
       s.distanceKm = km;
       s.price = fee;
 
-      // Build totals using checkout items (pending or cart)
       const items = getCheckoutItems(user);
       const subtotal = computeSubtotal(items);
       const total = subtotal + fee;
@@ -614,7 +646,6 @@ async function handleMessage(
     }
 
     case 'SHOW_PRICE': {
-      // Not used in new flow; send proof prompt if reached.
       s.state = 'WAIT_PROOF';
       saveSession(user, s);
       return sendText(user, 'Tuma *screenshot ya muamala* au *majina matatu* ya mtumaji kuthibitisha.');
@@ -623,44 +654,40 @@ async function handleMessage(
     case 'WAIT_PROOF': {
       const items = getCheckoutItems(user);
       const deliveryFee = s.price ?? feeForDarDistance(s.distanceKm ?? Number(env.DEFAULT_DISTANCE_KM));
-      const mostRecent = (CONTACT.get(user)?.name) ? getMostRecentOrderByName(CONTACT.get(user)!.name!) : undefined;
+      const contact = CONTACT.get(user) || {};
+      const mostRecent = contact.name ? getMostRecentOrderByName(contact.name) : undefined;
 
-      // image proof
-      if (incoming.hasImage && CONTACT.get(user)?.name) {
+      if (incoming.hasImage && contact.name) {
         if (!mostRecent || mostRecent.status === 'Delivered') {
-          const contact = CONTACT.get(user)!;
           const delivery = s.district && s.place
             ? { mode: 'dar' as const, district: s.district!, place: s.place!, distanceKm: s.distanceKm ?? Number(env.DEFAULT_DISTANCE_KM), deliveryFee }
             : (contact.region
-                ? { mode: 'outside' as const, region: contact.region!, transportMode: 'bus' as const, deliveryFee: OUTSIDE_DAR_FEE }
+                ? { mode: 'outside' as const, region: contact.region!, transportMode: 'bus' as const, deliveryFee: 10_000 }
                 : { mode: 'pickup' as const });
           addOrder({ customerName: contact.name!, phone: contact.phone, items, delivery });
         }
-        const order = getMostRecentOrderByName(CONTACT.get(user)!.name!)!;
+        const order = getMostRecentOrderByName(contact.name!)!;
         setOrderProof(order, { type: 'image', imageId: incoming.imageId, receivedAt: new Date().toISOString() });
-        // clear context
         clearCart(user); clearCheckoutContext(user); resetSession(user);
         await sendText(user, 'Tumepokea *screenshot*. Asante! Oda yako imekamilika.');
         await sendText(user, 'Kwa kufuatilia, andika jina ulilotumia wakati wowote.');
         return;
       }
 
-      // names proof
       const words = (incoming.text ?? '')
         .split(/\s+/)
         .map(w => w.trim())
         .filter(w => /[A-Za-z\u00C0-\u024F]+/.test(w));
-      if (words.length >= 3 && CONTACT.get(user)?.name) {
+      if (words.length >= 3 && contact.name) {
         if (!mostRecent || mostRecent.status === 'Delivered') {
-          const contact = CONTACT.get(user)!;
           const delivery = s.district && s.place
             ? { mode: 'dar' as const, district: s.district!, place: s.place!, distanceKm: s.distanceKm ?? Number(env.DEFAULT_DISTANCE_KM), deliveryFee }
             : (contact.region
-                ? { mode: 'outside' as const, region: contact.region!, transportMode: 'bus' as const, deliveryFee: OUTSIDE_DAR_FEE }
+                ? { mode: 'outside' as const, region: contact.region!, transportMode: 'bus' as const, deliveryFee: 10_000 }
                 : { mode: 'pickup' as const });
           addOrder({ customerName: contact.name!, phone: contact.phone, items, delivery });
         }
-        const order = getMostRecentOrderByName(CONTACT.get(user)!.name!)!;
+        const order = getMostRecentOrderByName(contact.name)!;
         setOrderProof(order, { type: 'names', fullNames: incoming.text!, receivedAt: new Date().toISOString() });
         clearCart(user); clearCheckoutContext(user); resetSession(user);
         await sendText(user, 'Tumepokea majina ya mtumaji. Asante! Oda yako imekamilika.');
