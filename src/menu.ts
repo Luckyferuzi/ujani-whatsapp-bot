@@ -1,85 +1,176 @@
 // src/menu.ts
-// Menu + product helpers aligned with webhook.ts expectations
 
-export type Product = {
-  id: string;
-  priceTZS: number;
-};
+function formatTZS(amount: number): string {
+  return `${Math.round(amount).toLocaleString('sw-TZ')} TZS`;
+}
 
-export const PROMAX_PRICE_TZS = 350_000;
+export type ActionId =
+  | 'BUY_NOW'
+  | 'ADD_TO_CART'
+  | 'MORE_DETAILS'
+  | 'VIEW_CART'
+  | 'CHECKOUT'
+  | 'TRACK_BY_NAME'
+  | 'TALK_TO_AGENT'
+  | 'CHANGE_LANGUAGE'
+  | 'BACK_TO_MENU';
 
-// Main products shown in the list menu
+export interface Product {
+  sku: string;
+  name: string;
+  price: number;
+  short?: string;
+  children?: Product[];
+}
+
 export const PRODUCTS: Product[] = [
-  // UPDATED names and price
-  { id: 'product_kiboko', priceTZS: 140_000 }, // Ujani ya kupaka — Kiboko ya Kibamia
-  { id: 'product_furaha', priceTZS: 110_000 }, // Ujani ya kunywa — Furaha ya Ndoa (FIXED)
-  // Pro Max (category row) is informational; sub-packages below.
+  {
+    sku: 'KIBOKO',
+    name: 'Ujani Kiboko',
+    price: 140_000,
+    short: 'Kiboko — ' + formatTZS(140_000),
+  },
+  {
+    sku: 'FURAHA',
+    name: 'Furaha ya Ndoa',
+    price: 110_000,
+    short: 'Furaha ya Ndoa — ' + formatTZS(110_000),
+  },
+  {
+    sku: 'PROMAX',
+    name: 'Ujani Pro Max',
+    price: 350_000,
+    short: 'Pro Max — ' + formatTZS(350_000),
+    children: [
+      {
+        sku: 'PROMAX_A',
+        name: 'Pro Max — A',
+        price: 350_000,
+        short: 'Pro Max A — ' + formatTZS(350_000),
+      },
+      {
+        sku: 'PROMAX_B',
+        name: 'Pro Max — B',
+        price: 350_000,
+        short: 'Pro Max B — ' + formatTZS(350_000),
+      },
+      {
+        sku: 'PROMAX_C',
+        name: 'Pro Max — C',
+        price: 350_000,
+        short: 'Pro Max C — ' + formatTZS(350_000),
+      },
+    ],
+  },
 ];
 
-// Pro Max sub-packages
-export const PROMAX_PACKAGES = [
-  { id: 'promax_a' },
-  { id: 'promax_b' },
-  { id: 'promax_c' },
-];
-
-const PROMAX_SET = new Set(['promax_a', 'promax_b', 'promax_c']);
-
-export function isProMaxPackageId(id: string): boolean {
-  return PROMAX_SET.has((id || '').toLowerCase());
-}
-
-export function formatTZS(amount: number): string {
-  return new Intl.NumberFormat('sw-TZ', {
-    style: 'currency',
-    currency: 'TZS',
-    maximumFractionDigits: 0,
-  }).format(Math.max(0, Math.floor(amount || 0)));
-}
-
-// Human titles (keep requested Swahili phrasing in both locales for clarity)
-export function productTitle(productId: string, _lang: 'en' | 'sw'): string {
-  const id = (productId || '').toLowerCase();
-  if (id === 'product_kiboko') return 'Ujani ya kupaka — Kiboko ya Kibamia';
-  if (id === 'product_furaha') return 'Ujani ya kunywa — Furaha ya Ndoa';
-  if (id === 'product_promax') return 'Ujani Pro Max (A/B/C)';
-  return productId;
-}
-
-export function productSummary(productId: string, lang: 'en' | 'sw'): string {
-  const id = (productId || '').toLowerCase();
-  const price = PRODUCTS.find(p => p.id === id)?.priceTZS ?? 0;
-
-  if (id === 'product_kiboko') {
-    return (lang === 'en'
-      ? `Topical pack *Kiboko ya Kibamia*\nPrice: ${formatTZS(price)}`
-      : `Pakiti ya kupaka *Kiboko ya Kibamia*\nBei: ${formatTZS(price)}`);
+export function getProductBySku(sku: string): Product | undefined {
+  for (const p of PRODUCTS) {
+    if (p.sku === sku) return p;
+    if (p.children) {
+      const c = p.children.find(ch => ch.sku === sku);
+      if (c) return c;
+    }
   }
-  if (id === 'product_furaha') {
-    return (lang === 'en'
-      ? `Oral pack *Furaha ya Ndoa*\nPrice: ${formatTZS(price)}`
-      : `Pakiti ya kunywa *Furaha ya Ndoa*\nBei: ${formatTZS(price)}`);
-  }
-  if (id === 'product_promax') {
-    return (lang === 'en'
-      ? `Ujani Pro Max — choose package A/B/C. Total ${formatTZS(PROMAX_PRICE_TZS)}.`
-      : `Ujani Pro Max — chagua pakiti A/B/C. Bei jumla ${formatTZS(PROMAX_PRICE_TZS)}.`);
-  }
-  return '';
+  return undefined;
 }
 
-export function promaxPackageTitle(packageId: string, lang: 'en' | 'sw'): string {
-  const id = (packageId || '').toLowerCase();
-  if (id === 'promax_a') return lang === 'en' ? 'Package A' : 'Pakiti A';
-  if (id === 'promax_b') return lang === 'en' ? 'Package B' : 'Pakiti B';
-  if (id === 'promax_c') return lang === 'en' ? 'Package C' : 'Pakiti C';
-  return packageId;
+export function getTopLevelProducts(): Product[] {
+  return PRODUCTS;
 }
 
-export function promaxPackageSummary(packageId: string, lang: 'en' | 'sw'): string {
-  const id = (packageId || '').toLowerCase();
-  if (id === 'promax_a') return lang === 'en' ? '3 topical medicines' : 'Dawa 3 za kupaka';
-  if (id === 'promax_b') return lang === 'en' ? '3 oral medicines' : 'Dawa 3 za kunywa';
-  if (id === 'promax_c') return lang === 'en' ? '2 topical + 2 oral' : '2 za kupaka + 2 za kunywa';
-  return '';
+export function getVariantsOf(sku: string): Product[] {
+  const p = PRODUCTS.find(x => x.sku === sku);
+  return p?.children ?? [];
+}
+
+export interface MenuRow {
+  id: string;
+  title: string;
+  subtitle?: string;
+}
+
+export interface MenuSection {
+  title: string;
+  rows: MenuRow[];
+}
+
+export interface MenuModel {
+  header?: string;
+  footer?: string;
+  sections: MenuSection[];
+}
+
+export function buildMainMenu(t: (key: string) => string): MenuModel {
+  return {
+    header: t('menu.header'),
+    footer: t('menu.footer'),
+    sections: [
+      {
+        title: t('menu.products_section'),
+        rows: getTopLevelProducts().map(p => ({
+          id: `PRODUCT_${p.sku}`,
+          title: `${p.name} — ${formatTZS(p.price)}`,
+          subtitle: p.short || undefined,
+        })),
+      },
+      {
+        title: t('menu.actions_section'),
+        rows: [
+          { id: 'ACTION_VIEW_CART', title: t('menu.view_cart') },
+          { id: 'ACTION_CHECKOUT', title: t('menu.checkout') },
+          { id: 'ACTION_TRACK_BY_NAME', title: t('menu.track_by_name') },
+          { id: 'ACTION_TALK_TO_AGENT', title: t('menu.talk_to_agent') },
+          { id: 'ACTION_CHANGE_LANGUAGE', title: t('menu.change_language') },
+        ],
+      },
+    ],
+  };
+}
+
+export function buildProductMenu(t: (key: string) => string, product: Product): MenuModel {
+  const rows: MenuRow[] = [
+    { id: `BUY_${product.sku}`, title: t('menu.buy_now') },
+    { id: `ADD_${product.sku}`, title: t('menu.add_to_cart') },
+    { id: `DETAILS_${product.sku}`, title: t('menu.more_details') },
+    { id: 'ACTION_VIEW_CART', title: t('menu.view_cart') },
+    { id: 'ACTION_CHECKOUT', title: t('menu.checkout') },
+    { id: 'ACTION_BACK', title: t('menu.back_to_menu') },
+  ];
+
+  if (product.children?.length) {
+    rows.unshift({ id: `VARIANTS_${product.sku}`, title: t('menu.choose_variant') });
+  }
+
+  return {
+    header: `${product.name} — ${formatTZS(product.price)}`,
+    footer: t('menu.footer'),
+    sections: [{ title: t('menu.actions_section'), rows }],
+  };
+}
+
+export function buildVariantMenu(t: (key: string) => string, parent: Product): MenuModel {
+  const variants = parent.children ?? [];
+  return {
+    header: `${parent.name}`,
+    footer: t('menu.footer'),
+    sections: [
+      {
+        title: t('menu.choose_variant'),
+        rows: variants.map(v => ({
+          id: `PRODUCT_${v.sku}`,
+          title: `${v.name} — ${formatTZS(v.price)}`,
+          subtitle: v.short || undefined,
+        })),
+      },
+      {
+        title: t('menu.actions_section'),
+        rows: [
+          { id: 'ACTION_VIEW_CART', title: t('menu.view_cart') },
+          { id: 'ACTION_CHECKOUT', title: t('menu.checkout') },
+          { id: 'ACTION_BACK', title: t('menu.back_to_menu') },
+        ],
+      },
+    ],
+  };
 }

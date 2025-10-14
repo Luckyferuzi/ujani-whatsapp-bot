@@ -1,36 +1,42 @@
+// src/server.ts
 import express from 'express';
-import pinoHttp from 'pino-http';
 import { env } from './config.js';
 import { webhook } from './routes/webhook.js';
-import statusRouter from './routes/status.js';
+import { status } from './routes/status.js';
 
 const app = express();
 
-// HTTP logging
-app.use(pinoHttp());
+// Capture raw body so webhook signature verification can use it
+app.use(
+  express.json({
+    verify: (req: any, _res, buf) => {
+      req.rawBody = buf; // used by verifySignature in webhook.ts
+    },
+  })
+);
 
-// keep raw body for optional signature verification
-app.use(express.json({
-  verify: (req: any, _res, buf) => {
-    (req as any).rawBody = buf;
-  }
-}));
-
-// Root & health
-app.get('/', (_req, res) => res.json({ ok: true, app: 'ujani-whatsapp-bot' }));
-app.use('/api', statusRouter);
-
-// WhatsApp webhook (GET verify + POST messages)
-app.use('/webhook', webhook);
-
-// Error handler
-app.use((err: any, req: any, res: any, _next: any) => {
-  req.log?.error({ err }, 'Unhandled error');
-  res.status(500).json({ error: 'Internal Server Error' });
+app.get('/', (_req, res) => {
+  res.status(200).send('Ujani Herbal Bot is running');
 });
 
-// Start
-app.listen(env.PORT, () => {
-  console.log(`✅ Server listening on :${env.PORT}`);
-  console.log(`ℹ️  Public base URL set to: ${env.PUBLIC_BASE_URL}`);
+// Routes
+app.use('/', webhook);
+app.use('/api', status);
+
+// 404
+app.use((_req, res) => {
+  res.status(404).json({ error: 'Not found' });
+});
+
+// Error handler
+app.use(
+  (err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    console.error('Server error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+);
+
+const port = env.PORT ?? 3000;
+app.listen(port, () => {
+  console.log(`Server listening on :${port}`);
 });
