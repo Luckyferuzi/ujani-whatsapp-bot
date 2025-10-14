@@ -1,5 +1,7 @@
+// src/places.ts
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { env } from './config.js';
 
 type Row = {
@@ -9,7 +11,7 @@ type Row = {
   DISTRICTCODE: number;
   WARD: string;
   WARDCODE: number;
-  STREET: string; // place / mtaa
+  STREET: string;
   PLACES: string;
   DISTANCE_FROM_KEKO_MAGURUMBASI_KM: number;
 };
@@ -27,9 +29,32 @@ function normalize(s: string): string {
     .trim();
 }
 
+function resolveDataPath(): string {
+  const fromEnv = process.env.DATA_LOCATION_PATH || (env as any).DATA_LOCATION_PATH;
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    fromEnv,
+    path.resolve(process.cwd(), 'src/data/dar_location.json'),
+    path.resolve(process.cwd(), 'data/dar_location.json'),
+    path.resolve(here, '../data/dar_location.json'),
+    '/app/src/data/dar_location.json',
+    '/app/data/dar_location.json',
+  ].filter(Boolean) as string[];
+
+  for (const p of candidates) {
+    try {
+      if (fs.existsSync(p)) return p;
+    } catch {}
+  }
+  throw new Error(
+    `dar_location.json not found. Tried:\n${candidates.map(c => ' - ' + c).join('\n')}\n` +
+    `Set DATA_LOCATION_PATH to the correct file if needed.`
+  );
+}
+
 function loadRows(): Row[] {
   if (CACHE) return CACHE.rows;
-  const file = path.resolve('src/data/dar_location.json');
+  const file = resolveDataPath();
   const raw = fs.readFileSync(file, 'utf8');
   CACHE = { rows: JSON.parse(raw) as Row[] };
   return CACHE.rows;
@@ -66,5 +91,5 @@ export function resolveDistanceKm(
   }
   const avg = districtAverageKm(district);
   if (typeof avg === 'number') return { km: avg, from: 'district_avg' };
-  return { km: env.DEFAULT_DISTANCE_KM, from: 'default' };
+  return { km: Number(env.DEFAULT_DISTANCE_KM) || 8, from: 'default' };
 }

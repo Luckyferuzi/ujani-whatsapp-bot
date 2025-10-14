@@ -21,24 +21,19 @@ import {
   listOrdersByName,
   getMostRecentOrderByName,
 } from '../orders.js';
-import { getSession, saveSession, resetSession, Session } from '../session.js';
+import { getSession, saveSession, resetSession } from '../session.js';
 import {
   buildMainMenu,
   buildProductMenu,
   buildVariantMenu,
   getProductBySku,
-  getTopLevelProducts,
-  getVariantsOf,
 } from '../menu.js';
 
-// -------- Router --------
 export const webhook = Router();
 
-// Lightweight per-user prefs (no DB yet)
-const USER_LANG = new Map<string, Lang>();         // default 'sw'
-const TRACK_AWAITING_NAME = new Set<string>();     // users currently in "track by name" prompt
-
-// Simple cart store (per user) — keeps existing prices/flow intact
+/* ------------------------- lightweight per-user state ------------------------ */
+const USER_LANG = new Map<string, Lang>();
+const TRACK_AWAITING_NAME = new Set<string>();
 type CartItem = OrderItem;
 const CART = new Map<string, CartItem[]>();
 
@@ -48,47 +43,34 @@ function getLang(user: string): Lang {
 function setLang(user: string, lang: Lang) {
   USER_LANG.set(user, lang);
 }
-
-function addToCart(user: string, item: CartItem) {
-  const cart = CART.get(user) ?? [];
-  const existing = cart.find(c => c.sku === item.sku && c.unitPrice === item.unitPrice);
-  if (existing) existing.qty += item.qty;
-  else cart.push({ ...item });
-  CART.set(user, cart);
-}
-function getCart(user: string): CartItem[] {
-  return CART.get(user) ?? [];
-}
-function clearCart(user: string) {
-  CART.delete(user);
-}
-
 function money(n: number) {
   return `${Math.round(n).toLocaleString('sw-TZ')} TZS`;
 }
+function getCart(u: string) { return CART.get(u) ?? []; }
+function setCart(u: string, c: CartItem[]) { CART.set(u, c); }
+function clearCart(u: string) { CART.delete(u); }
+function addToCart(u: string, item: CartItem) {
+  const cart = getCart(u);
+  const same = cart.find(c => c.sku === item.sku && c.unitPrice === item.unitPrice);
+  if (same) same.qty += item.qty; else cart.push({ ...item });
+  setCart(u, cart);
+}
 
-// ---- WhatsApp webhook verification (GET) ----
-webhook.get('/webhook', (req: Request, res: Response) => {
+/* --------------------------------- verify ---------------------------------- */
+webhook.get('/webhook', (req, res) => {
   const mode = req.query['hub.mode'];
   const token = req.query['hub.verify_token'];
   const challenge = req.query['hub.challenge'];
-
-  if (mode === 'subscribe' && token === env.VERIFY_TOKEN) {
-    return res.status(200).send(challenge);
-  }
+  if (mode === 'subscribe' && token === env.VERIFY_TOKEN) return res.status(200).send(challenge);
   return res.sendStatus(403);
 });
 
-// ---- WhatsApp webhook receiver (POST) ----
+/* --------------------------------- receive --------------------------------- */
 webhook.post('/webhook', async (req: Request, res: Response) => {
   try {
-    // Signature verify (if APP_SECRET set). If your server isn't using raw body middleware,
-    // we fallback to the JSON string to avoid false negatives in dev.
     const raw = (req as any).rawBody ?? JSON.stringify(req.body ?? {});
     const sig = req.headers['x-hub-signature-256'] as string | undefined;
-    if (!verifySignature(raw, sig)) {
-      return res.sendStatus(403);
-    }
+    if (!verifySignature(raw, sig)) return res.sendStatus(403);
 
     const entries = req.body?.entry ?? [];
     for (const entry of entries) {
@@ -97,19 +79,14 @@ webhook.post('/webhook', async (req: Request, res: Response) => {
         const value = ch?.value;
         const messages = value?.messages ?? [];
         for (const msg of messages) {
-          // Basic fields
-          const from = msg?.from as string;                  // user phone
-          const waId = msg?.id as string | undefined;        // message id
+          const from = msg?.from as string;
+          const mid = msg?.id as string | undefined;
           if (!from) continue;
+          if (mid) await markAsRead(mid).catch(() => {});
 
-          // Mark read for better UX
-          if (waId) await markAsRead(waId).catch(() => {});
-
-          // Language pref
           const lang = getLang(from);
-          const tt = (key: string, params?: Record<string, string | number>) => t(lang, key, params);
+          const tt = (k: string, p?: Record<string, string | number>) => t(lang, k, p);
 
-          // Parse interaction
           const type = msg?.type as string;
           const textBody: string | undefined = type === 'text' ? msg?.text?.body : undefined;
 
@@ -123,87 +100,88 @@ webhook.post('/webhook', async (req: Request, res: Response) => {
           const hasImage = type === 'image';
           const imageId: string | undefined = hasImage ? msg.image?.id : undefined;
 
-          // Route interactions first
+          // Always start at main menu on first contact or common "start" commands
+          const s = getSession(from);
+          if (!interactiveId && !hasImage) {
+            const txt = (textBody || '').trim().toLowerCase();
+            if (s.state === 'IDLE' || ['hi', 'hello', 'mambo', 'start', 'anza', 'menu', 'menyu'].includes(txt)) {
+              await showMainMenu(from, tt);
+              continue;
+            }
+          }
+
+          // Handle interactive replies first
           if (interactiveId) {
             await handleInteractive(from, interactiveId, tt);
             continue;
           }
 
-          // Track-by-name prompt short-circuit
+          // Track-by-name prompt
           if (TRACK_AWAITING_NAME.has(from) && textBody) {
             TRACK_AWAITING_NAME.delete(from);
             await handleTrackByName(from, textBody.trim(), tt);
             continue;
           }
 
-          // Otherwise route plain text / media into the state machine
+          // Fallback to state machine
           await handleMessage(from, { text: textBody, hasImage, imageId }, tt);
         }
       }
     }
 
     res.sendStatus(200);
-  } catch (err) {
-    console.error('webhook error:', err);
+  } catch (e) {
+    console.error('webhook error:', e);
     res.sendStatus(200);
   }
 });
 
-// -------- Helpers to render menus to WA ----------
-
+/* -------------------------- render menus as lists --------------------------- */
 function toListSections(model: ReturnType<typeof buildMainMenu> | ReturnType<typeof buildProductMenu> | ReturnType<typeof buildVariantMenu>) {
   return model.sections.map(s => ({
     title: s.title,
-    rows: s.rows.map(r => ({
-      id: r.id,
-      title: r.title,
-      description: r.subtitle,
-    })),
+    rows: s.rows.map(r => ({ id: r.id, title: r.title, description: r.subtitle })),
   }));
 }
-
 async function showMainMenu(user: string, tt: (k: string, p?: any) => string) {
-  const model = buildMainMenu((k) => tt(k));
+  const model = buildMainMenu(k => tt(k));
   await sendListMessage({
     to: user,
     header: model.header,
     body: tt('menu.header'),
     footer: model.footer,
-    buttonText: 'Chagua',
+    buttonText: 'Fungua',
     sections: toListSections(model),
   });
 }
-
 async function showProductMenu(user: string, sku: string, tt: (k: string, p?: any) => string) {
   const p = getProductBySku(sku);
   if (!p) return;
-  const model = buildProductMenu((k) => tt(k), p);
+  const model = buildProductMenu(k => tt(k), p);
   await sendListMessage({
     to: user,
     header: model.header,
-    body: p?.name ?? 'Bidhaa',
+    body: p.name,
     footer: model.footer,
-    buttonText: 'Chagua',
+    buttonText: 'Fungua',
     sections: toListSections(model),
   });
 }
-
 async function showVariantsMenu(user: string, parentSku: string, tt: (k: string, p?: any) => string) {
   const parent = getProductBySku(parentSku);
   if (!parent) return;
-  const model = buildVariantMenu((k) => tt(k), parent);
+  const model = buildVariantMenu(k => tt(k), parent);
   await sendListMessage({
     to: user,
     header: model.header,
-    body: parent?.name ?? 'Bidhaa',
+    body: parent.name,
     footer: model.footer,
     buttonText: 'Chagua',
     sections: toListSections(model),
   });
 }
 
-// -------- Cart & Checkout summaries ----------
-
+/* ------------------------------ cart helpers ------------------------------- */
 function cartSummaryText(user: string, tt: (k: string, p?: any) => string) {
   const cart = getCart(user);
   if (!cart.length) return tt('cart.empty');
@@ -219,7 +197,6 @@ function cartSummaryText(user: string, tt: (k: string, p?: any) => string) {
     tt('cart.summary_total', { total: Math.round(subtotal).toLocaleString('sw-TZ') }),
   ].join('\n');
 }
-
 async function showCart(user: string, tt: (k: string, p?: any) => string) {
   const body = cartSummaryText(user, tt);
   await sendButtonsMessage({
@@ -232,49 +209,61 @@ async function showCart(user: string, tt: (k: string, p?: any) => string) {
   });
 }
 
-// -------- Interaction handlers ----------
-
+/* --------------------------- interactive routing --------------------------- */
 async function handleInteractive(user: string, id: string, tt: (k: string, p?: any) => string) {
-  // Global actions
-  if (id === 'ACTION_VIEW_CART') {
-    await showCart(user, tt);
-    return;
-  }
-  if (id === 'ACTION_CHECKOUT') {
-    await beginCheckout(user, tt);
-    return;
-  }
+  // global actions
+  if (id === 'ACTION_VIEW_CART') return showCart(user, tt);
+  if (id === 'ACTION_CHECKOUT') return beginCheckout(user, tt);
   if (id === 'ACTION_TRACK_BY_NAME') {
     TRACK_AWAITING_NAME.add(user);
-    await sendText(user, tt('track.ask_name'));
-    return;
+    return sendText(user, tt('track.ask_name'));
   }
   if (id === 'ACTION_TALK_TO_AGENT') {
-    await sendText(user, 'Karibu kuwasiliana na wakala. Tuma ujumbe wako hapa, au piga: ' + (env.BUSINESS_WA_NUMBER_E164 || ''));
-    return;
+    return sendText(user, 'Ongea na wakala: ' + (env.BUSINESS_WA_NUMBER_E164 || ''));
   }
   if (id === 'ACTION_CHANGE_LANGUAGE') {
     const next = (getLang(user) === 'sw') ? 'en' : 'sw';
     setLang(user, next as Lang);
-    await sendText(user, next === 'sw' ? 'Lugha imebadilishwa kuwa *Kiswahili*.' : 'Language switched to *English*.');
-    await showMainMenu(user, tt);
-    return;
+    await sendText(user, next === 'sw' ? 'Lugha: Kiswahili' : 'Language: English');
+    return showMainMenu(user, tt);
   }
-  if (id === 'ACTION_BACK') {
-    await showMainMenu(user, tt);
-    return;
+  if (id === 'ACTION_BACK') return showMainMenu(user, tt);
+
+  // Dar buttons
+  if (id === 'INSIDE_DAR') {
+    const s = getSession(user);
+    s.isDar = true;
+    s.state = 'ASK_DISTRICT';
+    saveSession(user, s);
+    return sendText(user, tt('flow.ask_district'));
+  }
+  if (id === 'OUTSIDE_DAR') {
+    const s = getSession(user);
+    s.isDar = false;
+    const estimateFee = feeForDarDistance(Number(env.DEFAULT_DISTANCE_KM) || 8);
+    s.state = 'SHOW_PRICE';
+    saveSession(user, s);
+    const subtotal = computeSubtotal(getCart(user));
+    const total = subtotal + estimateFee;
+    await sendText(user, [
+      tt('checkout.summary_header'),
+      tt('checkout.summary_name', { name: s.name ?? '' }),
+      tt('checkout.summary_total', { total: Math.round(total).toLocaleString('sw-TZ') }),
+    ].join('\n'));
+    await sendPaymentInstructions(user, total);
+    s.state = 'WAIT_PROOF';
+    saveSession(user, s);
+    return sendText(user, tt('proof.ask'));
   }
 
-  // Product selection & product-level actions
+  // products
   if (id.startsWith('PRODUCT_')) {
     const sku = id.replace('PRODUCT_', '');
-    await showProductMenu(user, sku, tt);
-    return;
+    return showProductMenu(user, sku, tt);
   }
   if (id.startsWith('VARIANTS_')) {
     const sku = id.replace('VARIANTS_', '');
-    await showVariantsMenu(user, sku, tt);
-    return;
+    return showVariantsMenu(user, sku, tt);
   }
   if (id.startsWith('BUY_')) {
     const sku = id.replace('BUY_', '');
@@ -282,8 +271,7 @@ async function handleInteractive(user: string, id: string, tt: (k: string, p?: a
     if (!p) return;
     addToCart(user, { sku: p.sku, name: p.name, qty: 1, unitPrice: p.price });
     await sendText(user, tt('cart.added', { title: p.name }));
-    await beginCheckout(user, tt);
-    return;
+    return beginCheckout(user, tt);
   }
   if (id.startsWith('ADD_')) {
     const sku = id.replace('ADD_', '');
@@ -291,45 +279,35 @@ async function handleInteractive(user: string, id: string, tt: (k: string, p?: a
     if (!p) return;
     addToCart(user, { sku: p.sku, name: p.name, qty: 1, unitPrice: p.price });
     await sendText(user, tt('cart.added', { title: p.name }));
-    await showCart(user, tt);
-    return;
+    return showCart(user, tt);
   }
   if (id.startsWith('DETAILS_')) {
     const sku = id.replace('DETAILS_', '');
     const p = getProductBySku(sku);
     if (!p) return;
-    // Use product detail keys from i18n (pulled from zip)
     const key =
       p.sku === 'KIBOKO' ? 'product.kiboko.details' :
       p.sku === 'FURAHA' ? 'product.furaha.details' :
       p.sku.startsWith('PROMAX') || p.sku === 'PROMAX' ? 'product.promax.details' :
       '';
     if (key) await sendText(user, t(getLang(user), key));
-    await showProductMenu(user, p.sku, tt);
-    return;
+    return showProductMenu(user, p.sku, tt);
   }
 
-  // Unknown action → show menu
-  await showMainMenu(user, tt);
+  return showMainMenu(user, tt);
 }
 
+/* ------------------------------- begin checkout ------------------------------ */
 async function beginCheckout(user: string, tt: (k: string, p?: any) => string) {
+  const cart = getCart(user);
+  if (!cart.length) return showMainMenu(user, tt);
   const s = getSession(user);
-  if (!getCart(user).length) {
-    // no items -> show products
-    await showMainMenu(user, tt);
-    return;
-  }
-  if (s.state === 'WAIT_PROOF') {
-    await sendText(user, tt('proof.ask'));
-    return;
-  }
-  // Start the name-based address flow
   s.state = 'ASK_NAME';
   saveSession(user, s);
   await sendText(user, tt('flow.ask_name'));
 }
 
+/* ------------------------------- state machine ------------------------------ */
 async function handleMessage(
   user: string,
   incoming: { text?: string; hasImage?: boolean; imageId?: string },
@@ -338,114 +316,73 @@ async function handleMessage(
   const s = getSession(user);
   const text = (incoming.text ?? '').trim();
 
-  // Commands to show menu quickly
-  if (!incoming.hasImage && text) {
-    const lower = text.toLowerCase();
-    if (['menu', 'menyu', 'start', 'anza'].includes(lower)) {
+  switch (s.state) {
+    case 'IDLE': {
       await showMainMenu(user, tt);
       return;
     }
-    if (['track', 'fuatilia'].includes(lower)) {
-      TRACK_AWAITING_NAME.add(user);
-      await sendText(user, tt('track.ask_name'));
-      return;
-    }
-  }
 
-  switch (s.state) {
     case 'ASK_NAME': {
-      if (!text) {
-        await sendText(user, tt('flow.ask_name'));
-        return;
-      }
+      if (!text) return sendText(user, tt('flow.ask_name'));
       s.name = text;
       s.state = 'ASK_IF_DAR';
       saveSession(user, s);
-      await sendText(user, tt('flow.name_saved', { name: s.name }) + '\n' + tt('flow.ask_if_dar'));
-      return;
+      return sendButtonsMessage({
+        to: user,
+        body: tt('flow.ask_if_dar'),
+        buttons: [
+          { id: 'INSIDE_DAR', title: 'Ndani ya Dar es Salaam' },
+          { id: 'OUTSIDE_DAR', title: 'Nje ya Dar es Salaam' },
+          { id: 'ACTION_BACK', title: tt('menu.back_to_menu') },
+        ],
+      });
     }
 
     case 'ASK_IF_DAR': {
       const ans = text.toLowerCase();
-      const yes = ['ndio', 'ndiyo', 'yes', 'y'].includes(ans);
-      const no = ['hapana', 'no', 'sio', 'siyo', 'si'].includes(ans);
-      if (!yes && !no) {
-        await sendText(user, tt('flow.reply_yes_no'));
-        return;
-      }
-      if (!no) {
-        // inside Dar
-        s.isDar = true;
-        s.state = 'ASK_DISTRICT';
-        saveSession(user, s);
-        await sendText(user, tt('flow.ask_district'));
-        return;
-      }
-      // outside Dar: show a coarse estimate, finish summary + payment
-      s.isDar = false;
-      const estimateFee = feeForDarDistance(env.DEFAULT_DISTANCE_KM);
-      s.state = 'SHOW_PRICE';
-      saveSession(user, s);
-
-      // show summary & payment
-      const subtotal = computeSubtotal(getCart(user));
-      const total = subtotal + estimateFee;
-      await sendText(
-        user,
-        [
-          tt('checkout.summary_header'),
-          tt('checkout.summary_name', { name: s.name ?? '' }),
-          tt('checkout.summary_total', { total: Math.round(total).toLocaleString('sw-TZ') }),
-        ].join('\n'),
-      );
-      await sendPaymentInstructions(user, total);
-      // move to proof state
-      s.state = 'WAIT_PROOF';
-      saveSession(user, s);
-      await sendText(user, tt('proof.ask'));
-      return;
+      if (['ndio','ndiyo','yes','y'].includes(ans)) return handleInteractive(user, 'INSIDE_DAR', tt);
+      if (['hapana','no','sio','siyo','si','n'].includes(ans)) return handleInteractive(user, 'OUTSIDE_DAR', tt);
+      return sendButtonsMessage({
+        to: user,
+        body: tt('flow.ask_if_dar'),
+        buttons: [
+          { id: 'INSIDE_DAR', title: 'Ndani ya Dar es Salaam' },
+          { id: 'OUTSIDE_DAR', title: 'Nje ya Dar es Salaam' },
+          { id: 'ACTION_BACK', title: tt('menu.back_to_menu') },
+        ],
+      });
     }
 
     case 'ASK_DISTRICT': {
-      if (!text) {
-        await sendText(user, tt('flow.ask_district'));
-        return;
-      }
+      if (!text) return sendText(user, tt('flow.ask_district'));
       s.district = text;
       s.state = 'ASK_PLACE';
       saveSession(user, s);
-      await sendText(user, tt('flow.ask_place'));
-      return;
+      return sendText(user, tt('flow.ask_place'));
     }
 
     case 'ASK_PLACE': {
-      if (!text) {
-        await sendText(user, tt('flow.ask_place'));
-        return;
-      }
+      if (!text) return sendText(user, tt('flow.ask_place'));
       s.place = text;
 
-      // Distance resolution
       const r = resolveDistanceKm(s.district!, s.place);
       const km = r.km;
       const fee = feeForDarDistance(km);
+
       s.distanceKm = km;
       s.price = fee;
       s.state = 'SHOW_PRICE';
       saveSession(user, s);
 
-      // Provide quote
-      const lines: string[] = [
-        tt('flow.distance_quote', { place: s.place, district: s.district, km: km.toFixed(2), fee: Math.round(fee).toLocaleString('sw-TZ') }),
-      ];
-      if (r.from === 'district_avg') lines.push(tt('flow.distance_avg_used', { district: s.district }));
-      if (r.from === 'default') lines.push(tt('flow.distance_default_used'));
-
-      // Order summary
       const cart = getCart(user);
       const subtotal = computeSubtotal(cart);
       const total = subtotal + fee;
 
+      const lines = [
+        tt('flow.distance_quote', { place: s.place, district: s.district, km: km.toFixed(2), fee: Math.round(fee).toLocaleString('sw-TZ') }),
+      ];
+      if (r.from === 'district_avg') lines.push(tt('flow.distance_avg_used', { district: s.district }));
+      if (r.from === 'default') lines.push(tt('flow.distance_default_used'));
       lines.push('');
       lines.push(tt('checkout.summary_header'));
       lines.push(tt('checkout.summary_name', { name: s.name ?? '' }));
@@ -455,89 +392,72 @@ async function handleMessage(
       await sendText(user, lines.join('\n'));
       await sendPaymentInstructions(user, total);
 
-      // Move to proof stage
       s.state = 'WAIT_PROOF';
       saveSession(user, s);
-      await sendText(user, tt('proof.ask'));
-      return;
+      return sendText(user, tt('proof.ask'));
     }
 
     case 'SHOW_PRICE': {
-      // We already sent summary & payment instructions in the previous step.
-      // Transition to WAIT_PROOF so user can send screenshot or names.
       s.state = 'WAIT_PROOF';
       saveSession(user, s);
-      await sendText(user, tt('proof.ask'));
-      return;
+      return sendText(user, tt('proof.ask'));
     }
 
     case 'WAIT_PROOF': {
-      // Accept either image or "three names"
       const cart = getCart(user);
-      const deliveryFee = s.price ?? feeForDarDistance(s.distanceKm ?? env.DEFAULT_DISTANCE_KM);
+      const deliveryFee = s.price ?? feeForDarDistance((s.distanceKm ?? Number(env.DEFAULT_DISTANCE_KM)) || 8);
       const orderTotal = computeSubtotal(cart) + deliveryFee;
-
       const mostRecent = s.name ? getMostRecentOrderByName(s.name) : undefined;
 
       if (incoming.hasImage && s.name) {
-        // Create order if we haven’t yet for this flow
-        if (!mostRecent || mostRecent.status === 'Delivered' || mostRecent.createdAt < new Date(Date.now() - 1000 * 60 * 60).toISOString()) {
-          // create fresh order
+        if (!mostRecent || mostRecent.status === 'Delivered') {
           const delivery = s.isDar
-            ? { mode: 'dar' as const, district: s.district!, place: s.place!, distanceKm: s.distanceKm ?? env.DEFAULT_DISTANCE_KM, deliveryFee }
+            ? { mode: 'dar' as const, district: s.district!, place: s.place!, distanceKm: (s.distanceKm ?? Number(env.DEFAULT_DISTANCE_KM)) || 8, deliveryFee }
             : { mode: 'outside' as const, region: 'Outside Dar', transportMode: 'bus' as const, deliveryFee };
-          addOrder({
-            customerName: s.name,
-            items: cart,
-            delivery,
-          });
+        addOrder({ customerName: s.name, items: cart, delivery });
         }
         const order = getMostRecentOrderByName(s.name)!;
         setOrderProof(order, { type: 'image', imageId: incoming.imageId, receivedAt: new Date().toISOString() });
         clearCart(user);
         resetSession(user);
         await sendText(user, tt('proof.ok_image'));
-        await sendText(user, 'Oda yako imekamilika. Kwa kufuatilia baadaye, taja jina lako hapa tena.');
+        await sendText(user, 'Oda imekamilika. Kwa kufuatilia baadaye, taja jina lako hapa tena.');
         return;
       }
 
-      const words = (incoming.text ?? '').split(/\s+/).filter(Boolean);
+      const words = (incoming.text ?? '')
+        .split(/\s+/)
+        .map(w => w.trim())
+        .filter(w => /[A-Za-z\u00C0-\u024F]+/.test(w));
       if (words.length >= 3 && s.name) {
-        if (!mostRecent || mostRecent.status === 'Delivered' || mostRecent.createdAt < new Date(Date.now() - 1000 * 60 * 60).toISOString()) {
+        if (!mostRecent || mostRecent.status === 'Delivered') {
           const delivery = s.isDar
-            ? { mode: 'dar' as const, district: s.district!, place: s.place!, distanceKm: s.distanceKm ?? env.DEFAULT_DISTANCE_KM, deliveryFee }
+            ? { mode: 'dar' as const, district: s.district!, place: s.place!, distanceKm: (s.distanceKm ?? Number(env.DEFAULT_DISTANCE_KM)) || 8, deliveryFee }
             : { mode: 'outside' as const, region: 'Outside Dar', transportMode: 'bus' as const, deliveryFee };
-          addOrder({
-            customerName: s.name,
-            items: cart,
-            delivery,
-          });
+          addOrder({ customerName: s.name, items: cart, delivery });
         }
         const order = getMostRecentOrderByName(s.name)!;
         setOrderProof(order, { type: 'names', fullNames: incoming.text!, receivedAt: new Date().toISOString() });
         clearCart(user);
         resetSession(user);
         await sendText(user, tt('proof.ok_names', { names: incoming.text }));
-        await sendText(user, 'Oda yako imekamilika. Kwa kufuatilia baadaye, taja jina lako hapa tena.');
+        await sendText(user, 'Oda imekamilika. Kwa kufuatilia baadaye, taja jina lako hapa tena.');
         return;
       }
 
-      await sendText(user, tt('proof.invalid'));
-      return;
+      return sendText(user, tt('proof.invalid'));
     }
   }
 
-  // No state matched → show main menu
+  // safety
   await showMainMenu(user, tt);
 }
 
-// ---- Tracking helper ----
+/* ---------------------------------- track ---------------------------------- */
 async function handleTrackByName(user: string, nameInput: string, tt: (k: string, p?: any) => string) {
   const orders = listOrdersByName(nameInput);
-  if (!orders.length) {
-    await sendText(user, tt('track.none_found', { name: nameInput }));
-    return;
-  }
+  if (!orders.length) return sendText(user, tt('track.none_found', { name: nameInput }));
+
   const lines = [tt('track.found_header', { name: nameInput })];
   for (const o of orders.slice(0, 5)) {
     lines.push(
@@ -548,5 +468,5 @@ async function handleTrackByName(user: string, nameInput: string, tt: (k: string
       })
     );
   }
-  await sendText(user, lines.join('\n'));
+  return sendText(user, lines.join('\n'));
 }

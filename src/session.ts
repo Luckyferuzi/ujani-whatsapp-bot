@@ -1,6 +1,7 @@
-// Name-based order flow (no order IDs)
+// src/session.ts
 
 export type State =
+  | 'IDLE'         // landing state -> show menu
   | 'ASK_NAME'
   | 'ASK_IF_DAR'
   | 'ASK_DISTRICT'
@@ -10,12 +11,12 @@ export type State =
 
 export interface Session {
   state: State;
-  name?: string;          // customer name for tracking
-  isDar?: boolean;        // ndani ya Dar?
-  district?: string;      // wilaya
-  place?: string;         // sehemu/mtaa
-  distanceKm?: number;    // computed from dar_location.json
-  price?: number;         // delivery fee (rounded)
+  name?: string;
+  isDar?: boolean;
+  district?: string;
+  place?: string;
+  distanceKm?: number;
+  price?: number;
 }
 
 const SESS = new Map<string, Session>();
@@ -23,7 +24,7 @@ const SESS = new Map<string, Session>();
 export function getSession(userId: string): Session {
   const s = SESS.get(userId);
   if (s) return s;
-  const fresh: Session = { state: 'ASK_NAME' };
+  const fresh: Session = { state: 'IDLE' };
   SESS.set(userId, fresh);
   return fresh;
 }
@@ -33,5 +34,5 @@ export function saveSession(userId: string, data: Session) {
 }
 
 export function resetSession(userId: string) {
-  SESS.set(userId, { state: 'ASK_NAME' });
+  SESS.set(userId, { state: 'IDLE' });
 }
