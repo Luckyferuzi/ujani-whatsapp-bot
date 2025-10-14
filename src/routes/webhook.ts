@@ -43,9 +43,6 @@ function getLang(user: string): Lang {
 function setLang(user: string, lang: Lang) {
   USER_LANG.set(user, lang);
 }
-function money(n: number) {
-  return `${Math.round(n).toLocaleString('sw-TZ')} TZS`;
-}
 function getCart(u: string) { return CART.get(u) ?? []; }
 function setCart(u: string, c: CartItem[]) { CART.set(u, c); }
 function clearCart(u: string) { CART.delete(u); }
@@ -136,13 +133,49 @@ webhook.post('/webhook', async (req: Request, res: Response) => {
   }
 });
 
-/* -------------------------- render menus as lists --------------------------- */
-function toListSections(model: ReturnType<typeof buildMainMenu> | ReturnType<typeof buildProductMenu> | ReturnType<typeof buildVariantMenu>) {
+/* -------------------- WhatsApp UI limits & list rendering ------------------- */
+const MAX_LIST_TITLE = 24;
+const MAX_LIST_DESC = 72;
+
+function clip(s: string, n: number) {
+  if (!s) return s;
+  return s.length <= n ? s : s.slice(0, Math.max(0, n - 1)) + '…';
+}
+
+function fitRow(titleIn: string, subtitleIn?: string) {
+  let title = (titleIn || '').trim();
+  let desc = (subtitleIn || '').trim();
+
+  if (title.length > MAX_LIST_TITLE) {
+    const parts = title.split(/\s*[—–-]\s*/);
+    if (parts.length > 1) {
+      const head = parts.shift() || '';
+      const tail = parts.join(' - ');
+      title = clip(head, MAX_LIST_TITLE);
+      desc = desc ? `${tail} • ${desc}` : tail;
+    } else {
+      desc = desc ? `${title} • ${desc}` : title;
+      title = clip(title, MAX_LIST_TITLE);
+    }
+  }
+
+  desc = clip(desc, MAX_LIST_DESC);
+  return { title, description: desc || undefined };
+}
+
+function toListSections(
+  model: ReturnType<typeof buildMainMenu> | ReturnType<typeof buildProductMenu> | ReturnType<typeof buildVariantMenu>
+) {
   return model.sections.map(s => ({
     title: s.title,
-    rows: s.rows.map(r => ({ id: r.id, title: r.title, description: r.subtitle })),
+    rows: s.rows.map(r => {
+      const { title, description } = fitRow(r.title, r.subtitle);
+      return { id: r.id, title, description };
+    }),
   }));
 }
+
+/* ------------------------------ menu shortcuts ------------------------------ */
 async function showMainMenu(user: string, tt: (k: string, p?: any) => string) {
   const model = buildMainMenu(k => tt(k));
   await sendListMessage({
@@ -203,8 +236,8 @@ async function showCart(user: string, tt: (k: string, p?: any) => string) {
     to: user,
     body,
     buttons: [
-      { id: 'ACTION_CHECKOUT', title: tt('menu.checkout') },
-      { id: 'ACTION_BACK', title: tt('menu.back_to_menu') },
+      { id: 'ACTION_CHECKOUT', title: tt('menu.checkout') }, // "Kamilisha oda" (<=20 chars)
+      { id: 'ACTION_BACK', title: tt('menu.back_to_menu') }, // "Rudi menyu"
     ],
   });
 }
@@ -331,8 +364,8 @@ async function handleMessage(
         to: user,
         body: tt('flow.ask_if_dar'),
         buttons: [
-          { id: 'INSIDE_DAR', title: 'Ndani ya Dar es Salaam' },
-          { id: 'OUTSIDE_DAR', title: 'Nje ya Dar es Salaam' },
+          { id: 'INSIDE_DAR', title: 'Ndani ya Dar' }, // <=20 chars
+          { id: 'OUTSIDE_DAR', title: 'Nje ya Dar' },  // <=20 chars
           { id: 'ACTION_BACK', title: tt('menu.back_to_menu') },
         ],
       });
@@ -346,8 +379,8 @@ async function handleMessage(
         to: user,
         body: tt('flow.ask_if_dar'),
         buttons: [
-          { id: 'INSIDE_DAR', title: 'Ndani ya Dar es Salaam' },
-          { id: 'OUTSIDE_DAR', title: 'Nje ya Dar es Salaam' },
+          { id: 'INSIDE_DAR', title: 'Ndani ya Dar' },
+          { id: 'OUTSIDE_DAR', title: 'Nje ya Dar' },
           { id: 'ACTION_BACK', title: tt('menu.back_to_menu') },
         ],
       });
@@ -405,8 +438,7 @@ async function handleMessage(
 
     case 'WAIT_PROOF': {
       const cart = getCart(user);
-      const deliveryFee = s.price ?? feeForDarDistance((s.distanceKm ?? Number(env.DEFAULT_DISTANCE_KM)) || 8);
-      const orderTotal = computeSubtotal(cart) + deliveryFee;
+      const deliveryFee = s.price ?? feeForDarDistance(s.distanceKm ?? Number(env.DEFAULT_DISTANCE_KM)) ;
       const mostRecent = s.name ? getMostRecentOrderByName(s.name) : undefined;
 
       if (incoming.hasImage && s.name) {
@@ -414,7 +446,7 @@ async function handleMessage(
           const delivery = s.isDar
             ? { mode: 'dar' as const, district: s.district!, place: s.place!, distanceKm: (s.distanceKm ?? Number(env.DEFAULT_DISTANCE_KM)) || 8, deliveryFee }
             : { mode: 'outside' as const, region: 'Outside Dar', transportMode: 'bus' as const, deliveryFee };
-        addOrder({ customerName: s.name, items: cart, delivery });
+          addOrder({ customerName: s.name, items: cart, delivery });
         }
         const order = getMostRecentOrderByName(s.name)!;
         setOrderProof(order, { type: 'image', imageId: incoming.imageId, receivedAt: new Date().toISOString() });
@@ -449,7 +481,6 @@ async function handleMessage(
     }
   }
 
-  // safety
   await showMainMenu(user, tt);
 }
 
