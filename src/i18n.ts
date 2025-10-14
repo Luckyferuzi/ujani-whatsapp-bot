@@ -9,7 +9,7 @@ const dict: Dict = {
     // ===== Menu (matches menu.ts) =====
     'menu.header': 'Karibu Ujani Herbal 🌿',
     'menu.footer': 'Chagua kutoka kwenye menyu hapa chini.',
-    'menu.products_section': 'Bidhaa',
+    'menu.products_section': 'Angalia Bidhaa zetu',
     'menu.actions_section': 'Vitendo',
     'menu.view_cart': 'Angalia kikapu',
     'menu.checkout': 'Kamilisha oda',
@@ -63,6 +63,9 @@ const dict: Dict = {
     'flow.distance_default_used': 'Hatukupata wilaya hiyo, tumetumia umbali chaguo-msingi.',
     'flow.outside_dar_notice':
       'Tunaweza kutuma nje ya Dar. Gharama zinaweza kutofautiana; makadirio kwa sasa ni *{fee} TZS*.',
+      'flow.ask_inside_choice': 'Ungependa *kuchukua ofisini* au *tuletee (delivery)*?',
+    'inside.choice_office': 'Chukua ofisini',
+    'inside.choice_delivery': 'Tuletee',
 
     // ===== Cart / Summary =====
     'cart.added': '✅ *{title}* limeongezwa kwenye kikapu.',
@@ -106,7 +109,7 @@ const dict: Dict = {
     // Keep English concise; Swahili is primary
     'menu.header': 'Welcome to Ujani Herbal 🌿',
     'menu.footer': 'Choose from the menu below.',
-    'menu.products_section': 'Products',
+    'menu.products_section': 'Browse our Products',
     'menu.actions_section': 'Actions',
     'menu.view_cart': 'View cart',
     'menu.checkout': 'Checkout',
@@ -150,6 +153,9 @@ const dict: Dict = {
     'flow.distance_avg_used': 'Place not found; used the *{district}* average.',
     'flow.distance_default_used': 'District not found; used default distance.',
     'flow.outside_dar_notice': 'We can deliver outside Dar. Current estimate is *{fee} TZS*.',
+    'flow.ask_inside_choice': 'Would you like to *pick up at office* or *get delivery*?',
+    'inside.choice_office': 'Pick up at office',
+    'inside.choice_delivery': 'Deliver to me',
 
     'cart.added': '✅ *{title}* added to your cart.',
     'cart.summary_header': '🧺 Cart Summary',
