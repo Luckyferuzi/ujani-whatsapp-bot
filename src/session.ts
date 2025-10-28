@@ -1,20 +1,17 @@
-// src/session.ts
-
 export type State =
-  | 'IDLE'         // landing state -> show menu
-  | 'ASK_NAME'
+  | 'IDLE'
   | 'ASK_IF_DAR'
-  | 'ASK_DISTRICT'
-  | 'ASK_PLACE'
+  | 'ASK_DISTRICT'   // we reuse this label to expect a WhatsApp location pin (GPS)
+  | 'ASK_PLACE'      // legacy (unused now)
   | 'SHOW_PRICE'
   | 'WAIT_PROOF';
 
 export interface Session {
   state: State;
-  name?: string;
-  isDar?: boolean;
+  // Address-ish context (kept for compatibility)
   district?: string;
   place?: string;
+  // Pricing context
   distanceKm?: number;
   price?: number;
 }

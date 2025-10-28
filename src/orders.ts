@@ -1,122 +1,110 @@
-// In-memory orders, tracked by customerName (no orderId)
+// src/orders.ts
+// In-memory orders & helpers used by the webhook flow.
 
-export type OrderStatus =
-  | 'Awaiting Proof'
-  | 'Proof Received'
-  | 'Preparing'
-  | 'Shipped'
-  | 'Delivered';
-
-export type PaymentProof =
-  | { type: 'image'; imageId?: string; imageUrl?: string; receivedAt: string }
-  | { type: 'names'; fullNames: string; receivedAt: string };
-
-export interface OrderItem {
+export type OrderItem = {
   sku: string;
   name: string;
   qty: number;
   unitPrice: number;
-}
+};
 
-export interface DeliveryInfoDar {
+export type DeliveryDar = {
   mode: 'dar';
-  district: string;
-  place: string;
-  distanceKm: number;
+  district: string;   // 'GPS'
+  place: string;      // address/name from pin if any
+  km: number;
   deliveryFee: number;
-}
+};
 
-export interface DeliveryInfoPickup {
-  mode: 'pickup';
-  pickupPoint?: string;
-}
-
-export interface DeliveryInfoOutside {
+export type DeliveryOutside = {
   mode: 'outside';
   region: string;
-  transportMode: 'bus' | 'boat';
-  operator?: string;
-  station?: string;
+  transportMode: 'bus';
   deliveryFee: number;
-}
+};
 
-export type DeliveryInfo = DeliveryInfoDar | DeliveryInfoPickup | DeliveryInfoOutside;
+export type DeliveryPickup = {
+  mode: 'pickup';
+};
 
-export interface Order {
-  createdAt: string;        // ISO timestamp
-  customerName: string;     // primary tracking key
+export type OrderDelivery = DeliveryDar | DeliveryOutside | DeliveryPickup;
+
+export type OrderProof =
+  | { type: 'image'; imageId: string; receivedAt: string }
+  | { type: 'text'; text: string; receivedAt: string };
+
+export type Order = {
+  id: string;
+  customerName: string;
   phone?: string;
   items: OrderItem[];
-  delivery: DeliveryInfo;
-  note?: string;
-
-  status: OrderStatus;
-  proof?: PaymentProof;
-}
+  delivery: OrderDelivery;
+  status: 'Pending' | 'Paid' | 'Shipped' | 'Delivered';
+  createdAt: string;
+  proof?: OrderProof;
+};
 
 const ORDERS: Order[] = [];
 
-export function addOrder(
-  o: Omit<Order, 'createdAt' | 'status'> & Partial<Pick<Order, 'status'>>
-): Order {
-  const order: Order = {
-    createdAt: new Date().toISOString(),
-    status: o.status ?? 'Awaiting Proof',
-    customerName: o.customerName,
-    phone: o.phone,
-    items: o.items,
-    delivery: o.delivery,
-    note: o.note,
-    proof: o.proof,
-  };
-  ORDERS.push(order);
-  return order;
+function genId() {
+  return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-6);
 }
 
-export function listOrders(): Order[] {
-  return ORDERS.slice().sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
-}
-
-export function listOrdersByName(name: string): Order[] {
-  const n = norm(name);
-  return ORDERS
-    .filter(o => norm(o.customerName) === n)
-    .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
-}
-
-export function getMostRecentOrderByName(name: string): Order | undefined {
-  return listOrdersByName(name)[0];
-}
-
-export function setOrderProof(order: Order, proof: PaymentProof): void {
-  order.proof = proof;
-  order.status = 'Proof Received';
-}
-
-export function updateOrderStatus(order: Order, status: OrderStatus): void {
-  order.status = status;
-}
+/* ------------------------------ Calculations ------------------------------ */
 
 export function computeSubtotal(items: OrderItem[]): number {
-  return items.reduce((sum, it) => sum + it.qty * it.unitPrice, 0);
+  return items.reduce((sum, it) => sum + it.unitPrice * it.qty, 0);
 }
 
 export function computeTotal(order: Order): number {
-  const delivery =
+  const sub = computeSubtotal(order.items);
+  const fee =
     order.delivery.mode === 'dar'
       ? order.delivery.deliveryFee
       : order.delivery.mode === 'outside'
-        ? order.delivery.deliveryFee
-        : 0;
-  return computeSubtotal(order.items) + (delivery || 0);
+      ? order.delivery.deliveryFee
+      : 0;
+  return sub + fee;
 }
 
-function norm(s: string): string {
-  return (s || '')
-    .normalize('NFD')
-    // @ts-ignore Unicode property escapes supported in Node
-    .replace(/\p{Diacritic}/gu, '')
-    .toLowerCase()
-    .replace(/\s+/g, ' ')
-    .trim();
+/* --------------------------------- CRUD ----------------------------------- */
+
+export function addOrder(input: {
+  customerName: string;
+  phone?: string;
+  items: OrderItem[];
+  delivery: OrderDelivery;
+}): Order {
+  const order: Order = {
+    id: genId(),
+    customerName: input.customerName,
+    phone: input.phone,
+    items: input.items.map(i => ({ ...i })),
+    delivery: input.delivery,
+    status: 'Pending',
+    createdAt: new Date().toISOString(),
+  };
+  ORDERS.unshift(order);
+  return order;
+}
+
+export function setOrderProof(order: Order, proof: OrderProof) {
+  order.proof = proof;
+  order.status = 'Paid';
+}
+
+export function listOrdersByName(name: string): Order[] {
+  const n = (name || '').trim().toLowerCase();
+  return ORDERS.filter(o => o.customerName.trim().toLowerCase() === n);
+}
+
+export function getMostRecentOrderByName(name: string): Order | undefined {
+  const matches = listOrdersByName(name);
+  return matches[0]; // newest first
+}
+
+/* ------------------------------ Admin helpers ----------------------------- */
+
+export function listAllOrders(): Order[] {
+  return ORDERS.slice();
 }
