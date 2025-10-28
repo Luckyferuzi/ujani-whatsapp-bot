@@ -30,7 +30,7 @@ import { getSession, saveSession, resetSession } from '../session.js';
 export const webhook = Router();
 
 /* -------------------------------------------------------------------------- */
-/*                          Helpers: safe text + format                       */
+/*                               Safe send helpers                            */
 /* -------------------------------------------------------------------------- */
 
 const MAX_TEXT_CHARS = 900; // conservative split to avoid WA long-text errors
@@ -50,6 +50,86 @@ async function safeSendText(to: string, body: string) {
 
 function fmtTZS(n: number) {
   return Math.round(n).toLocaleString('sw-TZ');
+}
+
+/* ----------------------- WhatsApp Interactive safety ---------------------- */
+// Hard WA limits (defensive caps)
+const MAX_LIST_TITLE = 24;
+const MAX_LIST_DESC = 72;
+const MAX_SECTION_TITLE = 24;
+const MAX_LIST_ROWS = 10;
+const MAX_BUTTON_TITLE = 20;
+
+type SafeListRow = { id: string; title: string; description?: string };
+type SafeListSection = { title: string; rows: SafeListRow[] };
+type SafeListPayload = {
+  to: string;
+  header?: string;
+  body: string;
+  footer?: string;
+  buttonText: string;
+  sections: SafeListSection[];
+};
+
+function splitTitleForTail(s: string): [string, string] {
+  const seps = [' — ', ' – ', ' - ', '—', '–', '-'];
+  for (const sep of seps) {
+    const idx = s.indexOf(sep);
+    if (idx > 0) {
+      return [s.slice(0, idx).trim(), s.slice(idx + sep.length).trim()];
+    }
+  }
+  return [s.trim(), ''];
+}
+
+function fitRowTitleDesc(titleIn: string, descIn?: string) {
+  let [name, tail] = splitTitleForTail(titleIn);
+  let title = name;
+  let desc = descIn || '';
+  // Move anything after dash (often price) to description
+  if (tail) desc = desc ? `${tail} • ${desc}` : tail;
+  if (title.length > MAX_LIST_TITLE) title = title.slice(0, MAX_LIST_TITLE);
+  if (desc.length > MAX_LIST_DESC) desc = desc.slice(0, MAX_LIST_DESC);
+  return { title, description: desc || undefined };
+}
+
+async function sendListMessageSafe(p: SafeListPayload) {
+  const sections = (p.sections || [])
+    .map((sec) => ({
+      title: (sec.title || '').slice(0, MAX_SECTION_TITLE) || '—',
+      rows: (sec.rows || []).slice(0, MAX_LIST_ROWS).map((r) => {
+        const { title, description } = fitRowTitleDesc(r.title, r.description);
+        return { id: r.id, title, description };
+      }),
+    }))
+    .filter((sec) => (sec.rows?.length ?? 0) > 0);
+
+  if (!sections.length) {
+    // Fallback to simple text to avoid WA 400
+    return safeSendText(p.to, p.body || 'Chagua huduma.');
+  }
+
+  return sendListMessage({
+    to: p.to,
+    header: p.header,
+    body: p.body || ' ',
+    footer: p.footer,
+    buttonText: (p.buttonText || 'Fungua').slice(0, MAX_BUTTON_TITLE),
+    sections,
+  } as any);
+}
+
+type Button = { id: string; title: string };
+async function sendButtonsMessageSafe(to: string, body: string, buttons: Button[]) {
+  // Trim titles to button limit; keep at most 3 buttons (WA limit)
+  const trimmed = (buttons || []).slice(0, 3).map((b) => ({
+    id: b.id,
+    title: (b.title || '').slice(0, MAX_BUTTON_TITLE) || '•',
+  }));
+  if (!trimmed.length) {
+    return safeSendText(to, body);
+  }
+  return sendButtonsMessage(to, (body || ' ').slice(0, 1000), trimmed);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -155,7 +235,7 @@ webhook.post('/webhook', async (req: Request, res: Response) => {
 
           const s = getSession(from);
 
-          // ALWAYS greet first on fresh/idle or common words
+          // Greet first (only when fresh or user typed a "menu" keyword)
           if (s.state === 'IDLE' || (!interactiveId && !hasImage)) {
             const txt = (textBody || '').trim().toLowerCase();
             if (s.state === 'IDLE' || ['hi','hello','mambo','start','anza','menu','menyu'].includes(txt)) {
@@ -194,7 +274,7 @@ webhook.post('/webhook', async (req: Request, res: Response) => {
 async function handleInteractive(user: string, id: string, tt: (k: string, p?: any) => string) {
   // Global actions
   if (id === 'ACTION_VIEW_CART') return showCart(user, tt);
-  if (id === 'ACTION_CHECKOUT')  return beginCheckout(user, tt); // <-- ask Dar here (not at start)
+  if (id === 'ACTION_CHECKOUT')  return beginCheckout(user, tt); // ask Dar here (not at start)
   if (id === 'ACTION_TRACK_BY_NAME') { TRACK_AWAITING_NAME.add(user); return safeSendText(user, tt('track.ask_name')); }
   if (id === 'ACTION_TALK_TO_AGENT') { return safeSendText(user, '👤 Mawasiliano ya Mwakilishi: ' + (env.BUSINESS_WA_NUMBER_E164 || '')); }
   if (id === 'ACTION_CHANGE_LANGUAGE') {
@@ -250,11 +330,11 @@ async function handleInteractive(user: string, id: string, tt: (k: string, p?: a
   // Region choice (only after pressing Checkout)
   if (id === 'INSIDE_DAR') {
     await safeSendText(user, 'Chagua njia ya kupata bidhaa zako:');
-    return sendButtonsMessage({ to: user, body: 'Delivery au Pickup', buttons: [
+    return sendButtonsMessageSafe(user, 'Delivery au Pickup', [
       { id: 'INSIDE_PICKUP', title: '🏪 Pickup (Keko Omax Bar)' },
       { id: 'INSIDE_DELIVERY', title: '🚚 Delivery (Dar)' },
       { id: 'ACTION_BACK', title: '⬅️ Rudi' },
-    ]});
+    ]);
   }
 
   if (id === 'OUTSIDE_DAR') {
@@ -286,14 +366,18 @@ type TT = (k: string, p?: Record<string, string | number>) => string;
 
 async function showMainMenu(user: string, tt: TT) {
   const model = buildMainMenu(tt);
-  await sendListMessage({
+  await sendListMessageSafe({
     to: user,
     header: tt('menu.header'),
     body: tt('menu.header'),
     buttonText: 'Fungua',
-    sections: model.sections.map(sec => ({
+    sections: model.sections.map((sec) => ({
       title: sec.title,
-      rows: sec.rows.map(r => ({ id: r.id, title: r.title, description: r.subtitle })),
+      rows: sec.rows.map((r) => ({
+        id: r.id,
+        title: r.title,        // can be long; safe wrapper trims and moves tail to description
+        description: r.subtitle,
+      })),
     })),
     footer: tt('menu.footer'),
   });
@@ -308,10 +392,10 @@ async function showCart(user: string, _tt: TT) {
     user,
     ['🧺 *Kikapu chako*', ...cart.map(c => `• ${c.name} ×${c.qty} — ${fmtTZS(c.unitPrice * c.qty)} TZS`), '', `Jumla ya bidhaa: *${fmtTZS(subtotal)} TZS*`].join('\n')
   );
-  return sendButtonsMessage({ to: user, body: 'Chagua hatua:', buttons: [
+  return sendButtonsMessageSafe(user, 'Chagua hatua:', [
     { id: 'ACTION_CHECKOUT', title: '✅ Checkout' },
     { id: 'ACTION_BACK',     title: '⬅️ Rudi' },
-  ]});
+  ]);
 }
 
 async function showProductActions(user: string, sku: string, _tt: TT) {
@@ -325,14 +409,14 @@ async function showProductActions(user: string, sku: string, _tt: TT) {
     { id: `ADD_${prod.sku}`,     title: '➕ Ongeza Kikapuni' },
     { id: `BUY_${prod.sku}`,     title: '🛍️ Nunua Sasa' },
   ];
-  return sendButtonsMessage({ to: user, body: 'Chagua kitendo:', buttons: buttons.slice(0, 3) });
+  return sendButtonsMessageSafe(user, 'Chagua kitendo:', buttons);
 }
 
 async function showVariantPicker(user: string, parentSku: string, _tt: TT) {
   const parent = getProductBySku(parentSku);
   if (!parent?.children?.length) return;
 
-  await sendListMessage({
+  await sendListMessageSafe({
     to: user,
     header: parent.name,
     body: 'Chagua kipakeji cha Pro Max:',
@@ -340,9 +424,9 @@ async function showVariantPicker(user: string, parentSku: string, _tt: TT) {
     sections: [
       {
         title: 'Kipakeji',
-        rows: parent.children.map(v => ({
+        rows: parent.children.map((v) => ({
           id: `PRODUCT_${v.sku}`,
-          title: `${v.name} — ${fmtTZS(v.price)} TZS`,
+          title: `${v.name} — ${fmtTZS(v.price)} TZS`, // safe wrapper trims to ≤24, price moved to desc when needed
           description: 'Gusa kuona vitendo',
         })),
       },
@@ -355,13 +439,13 @@ async function beginCheckout(user: string, _tt: TT) {
   const items = getCheckoutItems(user);
   if (!items.length) return showMainMenu(user, _tt);
 
-  // NOW (and only now) ask if they are in Dar or not
+  // Ask Dar / outside ONLY at checkout
   await safeSendText(user, 'Je, upo ndani ya Dar es Salaam?');
-  return sendButtonsMessage({ to: user, body: 'Chagua', buttons: [
+  return sendButtonsMessageSafe(user, 'Chagua', [
     { id: 'INSIDE_DAR',  title: 'Ndani ya Dar' },
     { id: 'OUTSIDE_DAR', title: 'Nje ya Dar' },
     { id: 'ACTION_BACK', title: '⬅️ Rudi' },
-  ]});
+  ]);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -468,7 +552,7 @@ async function handleMessage(user: string, incoming: Incoming, _tt: TT) {
     }
   }
 
-  // Session state machine (we DO NOT ask about Dar at start)
+  // Session state machine — we DO NOT ask about Dar at start (only on checkout)
   switch (s.state) {
     case 'IDLE': {
       return showMainMenu(user, (k, p) => t(getLang(user), k, p));
