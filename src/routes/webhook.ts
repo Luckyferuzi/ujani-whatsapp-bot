@@ -20,6 +20,41 @@ export const webhook = Router();
 /*                    WhatsApp list/button safety wrappers                    */
 /* -------------------------------------------------------------------------- */
 
+function getRawBody(req: Request): string {
+  // server.ts should be capturing this via express.json({ verify })
+  // but we also fall back to JSON.stringify just in case.
+  return (req as any).rawBody ?? JSON.stringify(req.body ?? {});
+}
+
+function signatureOk(req: Request): boolean {
+  try {
+    const sig = req.headers['x-hub-signature-256'] as string | undefined;
+    // Support both common shapes:
+    //  - verifySignature(req)
+    //  - verifySignature(rawBody, signature)
+    const anyVerify: any = verifySignature as any;
+    let ok = false;
+
+    if (typeof anyVerify === 'function') {
+      if (anyVerify.length >= 2) {
+        ok = !!anyVerify(getRawBody(req), sig);
+      } else {
+        ok = !!anyVerify(req);
+      }
+    }
+    if (!ok) {
+      console.warn('[webhook] signature FAILED (will continue for debug)');
+    } else {
+      console.log('[webhook] signature OK');
+    }
+    return ok;
+  } catch (e) {
+    console.warn('[webhook] signature check threw:', e);
+    return false;
+  }
+}
+
+
 const MAX_LIST_TITLE = 24;
 const MAX_LIST_DESC = 72;
 const MAX_SECTION_TITLE = 24;
@@ -165,6 +200,7 @@ webhook.get('/webhook', (req: Request, res: Response) => {
 
 webhook.post('/webhook', async (req: Request, res: Response) => {
   try {
+    signatureOk(req);
     // Signature check using your helper from whatsapp.ts
     if (!verifySignature(req)) return res.sendStatus(401);
 
