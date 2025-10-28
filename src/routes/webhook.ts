@@ -33,7 +33,7 @@ export const webhook = Router();
 /*                               Safe send helpers                            */
 /* -------------------------------------------------------------------------- */
 
-const MAX_TEXT_CHARS = 900; // conservative split to avoid WA long-text errors
+const MAX_TEXT_CHARS = 900;
 
 async function safeSendText(to: string, body: string) {
   if (!to || !body) return;
@@ -53,7 +53,6 @@ function fmtTZS(n: number) {
 }
 
 /* ----------------------- WhatsApp Interactive safety ---------------------- */
-// Hard WA limits (defensive caps)
 const MAX_LIST_TITLE = 24;
 const MAX_LIST_DESC = 72;
 const MAX_SECTION_TITLE = 24;
@@ -75,9 +74,7 @@ function splitTitleForTail(s: string): [string, string] {
   const seps = [' — ', ' – ', ' - ', '—', '–', '-'];
   for (const sep of seps) {
     const idx = s.indexOf(sep);
-    if (idx > 0) {
-      return [s.slice(0, idx).trim(), s.slice(idx + sep.length).trim()];
-    }
+    if (idx > 0) return [s.slice(0, idx).trim(), s.slice(idx + sep.length).trim()];
   }
   return [s.trim(), ''];
 }
@@ -86,8 +83,7 @@ function fitRowTitleDesc(titleIn: string, descIn?: string) {
   let [name, tail] = splitTitleForTail(titleIn);
   let title = name;
   let desc = descIn || '';
-  // Move anything after dash (often price) to description
-  if (tail) desc = desc ? `${tail} • ${desc}` : tail;
+  if (tail) desc = desc ? `${tail} • ${desc}` : tail;     // move price/tail to desc
   if (title.length > MAX_LIST_TITLE) title = title.slice(0, MAX_LIST_TITLE);
   if (desc.length > MAX_LIST_DESC) desc = desc.slice(0, MAX_LIST_DESC);
   return { title, description: desc || undefined };
@@ -104,10 +100,7 @@ async function sendListMessageSafe(p: SafeListPayload) {
     }))
     .filter((sec) => (sec.rows?.length ?? 0) > 0);
 
-  if (!sections.length) {
-    // Fallback to simple text to avoid WA 400
-    return safeSendText(p.to, p.body || 'Chagua huduma.');
-  }
+  if (!sections.length) return safeSendText(p.to, p.body || 'Chagua huduma.');
 
   return sendListMessage({
     to: p.to,
@@ -121,14 +114,11 @@ async function sendListMessageSafe(p: SafeListPayload) {
 
 type Button = { id: string; title: string };
 async function sendButtonsMessageSafe(to: string, body: string, buttons: Button[]) {
-  // Trim titles to button limit; keep at most 3 buttons (WA limit)
   const trimmed = (buttons || []).slice(0, 3).map((b) => ({
     id: b.id,
     title: (b.title || '').slice(0, MAX_BUTTON_TITLE) || '•',
   }));
-  if (!trimmed.length) {
-    return safeSendText(to, body);
-  }
+  if (!trimmed.length) return safeSendText(to, body);
   return sendButtonsMessage(to, (body || ' ').slice(0, 1000), trimmed);
 }
 
@@ -142,8 +132,8 @@ const USER_LANG = new Map<string, Lang>();
 function getLang(user: string): Lang { return USER_LANG.get(user) ?? 'sw'; }
 function setLang(user: string, lang: Lang) { USER_LANG.set(user, lang); }
 
-const CART = new Map<string, CartItem[]>();              // full cart
-const PENDING_ITEM = new Map<string, CartItem | null>(); // “buy now” one-off
+const CART = new Map<string, CartItem[]>();
+const PENDING_ITEM = new Map<string, CartItem | null>();
 function getCart(u: string) { return CART.get(u) ?? []; }
 function setCart(u: string, c: CartItem[]) { CART.set(u, c); }
 function clearCart(u: string) { CART.delete(u); }
@@ -164,9 +154,8 @@ function clearFlow(u: string) {
   setPending(u, null);
 }
 
-const TRACK_AWAITING_NAME = new Set<string>(); // track flow
+const TRACK_AWAITING_NAME = new Set<string>();
 
-// Delivery sub-flow (inside/outside/pickup)
 const STEP = new Map<string,
   | 'OUTSIDE_ASK_NAME' | 'OUTSIDE_ASK_PHONE' | 'OUTSIDE_ASK_REGION'
   | 'INSIDE_PICKUP_ASK_NAME' | 'INSIDE_PICKUP_ASK_PHONE'
@@ -234,23 +223,32 @@ webhook.post('/webhook', async (req: Request, res: Response) => {
           const locAddress: string | undefined = hasLocation ? (msg.location?.address || msg.location?.name) : undefined;
 
           const s = getSession(from);
+          const stepActive = STEP.has(from); // <<< prevent greeting hijack
 
-          // Greet first (only when fresh or user typed a "menu" keyword)
-          if (s.state === 'IDLE' || (!interactiveId && !hasImage)) {
-            const txt = (textBody || '').trim().toLowerCase();
-            if (s.state === 'IDLE' || ['hi','hello','mambo','start','anza','menu','menyu'].includes(txt)) {
-              await showMainMenu(from, tt);
-              continue;
-            }
-          }
-
-          // Interactive first
+          // 1) Interactive first (buttons/list replies)
           if (interactiveId) {
             await handleInteractive(from, interactiveId, tt);
             continue;
           }
 
-          // Otherwise normal message handler
+          // 2) If a step is active, go straight to message handler (no greeting)
+          if (stepActive) {
+            await handleMessage(
+              from,
+              { text: textBody, hasImage, imageId, hasLocation, latitude, longitude, address: locAddress },
+              tt
+            );
+            continue;
+          }
+
+          // 3) Greet only when session is IDLE (first contact / explicit "menu")
+          const txt = (textBody || '').trim().toLowerCase();
+          if (s.state === 'IDLE' && (!textBody || ['hi','hello','mambo','start','anza','menu','menyu'].includes(txt))) {
+            await showMainMenu(from, tt);
+            continue;
+          }
+
+          // 4) Otherwise normal handler
           await handleMessage(
             from,
             { text: textBody, hasImage, imageId, hasLocation, latitude, longitude, address: locAddress },
@@ -274,13 +272,14 @@ webhook.post('/webhook', async (req: Request, res: Response) => {
 async function handleInteractive(user: string, id: string, tt: (k: string, p?: any) => string) {
   // Global actions
   if (id === 'ACTION_VIEW_CART') return showCart(user, tt);
-  if (id === 'ACTION_CHECKOUT')  return beginCheckout(user, tt); // ask Dar here (not at start)
+  if (id === 'ACTION_CHECKOUT')  return beginCheckout(user, tt);
   if (id === 'ACTION_TRACK_BY_NAME') { TRACK_AWAITING_NAME.add(user); return safeSendText(user, tt('track.ask_name')); }
   if (id === 'ACTION_TALK_TO_AGENT') { return safeSendText(user, '👤 Mawasiliano ya Mwakilishi: ' + (env.BUSINESS_WA_NUMBER_E164 || '')); }
   if (id === 'ACTION_CHANGE_LANGUAGE') {
     const next = getLang(user) === 'sw' ? 'en' : 'sw';
     setLang(user, next as Lang);
-    return showMainMenu(user, (k, p) => t(next as Lang, k, p));
+    const ttNext = (k: string, p?: any) => t(next as Lang, k, p);
+    return showMainMenu(user, ttNext); // immediately redraw menu in the new language
   }
   if (id === 'ACTION_BACK') return showMainMenu(user, tt);
 
@@ -314,7 +313,6 @@ async function handleInteractive(user: string, id: string, tt: (k: string, p?: a
       return showProductActions(user, sku, tt);
     }
 
-    // ADD or BUY
     const item: CartItem = { sku: prod.sku, name: prod.name, qty: 1, unitPrice: prod.price };
     if (mode === 'ADD') {
       addToCart(user, item);
@@ -323,7 +321,7 @@ async function handleInteractive(user: string, id: string, tt: (k: string, p?: a
     }
     if (mode === 'BUY') {
       setPending(user, item);
-      return beginCheckout(user, tt); // Dar question happens inside checkout
+      return beginCheckout(user, tt);
     }
   }
 
@@ -364,18 +362,35 @@ async function handleInteractive(user: string, id: string, tt: (k: string, p?: a
 
 type TT = (k: string, p?: Record<string, string | number>) => string;
 
+function langToggleLabel(current: Lang) {
+  return current === 'sw' ? 'Change Language' : 'Badili Lugha';
+}
+
 async function showMainMenu(user: string, tt: TT) {
+  const currentLang = getLang(user);
+
+  // Build model and patch the language toggle row label to show the *other* language
   const model = buildMainMenu(tt);
+  const patchedSections = model.sections.map((sec) => ({
+    title: sec.title,
+    rows: sec.rows.map((r) => {
+      if (r.id === 'ACTION_CHANGE_LANGUAGE') {
+        return { ...r, title: langToggleLabel(currentLang) }; // Sw -> "Change Language", En -> "Badili Lugha"
+      }
+      return r;
+    }),
+  }));
+
   await sendListMessageSafe({
     to: user,
     header: tt('menu.header'),
     body: tt('menu.header'),
     buttonText: 'Fungua',
-    sections: model.sections.map((sec) => ({
+    sections: patchedSections.map((sec) => ({
       title: sec.title,
       rows: sec.rows.map((r) => ({
         id: r.id,
-        title: r.title,        // can be long; safe wrapper trims and moves tail to description
+        title: r.title,
         description: r.subtitle,
       })),
     })),
@@ -426,7 +441,7 @@ async function showVariantPicker(user: string, parentSku: string, _tt: TT) {
         title: 'Kipakeji',
         rows: parent.children.map((v) => ({
           id: `PRODUCT_${v.sku}`,
-          title: `${v.name} — ${fmtTZS(v.price)} TZS`, // safe wrapper trims to ≤24, price moved to desc when needed
+          title: `${v.name} — ${fmtTZS(v.price)} TZS`,
           description: 'Gusa kuona vitendo',
         })),
       },
@@ -439,7 +454,6 @@ async function beginCheckout(user: string, _tt: TT) {
   const items = getCheckoutItems(user);
   if (!items.length) return showMainMenu(user, _tt);
 
-  // Ask Dar / outside ONLY at checkout
   await safeSendText(user, 'Je, upo ndani ya Dar es Salaam?');
   return sendButtonsMessageSafe(user, 'Chagua', [
     { id: 'INSIDE_DAR',  title: 'Ndani ya Dar' },
@@ -552,14 +566,14 @@ async function handleMessage(user: string, incoming: Incoming, _tt: TT) {
     }
   }
 
-  // Session state machine — we DO NOT ask about Dar at start (only on checkout)
+  // Session state machine (we DO NOT ask about Dar at start — only on checkout)
   switch (s.state) {
     case 'IDLE': {
       return showMainMenu(user, (k, p) => t(getLang(user), k, p));
     }
 
     case 'ASK_DISTRICT': {
-      // Expect WhatsApp location pin (GPS) after user chose inside Dar → Delivery
+      // Expect WhatsApp location pin (GPS)
       if (incoming.hasLocation && typeof incoming.latitude === 'number' && typeof incoming.longitude === 'number') {
         const km = distanceFromBaseKm(incoming.latitude, incoming.longitude);
 
@@ -592,7 +606,6 @@ async function handleMessage(user: string, incoming: Incoming, _tt: TT) {
         s.state = 'WAIT_PROOF'; saveSession(user, s);
         return safeSendText(user, 'Tuma *screenshot ya muamala* au *majina matatu* ya mtumaji kuthibitisha.');
       }
-      // If they typed instead of pin
       return safeSendText(user, 'Tafadhali *tuma location pin* yako: bonyeza alama ya “+” → *Location* → *Send*.');
     }
 
