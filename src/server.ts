@@ -6,14 +6,9 @@ import { webhook } from './routes/webhook.js';
 import { status } from './routes/status.js';
 
 const app = express();
-
-// Hide tech stack header
 app.disable('x-powered-by');
 
-/**
- * Capture raw body so verifySignature(req) can HMAC the exact payload.
- * Must run BEFORE json/urlencoded parsers.
- */
+/** capture raw body for signature HMAC */
 app.use(
   express.json({
     limit: '2mb',
@@ -24,7 +19,7 @@ app.use(
 );
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
-// Basic CORS (adjust origins as needed)
+/** basic CORS */
 app.use(
   cors({
     origin: '*',
@@ -33,10 +28,20 @@ app.use(
   })
 );
 
-// If behind a proxy/load balancer
+/** log webhook traffic early (so you see *something* on Render) */
+app.use((req, _res, next) => {
+  if (req.path.startsWith('/webhook')) {
+    const sig = req.header('x-hub-signature-256');
+    console.log(
+      `[server] ${req.method} ${req.path} sig:${sig ? 'yes' : 'no'} len:${Number(req.headers['content-length'] || 0)}`
+    );
+  }
+  next();
+});
+
 app.set('trust proxy', 1);
 
-/** Lightweight ping */
+/** health */
 app.get('/health', (_req: Request, res: Response) => {
   res.status(200).json({
     ok: true,
@@ -45,11 +50,7 @@ app.get('/health', (_req: Request, res: Response) => {
   });
 });
 
-/**
- * Mount routes
- * - webhook: GET /webhook (verification), POST /webhook (events), GET / (ok)
- * - status:  GET /api/orders (admin JSON listing)
- */
+/** routes */
 app.use('/', webhook);
 app.use('/api', status);
 
@@ -58,13 +59,13 @@ app.use((_req: Request, res: Response) => {
   res.status(404).json({ ok: false, error: 'Not Found' });
 });
 
-/** Error handler */
+/** errors */
 app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
   console.error('[server] unhandled error:', err);
   res.status(500).json({ ok: false, error: 'Internal Server Error' });
 });
 
-/** Boot */
+/** boot */
 assertCriticalEnv(['WHATSAPP_TOKEN', 'PHONE_NUMBER_ID', 'VERIFY_TOKEN'] as any);
 const port = Number(env.PORT) || 3000;
 app.listen(port, () => {
