@@ -1,73 +1,64 @@
 // src/server.ts
-import express, { Request, Response, NextFunction } from 'express';
-import cors from 'cors';
-import { env, assertCriticalEnv } from './config.js';
+import express from 'express';
 import { webhook } from './routes/webhook.js';
-import { status } from './routes/status.js';
 
 const app = express();
-app.disable('x-powered-by');
 
-/** capture raw body for signature HMAC */
+/* ------------------------------ Minimal CORS ------------------------------ */
+// (Avoids the need for 'cors' typings)
+// If you already installed @types/cors, you can swap this for `app.use(cors())`.
+app.use((req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader(
+    'Access-Control-Allow-Methods',
+    'GET,POST,PUT,PATCH,DELETE,OPTIONS'
+  );
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    'Content-Type, X-Hub-Signature-256, X-Hub-Signature'
+  );
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
+});
+
+/* ---------------------- Capture RAW body for HMAC check ------------------- */
+// IMPORTANT: must come BEFORE any routes that read req.body.
 app.use(
   express.json({
-    limit: '2mb',
+    limit: '5mb',
     verify: (req: any, _res, buf) => {
-      req.rawBody = buf ? buf.toString('utf8') : '';
+      // Keep exact bytes Meta signed; do NOT convert to string here.
+      req.rawBody = Buffer.isBuffer(buf) ? buf : Buffer.from(buf || '');
     },
   })
 );
-app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
-/** basic CORS */
-app.use(
-  cors({
-    origin: '*',
-    methods: ['GET', 'POST', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'x-hub-signature-256', 'Authorization'],
-  })
-);
-
-/** log webhook traffic early (so you see *something* on Render) */
-app.use((req, _res, next) => {
-  if (req.path.startsWith('/webhook')) {
-    const sig = req.header('x-hub-signature-256');
+/* ----------------------------- Request logging ---------------------------- */
+// Mirrors your existing logs like: [server] POST /webhook sig:yes len:493
+app.use((req: any, _res, next) => {
+  if (req.method === 'POST' && req.path === '/webhook') {
+    const hasSig =
+      Boolean(req.header('x-hub-signature-256')) ||
+      Boolean(req.header('x-hub-signature'));
+    const len =
+      (req.rawBody && req.rawBody.length) ||
+      Number(req.header('content-length') || 0);
     console.log(
-      `[server] ${req.method} ${req.path} sig:${sig ? 'yes' : 'no'} len:${Number(req.headers['content-length'] || 0)}`
+      `[server] POST /webhook sig:${hasSig ? 'yes' : 'no'} len:${len}`
     );
   }
   next();
 });
 
-app.set('trust proxy', 1);
-
-/** health */
-app.get('/health', (_req: Request, res: Response) => {
-  res.status(200).json({
-    ok: true,
-    uptime: Math.round(process.uptime()),
-    ts: new Date().toISOString(),
-  });
-});
-
-/** routes */
+/* --------------------------------- Routes -------------------------------- */
 app.use('/', webhook);
-app.use('/api', status);
 
-/** 404 */
-app.use((_req: Request, res: Response) => {
-  res.status(404).json({ ok: false, error: 'Not Found' });
+app.get('/', (_req, res) => res.status(200).send('ok'));
+
+/* ------------------------------- Start server ----------------------------- */
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`[server] listening on :${PORT}`);
 });
 
-/** errors */
-app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
-  console.error('[server] unhandled error:', err);
-  res.status(500).json({ ok: false, error: 'Internal Server Error' });
-});
-
-/** boot */
-assertCriticalEnv(['WHATSAPP_TOKEN', 'PHONE_NUMBER_ID', 'VERIFY_TOKEN'] as any);
-const port = Number(env.PORT) || 3000;
-app.listen(port, () => {
-  console.log(`[server] listening on :${port}`);
-});
+export default app;
