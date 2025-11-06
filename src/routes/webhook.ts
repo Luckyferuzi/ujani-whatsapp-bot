@@ -165,7 +165,13 @@ const CART = new Map<string, CartItem[]>();
 const PENDING = new Map<string, CartItem | null>();
 
 // Local flow map (so we don't mutate Session's State type)
-type FlowStep = 'ASK_NAME' | 'ASK_IF_DAR' | 'ASK_DISTRICT' | 'ASK_PLACE';
+type FlowStep =
+  | 'ASK_NAME'
+  | 'ASK_IF_DAR'      // now waits for buttons (DAR_INSIDE / DAR_OUTSIDE)
+  | 'ASK_IN_DAR_MODE' // waits for buttons (IN_DAR_DELIVERY / IN_DAR_PICKUP)
+  | 'ASK_GPS'         // expects WhatsApp location pin
+  | 'TRACK_ASK_NAME'; // tracking name prompt
+
 const FLOW = new Map<string, FlowStep | null>();
 
 // Lightweight contact info for the current checkout
@@ -185,6 +191,61 @@ function addToCart(u: string, it: CartItem) {
 function setPending(u: string, it: CartItem | null) { PENDING.set(u, it); }
 function pendingOrCart(u: string): CartItem[] { const p = PENDING.get(u); return p ? [p] : getCart(u); }
 function setFlow(u: string, step: FlowStep | null) { if (step) FLOW.set(u, step); else FLOW.delete(u); }
+
+function getPaymentOptions() {
+  const opts: Array<{ id: string; label: string; value: string }> = [];
+  for (let i = 1; i <= 5; i++) {
+    const label = (process.env as any)[`PAYMENT_${i}_LABEL`];
+    const value = (process.env as any)[`PAYMENT_${i}_NUMBER`];
+    if (label && value) opts.push({ id: `PAY_${i}`, label, value });
+  }
+  return opts;
+}
+
+async function showDarChoiceButtons(user: string, lang: Lang) {
+  await sendText(user, t(lang, 'flow.choose_dar'));
+  return sendButtonsMessageSafe(user, t(lang, 'menu.actions_section'), [
+    { id: 'DAR_INSIDE',  title: t(lang, 'flow.option_inside_dar') },
+    { id: 'DAR_OUTSIDE', title: t(lang, 'flow.option_outside_dar') },
+  ]);
+}
+
+async function showInDarModeButtons(user: string, lang: Lang) {
+  await sendText(user, t(lang, 'flow.choose_in_dar_mode'));
+  return sendButtonsMessageSafe(user, t(lang, 'menu.actions_section'), [
+    { id: 'IN_DAR_DELIVERY', title: t(lang, 'in_dar.delivery') },
+    { id: 'IN_DAR_PICKUP',   title: t(lang, 'in_dar.pickup') },
+  ]);
+}
+
+async function showPaymentOptions(user: string, lang: Lang, total: number) {
+  const opts = getPaymentOptions();
+  if (!opts.length) {
+    await sendText(user, t(lang, 'payment.none'));
+    return;
+  }
+  await sendText(user, t(lang, 'flow.payment_choose'));
+  return sendListMessageSafe({
+    to: user,
+    header: t(lang, 'checkout.summary_total', { total: Math.round(total).toLocaleString('sw-TZ') }),
+    body: t(lang, 'flow.payment_choose'),
+    footer: '',
+    buttonText: t(lang, 'generic.choose'),
+    sections: [{
+      title: t(lang, 'flow.payment_choose'),
+      rows: opts.map(o => ({ id: o.id, title: o.label, description: o.value })),
+    }],
+  });
+}
+
+function paymentChoiceById(id: string) {
+  const n = Number(id.replace('PAY_', ''));
+  const label = (process.env as any)[`PAYMENT_${n}_LABEL`];
+  const value = (process.env as any)[`PAYMENT_${n}_NUMBER`];
+  if (label && value) return { label, value };
+  return null;
+}
+
 
 /* -------------------------------------------------------------------------- */
 /*                                   Routes                                   */
@@ -428,6 +489,69 @@ async function onInteractive(user: string, id: string, lang: Lang) {
       CONTACT.set(user, {});
       return sendText(user, t(lang, 'flow.ask_name'));
     }
+    // Where are you?
+if (id === 'DAR_INSIDE') {
+  setFlow(user, 'ASK_IN_DAR_MODE');
+  return showInDarModeButtons(user, lang);
+}
+if (id === 'DAR_OUTSIDE') {
+  setFlow(user, null);
+  const items = pendingOrCart(user);
+  const sub = items.reduce((a, it) => a + it.unitPrice * it.qty, 0);
+  const OUTSIDE_DAR_FEE = 10000;
+  const total = sub + OUTSIDE_DAR_FEE;
+
+  await sendText(user, t(lang, 'flow.outside_dar_notice', { fee: OUTSIDE_DAR_FEE.toLocaleString('sw-TZ') }));
+  await sendText(user, [
+    t(lang, 'checkout.summary_header'),
+    t(lang, 'checkout.summary_total', { total: Math.round(total).toLocaleString('sw-TZ') }),
+  ].join('\n'));
+
+  await showPaymentOptions(user, lang, total);
+  return;
+}
+
+// Inside-Dar mode
+if (id === 'IN_DAR_DELIVERY') {
+  setFlow(user, 'ASK_GPS');
+  return sendText(user, t(lang, 'flow.ask_gps'));
+}
+if (id === 'IN_DAR_PICKUP') {
+  setFlow(user, null);
+  const items = pendingOrCart(user);
+  const sub = items.reduce((a, it) => a + it.unitPrice * it.qty, 0);
+  const total = sub;
+
+  await sendText(user, [
+    t(lang, 'checkout.summary_header'),
+    t(lang, 'checkout.summary_total', { total: Math.round(total).toLocaleString('sw-TZ') }),
+  ].join('\n'));
+  await showPaymentOptions(user, lang, total);
+  return;
+}
+
+// Payment choice
+if (id.startsWith('PAY_')) {
+  const choice = paymentChoiceById(id);
+  if (choice) {
+    await sendText(user, t(lang, 'payment.selected', { label: choice.label, value: choice.value }));
+    const s = getSession(user);
+    s.state = 'WAIT_PROOF';
+    saveSession(user, s);
+    return sendText(user, t(lang, 'proof.ask'));
+  }
+  return sendText(user, t(lang, 'payment.none'));
+}
+
+// Make these responsive if present in the menu
+if (id === 'ACTION_TALK_TO_AGENT') {
+  return sendText(user, t(lang, 'agent.reply'));
+}
+if (id === 'ACTION_TRACK_BY_NAME') {
+  setFlow(user, 'TRACK_ASK_NAME');
+  return sendText(user, t(lang, 'track.ask_name'));
+}
+
   }
 }
 
@@ -453,109 +577,57 @@ async function onFlow(user: string, step: FlowStep, m: Incoming, lang: Lang) {
       contact.name = txt;
       CONTACT.set(user, contact);
       setFlow(user, 'ASK_IF_DAR');
-      return sendText(user, t(lang, 'flow.name_saved', { name: txt }) + '\n' + t(lang, 'flow.ask_if_dar'));
-    }
+      await sendText(user, t(lang, 'flow.name_saved', { name: txt }));
+      return showDarChoiceButtons(user, lang);
+}
 
-    case 'ASK_IF_DAR': {
-      const a = txt.toLowerCase();
-      if (['ndiyo','ndio','ndani','yes','y'].includes(a)) {
-        setFlow(user, 'ASK_DISTRICT');
-        return sendText(user, t(lang, 'flow.ask_district'));
-      }
-      if (['hapana','nje','no','n'].includes(a)) {
-        // Outside Dar — flat estimate, then go straight to proof
-        setFlow(user, null);
-        const items = pendingOrCart(user);
-        const sub = items.reduce((acc, it) => acc + it.unitPrice * it.qty, 0);
-        const total = sub + OUTSIDE_DAR_FEE;
 
-        await sendText(user, t(lang, 'flow.outside_dar_notice', { fee: fmtTZS(OUTSIDE_DAR_FEE) }));
-        await sendText(
-          user,
-          [
-            t(lang, 'checkout.summary_header'),
-            t(lang, 'checkout.summary_name', { name: contact.name || '' }),
-            t(lang, 'checkout.summary_total', { total: fmtTZS(total) }),
-          ].join('\n')
-        );
-        await sendPaymentInstructions(user, total);
-        s.state = 'WAIT_PROOF'; saveSession(user, s);
-        return sendText(user, t(lang, 'proof.ask'));
-      }
-      return sendText(user, t(lang, 'flow.reply_yes_no'));
-    }
+  case 'ASK_IF_DAR': {
+    // Wait for interactive button (DAR_INSIDE / DAR_OUTSIDE)
+    return;
+}
+  case 'ASK_IN_DAR_MODE': {
+  // Wait for interactive button (IN_DAR_DELIVERY / IN_DAR_PICKUP)
+  return;
+}
 
-    case 'ASK_DISTRICT': {
-      if (!txt) return sendText(user, t(lang, 'flow.ask_district'));
-      contact.district = txt;
-      CONTACT.set(user, contact);
-      setFlow(user, 'ASK_PLACE');
-      return sendText(user, t(lang, 'flow.ask_place'));
-    }
+case 'ASK_GPS': {
+  if (m.hasLocation && typeof m.lat === 'number' && typeof m.lon === 'number') {
+    const km = haversineKm(KEKO.lat, KEKO.lon, m.lat, m.lon);
+    const fee = feeForDarDistance(km);
+    const items = pendingOrCart(user);
+    const sub = items.reduce((a, it) => a + it.unitPrice * it.qty, 0);
+    const total = sub + fee;
 
-    case 'ASK_PLACE': {
-      // Prefer GPS pin
-      if (m.hasLocation && typeof m.lat === 'number' && typeof m.lon === 'number') {
-        const km = haversineKm(KEKO.lat, KEKO.lon, m.lat, m.lon);
-        const fee = feeForDarDistance(km);
-        const items = pendingOrCart(user);
-        const sub = items.reduce((acc, it) => acc + it.unitPrice * it.qty, 0);
-        const total = sub + fee;
+    await sendText(user, t(lang, 'flow.distance_quote', {
+      place: 'GPS Pin',
+      district: '',
+      km: km.toFixed(1),
+      fee: Math.round(fee).toLocaleString('sw-TZ'),
+    }));
 
-        await sendText(user, t(lang, 'flow.distance_quote', {
-          place: 'GPS Pin',
-          district: contact.district || '',
-          km: km.toFixed(1),
-          fee: fmtTZS(fee),
-        }));
-        await sendText(user, [
-          t(lang, 'checkout.summary_header'),
-          t(lang, 'checkout.summary_name', { name: contact.name || '' }),
-          t(lang, 'checkout.summary_address_dar', { place: 'GPS Pin', district: contact.district || '' }),
-          t(lang, 'checkout.summary_total', { total: fmtTZS(total) }),
-        ].join('\n'));
-        await sendPaymentInstructions(user, total);
-        s.state = 'WAIT_PROOF'; saveSession(user, s);
-        setFlow(user, null);
-        return sendText(user, t(lang, 'proof.ask'));
-      }
+    await sendText(user, [
+      t(lang, 'checkout.summary_header'),
+      t(lang, 'checkout.summary_name', { name: contact.name || '' }),
+      t(lang, 'checkout.summary_total', { total: Math.round(total).toLocaleString('sw-TZ') }),
+    ].join('\n'));
 
-      if (!txt) return sendText(user, t(lang, 'flow.ask_place'));
-      const place = txt;
+    await showPaymentOptions(user, lang, total);
+    setFlow(user, null);
+    return;
+  }
+  return sendText(user, t(lang, 'flow.ask_gps'));
+}
 
-      // Rough estimate by district average (or default 8km)
-      const avg = DISTRICT_AVG_KM[(contact.district || '').toLowerCase()];
-      const usedKm = typeof avg === 'number' ? avg : 8;
-      const fee = feeForDarDistance(usedKm);
+case 'TRACK_ASK_NAME': {
+  if (!txt) return sendText(user, t(lang, 'track.ask_name'));
+  // TODO: plug in your DB
+  await sendText(user, t(lang, 'track.none_found', { name: txt }));
+  setFlow(user, null);
+  return;
+}
 
-      if (typeof avg === 'number') {
-        await sendText(user, t(lang, 'flow.distance_avg_used', { district: contact.district || '' }));
-      } else {
-        await sendText(user, t(lang, 'flow.distance_default_used'));
-      }
 
-      await sendText(user, t(lang, 'flow.distance_quote', {
-        place,
-        district: contact.district || '',
-        km: usedKm.toFixed(1),
-        fee: fmtTZS(fee),
-      }));
-
-      const items = pendingOrCart(user);
-      const sub = items.reduce((acc, it) => acc + it.unitPrice * it.qty, 0);
-      const total = sub + fee;
-
-      await sendText(user, [
-        t(lang, 'checkout.summary_header'),
-        t(lang, 'checkout.summary_name', { name: contact.name || '' }),
-        t(lang, 'checkout.summary_address_dar', { place, district: contact.district || '' }),
-        t(lang, 'checkout.summary_total', { total: fmtTZS(total) }),
-      ].join('\n'));
-      await sendPaymentInstructions(user, total);
-      s.state = 'WAIT_PROOF'; saveSession(user, s);
-      setFlow(user, null);
-      return sendText(user, t(lang, 'proof.ask'));
-    }
   }
 }
 

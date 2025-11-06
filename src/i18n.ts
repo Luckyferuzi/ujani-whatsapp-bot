@@ -79,6 +79,23 @@ const dict: Dict = {
     'flow.distance_avg_used': 'Hatukupata mtaa huo; tumetumia wastani wa *{district}*.',
     'flow.distance_default_used': 'Hatukupata wilaya hiyo; tumetumia umbali wa chaguo-msingi.',
     'flow.outside_dar_notice': 'Tunaweza kutuma nje ya Dar. Makadirio kwa sasa: *{fee} TZS*.',
+    'flow.choose_dar': 'Mahali ulipo sasa:',
+    'flow.option_inside_dar': '1) UPO ndani ya Dar',
+    'flow.option_outside_dar': '2) UPO nje ya Dar',
+
+    'flow.choose_in_dar_mode': 'Chagua huduma:',
+    'in_dar.delivery': 'Tuletee (Delivery)',
+    'in_dar.pickup': 'Nitakuja ofisini',
+
+    'flow.ask_gps': 'Tafadhali *shiriki live location ya WhatsApp* ili tukokotoe gharama ya delivery.',
+
+    'flow.payment_choose': 'Chagua njia ya kulipa:',
+    'payment.selected': 'Tumia *{label}*: {value}\nBaada ya kulipa, tuma *screenshot* au *majina matatu ya mtumaji* kuthibitisha.',
+    'payment.none': 'Namba za malipo hazijawekewa. Tafadhali wasiliana na mwakilishi.',
+
+    'agent.reply': 'Tafadhali andika ujumbe wako; mwakilishi atakujibu haraka.',
+    'track.ask_name': 'Andika *jina* ulilotumia kufuatilia oda.',
+    'track.none_found': 'Hakuna oda zilizopatikana kwa *{name}*.',
 
     /* ===== Cart / Summary ===== */
     'cart.added': '✅ *{title}* limeongezwa kwenye kikapu.',
@@ -171,6 +188,23 @@ const dict: Dict = {
     'flow.distance_avg_used': 'We couldn’t find that area; used the average for *{district}*.',
     'flow.distance_default_used': 'We couldn’t find that district; used a default distance.',
     'flow.outside_dar_notice': 'We can deliver outside Dar. Current estimate: *{fee} TZS*.',
+    'flow.choose_dar': 'Where are you now:',
+    'flow.option_inside_dar': '1) INSIDE Dar',
+    'flow.option_outside_dar': '2) OUTSIDE Dar',
+
+    'flow.choose_in_dar_mode': 'Choose service:',
+    'in_dar.delivery': 'Deliver to me',
+    'in_dar.pickup': 'I will pick up at the office',
+
+    'flow.ask_gps': 'Please *share your WhatsApp live location* so we can calculate the delivery fee.',
+
+    'flow.payment_choose': 'Choose how to pay:',
+    'payment.selected': 'Use *{label}*: {value}\nAfter payment, send a *screenshot* or the *payer’s three names*.',
+    'payment.none': 'Payment numbers are not configured. Please contact an agent.',
+
+    'agent.reply': 'Please type your message; an agent will reply shortly.',
+    'track.ask_name': 'Type the *name* you used to track your order.',
+    'track.none_found': 'No orders found for *{name}*.',
 
     'cart.added': '✅ *{title}* added to cart.',
     'cart.summary_header': '🧺 Your cart:',
