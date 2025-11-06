@@ -111,15 +111,55 @@ function otherLang(l: Lang): Lang { return l === 'sw' ? 'en' : 'sw'; }
 function normId(id?: string) { return (id ?? '').toString().trim().toUpperCase(); }
 
 /** Build payment choices from env pairs PAYMENT_1_LABEL/NUMBER ... up to 5 */
+// Build payment choices from YOUR envs first, then fall back to PAYMENT_n_* if any.
 function getPaymentOptions() {
   const opts: Array<{ id: string; label: string; value: string }> = [];
+
+  // 1) MIXXBYYAS LIPANAMB (Lipa Namba Till)
+  const mixxTill = process.env.LIPA_NAMBA_TILL;
+  const mixxName = process.env.LIPA_NAMBA_NAME;
+  if (mixxTill) {
+    opts.push({
+      id: 'PAY_MIXX', // stable ID we handle onInteractive
+      label: 'MIXXBYYAS LIPANAMB', // 👈 exactly as you asked
+      value: mixxName ? `${mixxTill} • ${mixxName}` : mixxTill,
+    });
+  }
+
+  // 2) VODALIPANMBA (Vodacom Lipa Namba Till)
+  const vodaTill = process.env.VODA_LNM_TILL;
+  const vodaName = process.env.VODA_LNM_NAME;
+  if (vodaTill) {
+    opts.push({
+      id: 'PAY_VODA_LNM',
+      label: 'VODALIPANMBA', // 👈 exactly as you asked
+      value: vodaName ? `${vodaTill} • ${vodaName}` : vodaTill,
+    });
+  }
+
+  // 3) Vodacom P2P MSISDN (optional)
+  const vodaMsisdn = process.env.VODA_P2P_MSISDN;
+  const vodaP2PName = process.env.VODA_P2P_NAME;
+  if (vodaMsisdn) {
+    opts.push({
+      id: 'PAY_VODA_P2P',
+      label: 'Voda P2P',
+      value: vodaP2PName ? `${vodaMsisdn} • ${vodaP2PName}` : vodaMsisdn,
+    });
+  }
+
+  // 4) Also support generic PAYMENT_n_LABEL / PAYMENT_n_NUMBER (1..5) if you keep any
   for (let i = 1; i <= 5; i++) {
     const label = (process.env as any)[`PAYMENT_${i}_LABEL`];
     const value = (process.env as any)[`PAYMENT_${i}_NUMBER`];
-    if (label && value) opts.push({ id: `PAY_${i}`, label, value });
+    if (label && value) {
+      opts.push({ id: `PAY_${i}`, label: String(label), value: String(value) });
+    }
   }
+
   return opts;
 }
+
 
 async function showDarChoiceButtons(user: string, lang: Lang) {
   await sendText(user, t(lang, 'flow.choose_dar'));
@@ -158,12 +198,40 @@ async function showPaymentOptions(user: string, lang: Lang, total: number) {
 }
 
 function paymentChoiceById(id: string) {
-  const n = Number(id.replace('PAY_', ''));
-  const label = (process.env as any)[`PAYMENT_${n}_LABEL`];
-  const value = (process.env as any)[`PAYMENT_${n}_NUMBER`];
-  if (label && value) return { label, value };
+  const N = (id || '').toUpperCase().trim();
+
+  if (N === 'PAY_MIXX') {
+    const till = process.env.LIPA_NAMBA_TILL;
+    const name = process.env.LIPA_NAMBA_NAME;
+    if (till) return { label: 'MIXXBYYAS LIPANAMB', value: name ? `${till} • ${name}` : till };
+  }
+
+  if (N === 'PAY_VODA_LNM') {
+    const till = process.env.VODA_LNM_TILL;
+    const name = process.env.VODA_LNM_NAME;
+    if (till) return { label: 'VODALIPANMBA', value: name ? `${till} • ${name}` : till };
+  }
+
+  if (N === 'PAY_VODA_P2P') {
+    const msisdn = process.env.VODA_P2P_MSISDN;
+    const name = process.env.VODA_P2P_NAME;
+    if (msisdn) return { label: 'Voda P2P', value: name ? `${msisdn} • ${name}` : msisdn };
+  }
+
+  // generic fallback for PAYMENT_n_* pairs
+  if (N.startsWith('PAY_')) {
+    const n = Number(id.replace(/^PAY_/, ''));
+    if (!Number.isNaN(n)) {
+      const label = (process.env as any)[`PAYMENT_${n}_LABEL`];
+      const value = (process.env as any)[`PAYMENT_${n}_NUMBER`];
+      if (label && value) return { label, value };
+    }
+  }
+
   return null;
 }
+
+
 
 /* -------------------------------------------------------------------------- */
 /*                              In-memory state                               */
