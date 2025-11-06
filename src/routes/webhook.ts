@@ -143,55 +143,6 @@ function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-/** Fallback average distance when only district is typed (no GPS pin) */
-const DISTRICT_AVG_KM: Record<string, number> = {
-  temeke: 7,
-  ilala: 6,
-  kinondoni: 11,
-  ubungo: 12,
-  kigamboni: 10,
-};
-
-function otherLang(l: Lang): Lang { return l === 'sw' ? 'en' : 'sw'; }
-
-/* -------------------------------------------------------------------------- */
-/*                              In-memory state                               */
-/* -------------------------------------------------------------------------- */
-
-export type CartItem = { sku: string; name: string; qty: number; unitPrice: number };
-
-const USER_LANG = new Map<string, Lang>();
-const CART = new Map<string, CartItem[]>();
-const PENDING = new Map<string, CartItem | null>();
-
-// Local flow map (so we don't mutate Session's State type)
-type FlowStep =
-  | 'ASK_NAME'
-  | 'ASK_IF_DAR'      // now waits for buttons (DAR_INSIDE / DAR_OUTSIDE)
-  | 'ASK_IN_DAR_MODE' // waits for buttons (IN_DAR_DELIVERY / IN_DAR_PICKUP)
-  | 'ASK_GPS'         // expects WhatsApp location pin
-  | 'TRACK_ASK_NAME'; // tracking name prompt
-
-const FLOW = new Map<string, FlowStep | null>();
-
-// Lightweight contact info for the current checkout
-const CONTACT = new Map<string, { name?: string; district?: string }>();
-
-function getLang(u: string): Lang { return USER_LANG.get(u) ?? 'sw'; }
-function setLang(u: string, l: Lang) { USER_LANG.set(u, l); }
-function getCart(u: string) { return CART.get(u) ?? []; }
-function setCart(u: string, x: CartItem[]) { CART.set(u, x); }
-function clearCart(u: string) { CART.delete(u); }
-function addToCart(u: string, it: CartItem) {
-  const arr = getCart(u);
-  const same = arr.find(c => c.sku === it.sku && c.unitPrice === it.unitPrice);
-  if (same) same.qty += it.qty; else arr.push({ ...it });
-  setCart(u, arr);
-}
-function setPending(u: string, it: CartItem | null) { PENDING.set(u, it); }
-function pendingOrCart(u: string): CartItem[] { const p = PENDING.get(u); return p ? [p] : getCart(u); }
-function setFlow(u: string, step: FlowStep | null) { if (step) FLOW.set(u, step); else FLOW.delete(u); }
-
 function getPaymentOptions() {
   const opts: Array<{ id: string; label: string; value: string }> = [];
   for (let i = 1; i <= 5; i++) {
@@ -220,10 +171,7 @@ async function showInDarModeButtons(user: string, lang: Lang) {
 
 async function showPaymentOptions(user: string, lang: Lang, total: number) {
   const opts = getPaymentOptions();
-  if (!opts.length) {
-    await sendText(user, t(lang, 'payment.none'));
-    return;
-  }
+  if (!opts.length) return sendText(user, t(lang, 'payment.none'));
   await sendText(user, t(lang, 'flow.payment_choose'));
   return sendListMessageSafe({
     to: user,
@@ -245,6 +193,56 @@ function paymentChoiceById(id: string) {
   if (label && value) return { label, value };
   return null;
 }
+
+
+/** Fallback average distance when only district is typed (no GPS pin) */
+const DISTRICT_AVG_KM: Record<string, number> = {
+  temeke: 7,
+  ilala: 6,
+  kinondoni: 11,
+  ubungo: 12,
+  kigamboni: 10,
+};
+
+function otherLang(l: Lang): Lang { return l === 'sw' ? 'en' : 'sw'; }
+
+/* -------------------------------------------------------------------------- */
+/*                              In-memory state                               */
+/* -------------------------------------------------------------------------- */
+
+export type CartItem = { sku: string; name: string; qty: number; unitPrice: number };
+
+const USER_LANG = new Map<string, Lang>();
+const CART = new Map<string, CartItem[]>();
+const PENDING = new Map<string, CartItem | null>();
+
+// Local flow map (so we don't mutate Session's State type)
+type FlowStep =
+  | 'ASK_NAME'
+  | 'ASK_IF_DAR'      // waits for DAR_INSIDE / DAR_OUTSIDE (buttons)
+  | 'ASK_IN_DAR_MODE' // waits for IN_DAR_DELIVERY / IN_DAR_PICKUP (buttons)
+  | 'ASK_GPS'         // expects a WhatsApp live location
+  | 'TRACK_ASK_NAME';
+
+const FLOW = new Map<string, FlowStep | null>();
+
+// Lightweight contact info for the current checkout
+const CONTACT = new Map<string, { name?: string; district?: string }>();
+
+function getLang(u: string): Lang { return USER_LANG.get(u) ?? 'sw'; }
+function setLang(u: string, l: Lang) { USER_LANG.set(u, l); }
+function getCart(u: string) { return CART.get(u) ?? []; }
+function setCart(u: string, x: CartItem[]) { CART.set(u, x); }
+function clearCart(u: string) { CART.delete(u); }
+function addToCart(u: string, it: CartItem) {
+  const arr = getCart(u);
+  const same = arr.find(c => c.sku === it.sku && c.unitPrice === it.unitPrice);
+  if (same) same.qty += it.qty; else arr.push({ ...it });
+  setCart(u, arr);
+}
+function setPending(u: string, it: CartItem | null) { PENDING.set(u, it); }
+function pendingOrCart(u: string): CartItem[] { const p = PENDING.get(u); return p ? [p] : getCart(u); }
+function setFlow(u: string, step: FlowStep | null) { if (step) FLOW.set(u, step); else FLOW.delete(u); }
 
 
 /* -------------------------------------------------------------------------- */
@@ -512,16 +510,18 @@ if (id === 'DAR_OUTSIDE') {
 }
 
 // Inside-Dar mode
-if (id === 'IN_DAR_DELIVERY') {
-  setFlow(user, 'ASK_GPS');
-  return sendText(user, t(lang, 'flow.ask_gps'));
+// Inside / Outside Dar choice
+if (id === 'DAR_INSIDE') {
+  setFlow(user, 'ASK_IN_DAR_MODE');
+  return showInDarModeButtons(user, lang);
 }
-if (id === 'IN_DAR_PICKUP') {
+if (id === 'DAR_OUTSIDE') {
   setFlow(user, null);
   const items = pendingOrCart(user);
   const sub = items.reduce((a, it) => a + it.unitPrice * it.qty, 0);
-  const total = sub;
-
+  const OUTSIDE_DAR_FEE = 10000; // your flat fee
+  const total = sub + OUTSIDE_DAR_FEE;
+  await sendText(user, t(lang, 'flow.outside_dar_notice', { fee: OUTSIDE_DAR_FEE.toLocaleString('sw-TZ') }));
   await sendText(user, [
     t(lang, 'checkout.summary_header'),
     t(lang, 'checkout.summary_total', { total: Math.round(total).toLocaleString('sw-TZ') }),
@@ -530,7 +530,25 @@ if (id === 'IN_DAR_PICKUP') {
   return;
 }
 
-// Payment choice
+// In-Dar: Delivery or Pickup
+if (id === 'IN_DAR_DELIVERY') {
+  setFlow(user, 'ASK_GPS');
+  return sendText(user, t(lang, 'flow.ask_gps'));
+}
+if (id === 'IN_DAR_PICKUP') {
+  setFlow(user, null);
+  const items = pendingOrCart(user);
+  const sub = items.reduce((a, it) => a + it.unitPrice * it.qty, 0);
+  const total = sub; // no delivery fee
+  await sendText(user, [
+    t(lang, 'checkout.summary_header'),
+    t(lang, 'checkout.summary_total', { total: Math.round(total).toLocaleString('sw-TZ') }),
+  ].join('\n'));
+  await showPaymentOptions(user, lang, total);
+  return;
+}
+
+// Payment option picked from the list
 if (id.startsWith('PAY_')) {
   const choice = paymentChoiceById(id);
   if (choice) {
@@ -542,6 +560,7 @@ if (id.startsWith('PAY_')) {
   }
   return sendText(user, t(lang, 'payment.none'));
 }
+
 
 // Make these responsive if present in the menu
 if (id === 'ACTION_TALK_TO_AGENT') {
@@ -582,14 +601,9 @@ async function onFlow(user: string, step: FlowStep, m: Incoming, lang: Lang) {
 }
 
 
-  case 'ASK_IF_DAR': {
-    // Wait for interactive button (DAR_INSIDE / DAR_OUTSIDE)
-    return;
-}
-  case 'ASK_IN_DAR_MODE': {
-  // Wait for interactive button (IN_DAR_DELIVERY / IN_DAR_PICKUP)
-  return;
-}
+case 'ASK_IF_DAR':      return; // waiting for DAR_INSIDE / DAR_OUTSIDE
+case 'ASK_IN_DAR_MODE': return; // waiting for IN_DAR_DELIVERY / IN_DAR_PICKUP
+
 
 case 'ASK_GPS': {
   if (m.hasLocation && typeof m.lat === 'number' && typeof m.lon === 'number') {
@@ -600,12 +614,9 @@ case 'ASK_GPS': {
     const total = sub + fee;
 
     await sendText(user, t(lang, 'flow.distance_quote', {
-      place: 'GPS Pin',
-      district: '',
-      km: km.toFixed(1),
+      place: 'GPS Pin', district: '', km: km.toFixed(1),
       fee: Math.round(fee).toLocaleString('sw-TZ'),
     }));
-
     await sendText(user, [
       t(lang, 'checkout.summary_header'),
       t(lang, 'checkout.summary_name', { name: contact.name || '' }),
@@ -618,6 +629,7 @@ case 'ASK_GPS': {
   }
   return sendText(user, t(lang, 'flow.ask_gps'));
 }
+
 
 case 'TRACK_ASK_NAME': {
   if (!txt) return sendText(user, t(lang, 'track.ask_name'));

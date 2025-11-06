@@ -80,8 +80,8 @@ const dict: Dict = {
     'flow.distance_default_used': 'Hatukupata wilaya hiyo; tumetumia umbali wa chaguo-msingi.',
     'flow.outside_dar_notice': 'Tunaweza kutuma nje ya Dar. Makadirio kwa sasa: *{fee} TZS*.',
     'flow.choose_dar': 'Mahali ulipo sasa:',
-    'flow.option_inside_dar': '1) UPO ndani ya Dar',
-    'flow.option_outside_dar': '2) UPO nje ya Dar',
+    'flow.option_inside_dar': 'ndani ya Dar',
+    'flow.option_outside_dar': 'UPO nje ya Dar',
 
     'flow.choose_in_dar_mode': 'Chagua huduma:',
     'in_dar.delivery': 'Tuletee (Delivery)',
@@ -189,8 +189,8 @@ const dict: Dict = {
     'flow.distance_default_used': 'We couldn’t find that district; used a default distance.',
     'flow.outside_dar_notice': 'We can deliver outside Dar. Current estimate: *{fee} TZS*.',
     'flow.choose_dar': 'Where are you now:',
-    'flow.option_inside_dar': '1) INSIDE Dar',
-    'flow.option_outside_dar': '2) OUTSIDE Dar',
+    'flow.option_inside_dar': 'INSIDE Dar',
+    'flow.option_outside_dar': 'OUTSIDE Dar',
 
     'flow.choose_in_dar_mode': 'Choose service:',
     'in_dar.delivery': 'Deliver to me',
