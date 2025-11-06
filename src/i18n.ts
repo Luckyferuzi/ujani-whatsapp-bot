@@ -81,7 +81,7 @@ const dict: Dict = {
     'flow.outside_dar_notice': 'Tunaweza kutuma nje ya Dar. Makadirio kwa sasa: *{fee} TZS*.',
     'flow.choose_dar': 'Mahali ulipo sasa:',
     'flow.option_inside_dar': 'ndani ya Dar',
-    'flow.option_outside_dar': 'UPO nje ya Dar',
+    'flow.option_outside_dar': 'nje ya Dar',
 
     'flow.choose_in_dar_mode': 'Chagua huduma:',
     'in_dar.delivery': 'Tuletee (Delivery)',

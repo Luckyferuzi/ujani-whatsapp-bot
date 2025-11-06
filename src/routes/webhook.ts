@@ -284,9 +284,11 @@ webhook.post('/webhook', async (req: Request, res: Response) => {
           let interactiveId: string | undefined;
           if (type === 'interactive') {
             const itype = msg.interactive?.type;
+            console.log('[webhook] interactive type:', itype, 'payload:', JSON.stringify(msg.interactive));
             if (itype === 'list_reply') interactiveId = msg.interactive?.list_reply?.id;
             if (itype === 'button_reply') interactiveId = msg.interactive?.button_reply?.id;
           }
+          if (interactiveId) console.log('[webhook] interactive id:', interactiveId);
 
           // Location pin
           const hasLocation = type === 'location';
