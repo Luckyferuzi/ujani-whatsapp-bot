@@ -110,8 +110,7 @@ function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number) {
 function otherLang(l: Lang): Lang { return l === 'sw' ? 'en' : 'sw'; }
 function normId(id?: string) { return (id ?? '').toString().trim().toUpperCase(); }
 
-/** Build payment choices from env pairs PAYMENT_1_LABEL/NUMBER ... up to 5 */
-// Build payment choices from YOUR envs first, then fall back to PAYMENT_n_* if any.
+/** Payment choices from your envs first, then PAYMENT_n_* as fallback */
 function getPaymentOptions() {
   const opts: Array<{ id: string; label: string; value: string }> = [];
 
@@ -120,8 +119,8 @@ function getPaymentOptions() {
   const mixxName = process.env.LIPA_NAMBA_NAME;
   if (mixxTill) {
     opts.push({
-      id: 'PAY_MIXX', // stable ID we handle onInteractive
-      label: 'MIXXBYYAS LIPANAMB', // 👈 exactly as you asked
+      id: 'PAY_MIXX',
+      label: 'MIXXBYYAS LIPANAMB',
       value: mixxName ? `${mixxTill} • ${mixxName}` : mixxTill,
     });
   }
@@ -132,12 +131,12 @@ function getPaymentOptions() {
   if (vodaTill) {
     opts.push({
       id: 'PAY_VODA_LNM',
-      label: 'VODALIPANMBA', // 👈 exactly as you asked
+      label: 'VODALIPANMBA',
       value: vodaName ? `${vodaTill} • ${vodaName}` : vodaTill,
     });
   }
 
-  // 3) Vodacom P2P MSISDN (optional)
+  // 3) Vodacom P2P
   const vodaMsisdn = process.env.VODA_P2P_MSISDN;
   const vodaP2PName = process.env.VODA_P2P_NAME;
   if (vodaMsisdn) {
@@ -148,59 +147,35 @@ function getPaymentOptions() {
     });
   }
 
-  // 4) Also support generic PAYMENT_n_LABEL / PAYMENT_n_NUMBER (1..5) if you keep any
+  // 4) Generic fallback
   for (let i = 1; i <= 5; i++) {
     const label = (process.env as any)[`PAYMENT_${i}_LABEL`];
     const value = (process.env as any)[`PAYMENT_${i}_NUMBER`];
-    if (label && value) {
-      opts.push({ id: `PAY_${i}`, label: String(label), value: String(value) });
-    }
+    if (label && value) opts.push({ id: `PAY_${i}`, label: String(label), value: String(value) });
   }
 
   return opts;
 }
 
-
-async function showDarChoiceButtons(user: string, lang: Lang) {
-  await sendText(user, t(lang, 'flow.choose_dar'));
-  return sendButtonsMessageSafe(user, t(lang, 'menu.actions_section'), [
-    { id: 'DAR_INSIDE',  title: t(lang, 'flow.option_inside_dar') },
-    { id: 'DAR_OUTSIDE', title: t(lang, 'flow.option_outside_dar') },
-  ]);
-}
-
-async function showInDarModeButtons(user: string, lang: Lang) {
-  await sendText(user, t(lang, 'flow.choose_in_dar_mode'));
-  return sendButtonsMessageSafe(user, t(lang, 'menu.actions_section'), [
-    { id: 'IN_DAR_DELIVERY', title: t(lang, 'in_dar.delivery') },
-    { id: 'IN_DAR_PICKUP',   title: t(lang, 'in_dar.pickup') },
-  ]);
-}
-
 async function showPaymentOptions(user: string, lang: Lang, total: number) {
   const opts = getPaymentOptions();
 
-  // 1) If nothing configured, tell the user plainly
   if (!opts.length) {
     await sendText(user, t(lang, 'payment.none'));
     return;
   }
 
-  // 2) Send a readable summary FIRST (exactly as you asked)
-  //    Example lines:
-  //    • MIXXBYYAS LIPANAMB: 15548195 • Ujani Herbals
-  //    • VODALIPANMBA: 36653317 • Ujani Herbals
-  //    • Voda P2P: 255743414956 • Ujani Herbals
+  // Human-readable list first
   const lines: string[] = [
     t(lang, 'flow.payment_choose'),
     ...opts.map(o => `• *${o.label}*: ${o.value}`),
   ];
   await sendText(user, lines.join('\n'));
 
-  // 3) Then show the selectable list, keeping the total in the header
+  // Selectable list
   await sendListMessageSafe({
     to: user,
-    header: t(lang, 'checkout.summary_total', { total: Math.round(total).toLocaleString('sw-TZ') }),
+    header: t(lang, 'checkout.summary_total', { total: fmtTZS(total) }),
     body: t(lang, 'flow.payment_choose'),
     footer: '',
     buttonText: t(lang, 'generic.choose'),
@@ -211,7 +186,6 @@ async function showPaymentOptions(user: string, lang: Lang, total: number) {
   });
 }
 
-
 function paymentChoiceById(id: string) {
   const N = (id || '').toUpperCase().trim();
 
@@ -220,20 +194,17 @@ function paymentChoiceById(id: string) {
     const name = process.env.LIPA_NAMBA_NAME;
     if (till) return { label: 'MIXXBYYAS LIPANAMB', value: name ? `${till} • ${name}` : till };
   }
-
   if (N === 'PAY_VODA_LNM') {
     const till = process.env.VODA_LNM_TILL;
     const name = process.env.VODA_LNM_NAME;
     if (till) return { label: 'VODALIPANMBA', value: name ? `${till} • ${name}` : till };
   }
-
   if (N === 'PAY_VODA_P2P') {
     const msisdn = process.env.VODA_P2P_MSISDN;
     const name = process.env.VODA_P2P_NAME;
     if (msisdn) return { label: 'Voda P2P', value: name ? `${msisdn} • ${name}` : msisdn };
   }
 
-  // generic fallback for PAYMENT_n_* pairs
   if (N.startsWith('PAY_')) {
     const n = Number(id.replace(/^PAY_/, ''));
     if (!Number.isNaN(n)) {
@@ -242,11 +213,8 @@ function paymentChoiceById(id: string) {
       if (label && value) return { label, value };
     }
   }
-
   return null;
 }
-
-
 
 /* -------------------------------------------------------------------------- */
 /*                              In-memory state                               */
@@ -258,16 +226,22 @@ const USER_LANG = new Map<string, Lang>();
 const CART = new Map<string, CartItem[]>();
 const PENDING = new Map<string, CartItem | null>();
 
-// Local checkout flow (to avoid changing your Session.State type)
+// New granular flow (we keep Session.state minimal)
 type FlowStep =
-  | 'ASK_NAME'
-  | 'ASK_IF_DAR'      // waits for DAR_INSIDE / DAR_OUTSIDE (buttons)
-  | 'ASK_IN_DAR_MODE' // waits for IN_DAR_DELIVERY / IN_DAR_PICKUP (buttons)
-  | 'ASK_GPS'         // expects WhatsApp location pin
+  | 'ASK_IF_DAR'       // buttons: inside/outside
+  | 'ASK_IN_DAR_MODE'  // buttons: delivery/pickup
+  | 'ASK_NAME_IN'
+  | 'ASK_PHONE_IN'
+  | 'ASK_GPS'
+  | 'ASK_NAME_PICK'
+  | 'ASK_PHONE_PICK'
+  | 'ASK_NAME_OUT'
+  | 'ASK_PHONE_OUT'
+  | 'ASK_REGION_OUT'
   | 'TRACK_ASK_NAME';
 
 const FLOW = new Map<string, FlowStep | null>();
-const CONTACT = new Map<string, { name?: string }>();
+const CONTACT = new Map<string, { name?: string; phone?: string; region?: string }>();
 
 function getLang(u: string): Lang { return USER_LANG.get(u) ?? 'sw'; }
 function setLang(u: string, l: Lang) { USER_LANG.set(u, l); }
@@ -338,7 +312,7 @@ webhook.post('/webhook', async (req: Request, res: Response) => {
             continue;
           }
 
-          // 2) if starting / idle, show main menu on greetings
+          // 2) start menu on greetings if idle
           const activeFlow = FLOW.get(from);
           if ((!s || s.state === 'IDLE') && !activeFlow) {
             const txt = (text || '').trim().toLowerCase();
@@ -348,7 +322,7 @@ webhook.post('/webhook', async (req: Request, res: Response) => {
             }
           }
 
-          // 3) route: flow step > session-controlled > fallback
+          // 3) route
           if (activeFlow) {
             await onFlow(from, activeFlow, { text, hasLocation, lat, lon }, lang);
           } else {
@@ -360,7 +334,7 @@ webhook.post('/webhook', async (req: Request, res: Response) => {
     res.sendStatus(200);
   } catch (e) {
     console.error('webhook error:', e);
-    res.sendStatus(200); // don't let WhatsApp disable the webhook
+    res.sendStatus(200);
   }
 });
 
@@ -464,50 +438,43 @@ async function showVariants(user: string, parentSku: string, lang: Lang) {
 /* -------------------------------------------------------------------------- */
 
 const OUTSIDE_DAR_FEE = 10_000;
+const PICKUP_INFO_SW = 'Tupo Keko Modern Furniture, mkabala na Omax Bar. Wasiliana nasi kwa maelezo zaidi.';
+const PICKUP_INFO_EN = 'We are at Keko Modern Furniture, opposite Omax Bar. Contact us for more details.';
 
 async function onInteractive(user: string, id: string, lang: Lang) {
   const N = normId(id);
 
-  // --- Handle location/service & payments FIRST; be robust to truncation (e.g., DAR_OUTSID)
+  /* --------- Location / service selection FIRST (robust to truncation) -------- */
   if (N.startsWith('DAR_INSIDE')) {
     setFlow(user, 'ASK_IN_DAR_MODE');
-    await showInDarModeButtons(user, lang);
+    await sendButtonsMessageSafe(user, t(lang, 'flow.choose_in_dar_mode'), [
+      { id: 'IN_DAR_DELIVERY', title: t(lang, 'in_dar.delivery') },
+      { id: 'IN_DAR_PICKUP',   title: t(lang, 'in_dar.pickup') },
+    ]);
     return;
   }
   if (N.startsWith('DAR_OUTSIDE')) {
-    setFlow(user, null);
-    const items = pendingOrCart(user);
-    const sub = items.reduce((a, it) => a + it.unitPrice * it.qty, 0);
-    const total = sub + OUTSIDE_DAR_FEE;
-
-    await sendText(user, t(lang, 'flow.outside_dar_notice', { fee: fmtTZS(OUTSIDE_DAR_FEE) }));
-    await sendText(user, [
-      t(lang, 'checkout.summary_header'),
-      t(lang, 'checkout.summary_total', { total: fmtTZS(total) }),
-    ].join('\n'));
-
-    await showPaymentOptions(user, lang, total);
+    setFlow(user, 'ASK_NAME_OUT');
+    CONTACT.set(user, {});
+    await sendText(user, t(lang, 'flow.ask_name'));
     return;
   }
   if (N.startsWith('IN_DAR_DELIVERY')) {
-    setFlow(user, 'ASK_GPS');
-    await sendText(user, t(lang, 'flow.ask_gps'));
+    setFlow(user, 'ASK_NAME_IN');
+    CONTACT.set(user, {});
+    await sendText(user, t(lang, 'flow.ask_name'));
     return;
   }
   if (N.startsWith('IN_DAR_PICKUP')) {
-    setFlow(user, null);
-    const items = pendingOrCart(user);
-    const sub = items.reduce((a, it) => a + it.unitPrice * it.qty, 0);
-    const total = sub; // pickup → no delivery fee
-    await sendText(user, [
-      t(lang, 'checkout.summary_header'),
-      t(lang, 'checkout.summary_total', { total: fmtTZS(total) }),
-    ].join('\n'));
-    await showPaymentOptions(user, lang, total);
+    setFlow(user, 'ASK_NAME_PICK');
+    CONTACT.set(user, {});
+    await sendText(user, t(lang, 'flow.ask_name'));
     return;
   }
+
+  /* -------------------------- Payment choice selected ------------------------- */
   if (N.startsWith('PAY_')) {
-    const choice = paymentChoiceById(id); // use original id to extract number
+    const choice = paymentChoiceById(id);
     if (choice) {
       await sendText(user, t(lang, 'payment.selected', { label: choice.label, value: choice.value }));
       const s = getSession(user);
@@ -520,14 +487,17 @@ async function onInteractive(user: string, id: string, lang: Lang) {
     return;
   }
 
-  // --- Cart / navigation actions
+  /* ------------------------------- Cart actions ------------------------------- */
   if (id === 'ACTION_VIEW_CART') return showCart(user, lang);
 
   if (id === 'ACTION_CHECKOUT') {
-    // start local flow without mutating Session.State union
-    setFlow(user, 'ASK_NAME');
-    CONTACT.set(user, {}); // reset temp contact
-    return sendText(user, t(lang, 'flow.ask_name'));
+    setFlow(user, 'ASK_IF_DAR');
+    CONTACT.set(user, {});
+    await sendButtonsMessageSafe(user, t(lang, 'flow.choose_dar'), [
+      { id: 'DAR_INSIDE',  title: t(lang, 'flow.option_inside_dar') },
+      { id: 'DAR_OUTSIDE', title: t(lang, 'flow.option_outside_dar') },
+    ]);
+    return;
   }
 
   if (id === 'ACTION_CHANGE_LANGUAGE') {
@@ -546,7 +516,7 @@ async function onInteractive(user: string, id: string, lang: Lang) {
     return sendText(user, t(lang, 'track.ask_name'));
   }
 
-  // --- Product & variant actions
+  /* ------------------------------ Product flows ------------------------------ */
   if (id.startsWith('PRODUCT_')) {
     const sku = id.replace('PRODUCT_', '');
     if (sku === 'PROMAX') return showVariants(user, 'PROMAX', lang);
@@ -565,7 +535,7 @@ async function onInteractive(user: string, id: string, lang: Lang) {
     if (!prod) return;
 
     if (mode === 'DETAILS') {
-      const txt = detailsForSku(lang, sku); // i18n-driven
+      const txt = detailsForSku(lang, sku);
       await sendText(user, `ℹ️ *${prod.name}*\n${txt}`);
       return showProductActions(user, sku, lang);
     }
@@ -582,9 +552,13 @@ async function onInteractive(user: string, id: string, lang: Lang) {
     }
     if (mode === 'BUY') {
       setPending(user, item);
-      setFlow(user, 'ASK_NAME'); // local flow start
+      setFlow(user, 'ASK_IF_DAR'); // << start with inside/outside Dar (no name yet)
       CONTACT.set(user, {});
-      return sendText(user, t(lang, 'flow.ask_name'));
+      await sendButtonsMessageSafe(user, t(lang, 'flow.choose_dar'), [
+        { id: 'DAR_INSIDE',  title: t(lang, 'flow.option_inside_dar') },
+        { id: 'DAR_OUTSIDE', title: t(lang, 'flow.option_outside_dar') },
+      ]);
+      return;
     }
   }
 }
@@ -606,25 +580,24 @@ async function onFlow(user: string, step: FlowStep, m: Incoming, lang: Lang) {
   const contact = CONTACT.get(user) || {};
 
   switch (step) {
-    case 'ASK_NAME': {
+    /* ----------------------------- Waiting on buttons ---------------------------- */
+    case 'ASK_IF_DAR':
+    case 'ASK_IN_DAR_MODE':
+      return;
+
+    /* ----------------------- INSIDE Dar — DELIVERY path ------------------------- */
+    case 'ASK_NAME_IN': {
       if (!txt) return sendText(user, t(lang, 'flow.ask_name'));
-      contact.name = txt;
-      CONTACT.set(user, contact);
-      setFlow(user, 'ASK_IF_DAR');
-      await sendText(user, t(lang, 'flow.name_saved', { name: txt }));
-      return showDarChoiceButtons(user, lang);
+      contact.name = txt; CONTACT.set(user, contact);
+      setFlow(user, 'ASK_PHONE_IN');
+      return sendText(user, t(lang, 'flow.ask_phone'));
     }
-
-    case 'ASK_IF_DAR': {
-      // Waiting for buttons: DAR_INSIDE / DAR_OUTSIDE
-      return;
+    case 'ASK_PHONE_IN': {
+      if (!txt) return sendText(user, t(lang, 'flow.ask_phone'));
+      contact.phone = txt; CONTACT.set(user, contact);
+      setFlow(user, 'ASK_GPS');
+      return sendText(user, t(lang, 'flow.ask_gps'));
     }
-
-    case 'ASK_IN_DAR_MODE': {
-      // Waiting for buttons: IN_DAR_DELIVERY / IN_DAR_PICKUP
-      return;
-    }
-
     case 'ASK_GPS': {
       if (m.hasLocation && typeof m.lat === 'number' && typeof m.lon === 'number') {
         const km = haversineKm(KEKO.lat, KEKO.lon, m.lat, m.lon);
@@ -643,6 +616,7 @@ async function onFlow(user: string, step: FlowStep, m: Incoming, lang: Lang) {
         await sendText(user, [
           t(lang, 'checkout.summary_header'),
           t(lang, 'checkout.summary_name', { name: contact.name || '' }),
+          t(lang, 'checkout.summary_phone', { phone: contact.phone || '' }),
           t(lang, 'checkout.summary_total', { total: fmtTZS(total) }),
         ].join('\n'));
 
@@ -653,9 +627,71 @@ async function onFlow(user: string, step: FlowStep, m: Incoming, lang: Lang) {
       return sendText(user, t(lang, 'flow.ask_gps'));
     }
 
+    /* ------------------------ INSIDE Dar — PICKUP path -------------------------- */
+    case 'ASK_NAME_PICK': {
+      if (!txt) return sendText(user, t(lang, 'flow.ask_name'));
+      contact.name = txt; CONTACT.set(user, contact);
+      setFlow(user, 'ASK_PHONE_PICK');
+      return sendText(user, t(lang, 'flow.ask_phone'));
+    }
+    case 'ASK_PHONE_PICK': {
+      if (!txt) return sendText(user, t(lang, 'flow.ask_phone'));
+      contact.phone = txt; CONTACT.set(user, contact);
+
+      const items = pendingOrCart(user);
+      const sub = items.reduce((a, it) => a + it.unitPrice * it.qty, 0);
+      const total = sub;
+
+      await sendText(user, (lang === 'sw' ? PICKUP_INFO_SW : PICKUP_INFO_EN));
+      await sendText(user, [
+        t(lang, 'checkout.summary_header'),
+        t(lang, 'checkout.summary_name', { name: contact.name || '' }),
+        t(lang, 'checkout.summary_phone', { phone: contact.phone || '' }),
+        t(lang, 'checkout.summary_total', { total: fmtTZS(total) }),
+      ].join('\n'));
+
+      await showPaymentOptions(user, lang, total);
+      setFlow(user, null);
+      return;
+    }
+
+    /* ----------------------------- OUTSIDE Dar path ----------------------------- */
+    case 'ASK_NAME_OUT': {
+      if (!txt) return sendText(user, t(lang, 'flow.ask_name'));
+      contact.name = txt; CONTACT.set(user, contact);
+      setFlow(user, 'ASK_PHONE_OUT');
+      return sendText(user, t(lang, 'flow.ask_phone'));
+    }
+    case 'ASK_PHONE_OUT': {
+      if (!txt) return sendText(user, t(lang, 'flow.ask_phone'));
+      contact.phone = txt; CONTACT.set(user, contact);
+      setFlow(user, 'ASK_REGION_OUT');
+      return sendText(user, t(lang, 'flow.ask_region'));
+    }
+    case 'ASK_REGION_OUT': {
+      if (!txt) return sendText(user, t(lang, 'flow.ask_region'));
+      contact.region = txt; CONTACT.set(user, contact);
+
+      const items = pendingOrCart(user);
+      const sub = items.reduce((a, it) => a + it.unitPrice * it.qty, 0);
+      const total = sub + OUTSIDE_DAR_FEE;
+
+      await sendText(user, [
+        t(lang, 'checkout.summary_header'),
+        t(lang, 'checkout.summary_name', { name: contact.name || '' }),
+        t(lang, 'checkout.summary_phone', { phone: contact.phone || '' }),
+        t(lang, 'checkout.summary_region', { region: contact.region || '' }),
+        t(lang, 'checkout.summary_total', { total: fmtTZS(total) }),
+      ].join('\n'));
+
+      await showPaymentOptions(user, lang, total);
+      setFlow(user, null);
+      return;
+    }
+
+    /* ------------------------------- Tracking stub ------------------------------ */
     case 'TRACK_ASK_NAME': {
       if (!txt) return sendText(user, t(lang, 'track.ask_name'));
-      // TODO: hook to your DB to find orders by name
       await sendText(user, t(lang, 'track.none_found', { name: txt }));
       setFlow(user, null);
       return;
@@ -676,9 +712,9 @@ async function onSessionMessage(user: string, m: Incoming, lang: Lang) {
       return sendText(user, t(lang, 'proof.ask'));
     }
     case 'WAIT_PROOF': {
-      // Accept text proof with 3+ names; actual media handled upstream
+      // Accept proof as 2+ names OR (media handled by infra)
       const words = txt.split(/\s+/).filter(Boolean);
-      if (words.length >= 3) {
+      if (words.length >= 2) {
         clearCart(user); setPending(user, null); resetSession(user);
         return sendText(user, t(lang, 'proof.ok_names', { names: txt }));
       }
