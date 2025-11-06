@@ -12,8 +12,8 @@ const dict: Dict = {
     'menu.actions_section': 'Vitendo',
     'menu.view_cart': 'Angalia kikapu',
     'menu.checkout': 'Kamilisha oda',
-    'menu.track_by_name': 'Fuatilia kwa Jina',
-    'menu.talk_to_agent': 'Ongea na Mwakilishi',
+    'menu.track_by_name': 'Fuatilia oda yako',
+    'menu.talk_to_agent': 'Ongea na Muhudumu',
     'menu.change_language': 'Badili Lugha',
     'menu.buy_now': 'Nunua sasa',
     'menu.add_to_cart': 'Ongeza kikapuni',
@@ -82,14 +82,14 @@ const dict: Dict = {
     'flow.choose_dar': 'Mahali ulipo sasa:',
     'flow.option_inside_dar': 'ndani ya Dar',
     'flow.option_outside_dar': 'nje ya Dar',
-    'flow.ask_phone': 'Tafadhali weka namba ya simu (mf. 0654123456) kwa mawasiliano zaidi.',
+    'flow.ask_phone': 'Tafadhali weka namba ya simu kwa mawasiliano zaidi.',
     'flow.ask_region': 'Tafadhali weka MKOA wako wa kupokea mzigo',
 
     'flow.choose_in_dar_mode': 'Chagua huduma:',
-    'in_dar.delivery': 'kuletewa bidhaa (Delivery)',
+    'in_dar.delivery': 'kuletewa(Delivery)',
     'in_dar.pickup': 'Nitakuja ofisini',
 
-    'flow.ask_gps': 'Tafadhali *shiriki live location ya WhatsApp* ili tukokotoe gharama ya delivery.',
+    'flow.ask_gps': 'Tafadhali tuma location yako ya WhatsApp ili tukadirie gharama ya delivery.',
 
     'flow.payment_choose': 'Chagua njia ya kulipa:',
     'payment.selected': 'Tumia *{label}*: {value}\nBaada ya kulipa, tuma *screenshot* au *majina matatu ya mtumaji* kuthibitisha.',
