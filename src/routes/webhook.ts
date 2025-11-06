@@ -179,14 +179,28 @@ async function showInDarModeButtons(user: string, lang: Lang) {
 
 async function showPaymentOptions(user: string, lang: Lang, total: number) {
   const opts = getPaymentOptions();
+
+  // 1) If nothing configured, tell the user plainly
   if (!opts.length) {
     await sendText(user, t(lang, 'payment.none'));
     return;
   }
-  await sendText(user, t(lang, 'flow.payment_choose'));
-  return sendListMessageSafe({
+
+  // 2) Send a readable summary FIRST (exactly as you asked)
+  //    Example lines:
+  //    • MIXXBYYAS LIPANAMB: 15548195 • Ujani Herbals
+  //    • VODALIPANMBA: 36653317 • Ujani Herbals
+  //    • Voda P2P: 255743414956 • Ujani Herbals
+  const lines: string[] = [
+    t(lang, 'flow.payment_choose'),
+    ...opts.map(o => `• *${o.label}*: ${o.value}`),
+  ];
+  await sendText(user, lines.join('\n'));
+
+  // 3) Then show the selectable list, keeping the total in the header
+  await sendListMessageSafe({
     to: user,
-    header: t(lang, 'checkout.summary_total', { total: fmtTZS(total) }),
+    header: t(lang, 'checkout.summary_total', { total: Math.round(total).toLocaleString('sw-TZ') }),
     body: t(lang, 'flow.payment_choose'),
     footer: '',
     buttonText: t(lang, 'generic.choose'),
@@ -196,6 +210,7 @@ async function showPaymentOptions(user: string, lang: Lang, total: number) {
     }],
   });
 }
+
 
 function paymentChoiceById(id: string) {
   const N = (id || '').toUpperCase().trim();
