@@ -8,7 +8,6 @@ import {
   sendButtonsMessage,
   markAsRead,
   verifySignature,
-  sendPaymentInstructions,
 } from '../whatsapp.js';
 import { feeForDarDistance } from '../delivery.js';
 import { buildMainMenu, getProductBySku, resolveProductForSku } from '../menu.js';
@@ -19,41 +18,6 @@ export const webhook = Router();
 /* -------------------------------------------------------------------------- */
 /*                    WhatsApp list/button safety wrappers                    */
 /* -------------------------------------------------------------------------- */
-
-function getRawBody(req: Request): string {
-  // server.ts should be capturing this via express.json({ verify })
-  // but we also fall back to JSON.stringify just in case.
-  return (req as any).rawBody ?? JSON.stringify(req.body ?? {});
-}
-
-function signatureOk(req: Request): boolean {
-  try {
-    const sig = req.headers['x-hub-signature-256'] as string | undefined;
-    // Support both common shapes:
-    //  - verifySignature(req)
-    //  - verifySignature(rawBody, signature)
-    const anyVerify: any = verifySignature as any;
-    let ok = false;
-
-    if (typeof anyVerify === 'function') {
-      if (anyVerify.length >= 2) {
-        ok = !!anyVerify(getRawBody(req), sig);
-      } else {
-        ok = !!anyVerify(req);
-      }
-    }
-    if (!ok) {
-      console.warn('[webhook] signature FAILED (will continue for debug)');
-    } else {
-      console.log('[webhook] signature OK');
-    }
-    return ok;
-  } catch (e) {
-    console.warn('[webhook] signature check threw:', e);
-    return false;
-  }
-}
-
 
 const MAX_LIST_TITLE = 24;
 const MAX_LIST_DESC = 72;
@@ -85,7 +49,7 @@ function clampRow(titleIn: string, descIn?: string) {
   let [name, tail] = splitTitleForTail(titleIn);
   let title = name;
   let desc = descIn || '';
-  if (tail) desc = desc ? `${tail} • ${desc}` : tail; // push overflow into description
+  if (tail) desc = desc ? `${tail} • ${desc}` : tail; // overflow to description
   if (title.length > MAX_LIST_TITLE) title = title.slice(0, MAX_LIST_TITLE);
   if (desc.length > MAX_LIST_DESC) desc = desc.slice(0, MAX_LIST_DESC);
   return { title, description: desc || undefined };
@@ -143,6 +107,10 @@ function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+function otherLang(l: Lang): Lang { return l === 'sw' ? 'en' : 'sw'; }
+function normId(id?: string) { return (id ?? '').toString().trim().toUpperCase(); }
+
+/** Build payment choices from env pairs PAYMENT_1_LABEL/NUMBER ... up to 5 */
 function getPaymentOptions() {
   const opts: Array<{ id: string; label: string; value: string }> = [];
   for (let i = 1; i <= 5; i++) {
@@ -171,11 +139,14 @@ async function showInDarModeButtons(user: string, lang: Lang) {
 
 async function showPaymentOptions(user: string, lang: Lang, total: number) {
   const opts = getPaymentOptions();
-  if (!opts.length) return sendText(user, t(lang, 'payment.none'));
+  if (!opts.length) {
+    await sendText(user, t(lang, 'payment.none'));
+    return;
+  }
   await sendText(user, t(lang, 'flow.payment_choose'));
   return sendListMessageSafe({
     to: user,
-    header: t(lang, 'checkout.summary_total', { total: Math.round(total).toLocaleString('sw-TZ') }),
+    header: t(lang, 'checkout.summary_total', { total: fmtTZS(total) }),
     body: t(lang, 'flow.payment_choose'),
     footer: '',
     buttonText: t(lang, 'generic.choose'),
@@ -194,18 +165,6 @@ function paymentChoiceById(id: string) {
   return null;
 }
 
-
-/** Fallback average distance when only district is typed (no GPS pin) */
-const DISTRICT_AVG_KM: Record<string, number> = {
-  temeke: 7,
-  ilala: 6,
-  kinondoni: 11,
-  ubungo: 12,
-  kigamboni: 10,
-};
-
-function otherLang(l: Lang): Lang { return l === 'sw' ? 'en' : 'sw'; }
-
 /* -------------------------------------------------------------------------- */
 /*                              In-memory state                               */
 /* -------------------------------------------------------------------------- */
@@ -216,18 +175,16 @@ const USER_LANG = new Map<string, Lang>();
 const CART = new Map<string, CartItem[]>();
 const PENDING = new Map<string, CartItem | null>();
 
-// Local flow map (so we don't mutate Session's State type)
+// Local checkout flow (to avoid changing your Session.State type)
 type FlowStep =
   | 'ASK_NAME'
   | 'ASK_IF_DAR'      // waits for DAR_INSIDE / DAR_OUTSIDE (buttons)
   | 'ASK_IN_DAR_MODE' // waits for IN_DAR_DELIVERY / IN_DAR_PICKUP (buttons)
-  | 'ASK_GPS'         // expects a WhatsApp live location
+  | 'ASK_GPS'         // expects WhatsApp location pin
   | 'TRACK_ASK_NAME';
 
 const FLOW = new Map<string, FlowStep | null>();
-
-// Lightweight contact info for the current checkout
-const CONTACT = new Map<string, { name?: string; district?: string }>();
+const CONTACT = new Map<string, { name?: string }>();
 
 function getLang(u: string): Lang { return USER_LANG.get(u) ?? 'sw'; }
 function setLang(u: string, l: Lang) { USER_LANG.set(u, l); }
@@ -244,7 +201,6 @@ function setPending(u: string, it: CartItem | null) { PENDING.set(u, it); }
 function pendingOrCart(u: string): CartItem[] { const p = PENDING.get(u); return p ? [p] : getCart(u); }
 function setFlow(u: string, step: FlowStep | null) { if (step) FLOW.set(u, step); else FLOW.delete(u); }
 
-
 /* -------------------------------------------------------------------------- */
 /*                                   Routes                                   */
 /* -------------------------------------------------------------------------- */
@@ -259,8 +215,6 @@ webhook.get('/webhook', (req: Request, res: Response) => {
 
 webhook.post('/webhook', async (req: Request, res: Response) => {
   try {
-    signatureOk(req);
-    // Signature check using your helper from whatsapp.ts
     if (!verifySignature(req)) return res.sendStatus(401);
 
     const entries = req.body?.entry ?? [];
@@ -277,15 +231,15 @@ webhook.post('/webhook', async (req: Request, res: Response) => {
           const lang = getLang(from);
           const s = getSession(from);
 
-          const type = msg?.type as string;
+          const type = msg?.type as string | undefined;
           const text: string | undefined = type === 'text' ? (msg.text?.body as string) : undefined;
 
-          // Interactive reply id
+          // Interactive reply id (and debug)
           let interactiveId: string | undefined;
           if (type === 'interactive') {
             const itype = msg.interactive?.type;
             console.log('[webhook] interactive type:', itype, 'payload:', JSON.stringify(msg.interactive));
-            if (itype === 'list_reply') interactiveId = msg.interactive?.list_reply?.id;
+            if (itype === 'list_reply')  interactiveId = msg.interactive?.list_reply?.id;
             if (itype === 'button_reply') interactiveId = msg.interactive?.button_reply?.id;
           }
           if (interactiveId) console.log('[webhook] interactive id:', interactiveId);
@@ -295,13 +249,13 @@ webhook.post('/webhook', async (req: Request, res: Response) => {
           const lat = hasLocation ? Number(msg.location?.latitude) : undefined;
           const lon = hasLocation ? Number(msg.location?.longitude) : undefined;
 
-          // 1) interactive first
+          // 1) handle interactive first
           if (interactiveId) {
             await onInteractive(from, interactiveId, lang);
             continue;
           }
 
-          // 2) start flow on greeting / menu words when idle and no active flow
+          // 2) if starting / idle, show main menu on greetings
           const activeFlow = FLOW.get(from);
           if ((!s || s.state === 'IDLE') && !activeFlow) {
             const txt = (text || '').trim().toLowerCase();
@@ -311,7 +265,7 @@ webhook.post('/webhook', async (req: Request, res: Response) => {
             }
           }
 
-          // 3) handle message either by local FLOW or by Session.state
+          // 3) route: flow step > session-controlled > fallback
           if (activeFlow) {
             await onFlow(from, activeFlow, { text, hasLocation, lat, lon }, lang);
           } else {
@@ -323,8 +277,7 @@ webhook.post('/webhook', async (req: Request, res: Response) => {
     res.sendStatus(200);
   } catch (e) {
     console.error('webhook error:', e);
-    // return 200 so WhatsApp doesn't disable webhooks on errors
-    res.sendStatus(200);
+    res.sendStatus(200); // don't let WhatsApp disable the webhook
   }
 });
 
@@ -335,7 +288,7 @@ webhook.post('/webhook', async (req: Request, res: Response) => {
 async function showMainMenu(user: string, lang: Lang) {
   const model = buildMainMenu((key: string) => t(lang, key));
 
-  // Show the OTHER language label on the toggle row
+  // Show OTHER language label on the toggle row
   const sections = model.sections.map((sec) => ({
     title: sec.title,
     rows: sec.rows.map((r) =>
@@ -430,10 +383,65 @@ async function showVariants(user: string, parentSku: string, lang: Lang) {
 const OUTSIDE_DAR_FEE = 10_000;
 
 async function onInteractive(user: string, id: string, lang: Lang) {
+  const N = normId(id);
+
+  // --- Handle location/service & payments FIRST; be robust to truncation (e.g., DAR_OUTSID)
+  if (N.startsWith('DAR_INSIDE')) {
+    setFlow(user, 'ASK_IN_DAR_MODE');
+    await showInDarModeButtons(user, lang);
+    return;
+  }
+  if (N.startsWith('DAR_OUTSIDE')) {
+    setFlow(user, null);
+    const items = pendingOrCart(user);
+    const sub = items.reduce((a, it) => a + it.unitPrice * it.qty, 0);
+    const total = sub + OUTSIDE_DAR_FEE;
+
+    await sendText(user, t(lang, 'flow.outside_dar_notice', { fee: fmtTZS(OUTSIDE_DAR_FEE) }));
+    await sendText(user, [
+      t(lang, 'checkout.summary_header'),
+      t(lang, 'checkout.summary_total', { total: fmtTZS(total) }),
+    ].join('\n'));
+
+    await showPaymentOptions(user, lang, total);
+    return;
+  }
+  if (N.startsWith('IN_DAR_DELIVERY')) {
+    setFlow(user, 'ASK_GPS');
+    await sendText(user, t(lang, 'flow.ask_gps'));
+    return;
+  }
+  if (N.startsWith('IN_DAR_PICKUP')) {
+    setFlow(user, null);
+    const items = pendingOrCart(user);
+    const sub = items.reduce((a, it) => a + it.unitPrice * it.qty, 0);
+    const total = sub; // pickup → no delivery fee
+    await sendText(user, [
+      t(lang, 'checkout.summary_header'),
+      t(lang, 'checkout.summary_total', { total: fmtTZS(total) }),
+    ].join('\n'));
+    await showPaymentOptions(user, lang, total);
+    return;
+  }
+  if (N.startsWith('PAY_')) {
+    const choice = paymentChoiceById(id); // use original id to extract number
+    if (choice) {
+      await sendText(user, t(lang, 'payment.selected', { label: choice.label, value: choice.value }));
+      const s = getSession(user);
+      s.state = 'WAIT_PROOF';
+      saveSession(user, s);
+      await sendText(user, t(lang, 'proof.ask'));
+      return;
+    }
+    await sendText(user, t(lang, 'payment.none'));
+    return;
+  }
+
+  // --- Cart / navigation actions
   if (id === 'ACTION_VIEW_CART') return showCart(user, lang);
 
   if (id === 'ACTION_CHECKOUT') {
-    // start local flow without touching Session.State
+    // start local flow without mutating Session.State union
     setFlow(user, 'ASK_NAME');
     CONTACT.set(user, {}); // reset temp contact
     return sendText(user, t(lang, 'flow.ask_name'));
@@ -447,14 +455,20 @@ async function onInteractive(user: string, id: string, lang: Lang) {
 
   if (id === 'ACTION_BACK') return showMainMenu(user, lang);
 
-  // Product taps
+  if (id === 'ACTION_TALK_TO_AGENT') {
+    return sendText(user, t(lang, 'agent.reply'));
+  }
+  if (id === 'ACTION_TRACK_BY_NAME') {
+    setFlow(user, 'TRACK_ASK_NAME');
+    return sendText(user, t(lang, 'track.ask_name'));
+  }
+
+  // --- Product & variant actions
   if (id.startsWith('PRODUCT_')) {
     const sku = id.replace('PRODUCT_', '');
     if (sku === 'PROMAX') return showVariants(user, 'PROMAX', lang);
     return showProductActions(user, sku, lang);
   }
-
-  // Variant selector
   if (id.startsWith('VARIANTS_')) {
     const parentSku = id.replace('VARIANTS_', '');
     return showVariants(user, parentSku, lang);
@@ -468,7 +482,7 @@ async function onInteractive(user: string, id: string, lang: Lang) {
     if (!prod) return;
 
     if (mode === 'DETAILS') {
-      const txt = detailsForSku(lang, sku); // strictly from i18n.ts for Pro Max packages
+      const txt = detailsForSku(lang, sku); // i18n-driven
       await sendText(user, `ℹ️ *${prod.name}*\n${txt}`);
       return showProductActions(user, sku, lang);
     }
@@ -489,95 +503,11 @@ async function onInteractive(user: string, id: string, lang: Lang) {
       CONTACT.set(user, {});
       return sendText(user, t(lang, 'flow.ask_name'));
     }
-    // Where are you?
-if (id === 'DAR_INSIDE') {
-  setFlow(user, 'ASK_IN_DAR_MODE');
-  return showInDarModeButtons(user, lang);
-}
-if (id === 'DAR_OUTSIDE') {
-  setFlow(user, null);
-  const items = pendingOrCart(user);
-  const sub = items.reduce((a, it) => a + it.unitPrice * it.qty, 0);
-  const OUTSIDE_DAR_FEE = 10000;
-  const total = sub + OUTSIDE_DAR_FEE;
-
-  await sendText(user, t(lang, 'flow.outside_dar_notice', { fee: OUTSIDE_DAR_FEE.toLocaleString('sw-TZ') }));
-  await sendText(user, [
-    t(lang, 'checkout.summary_header'),
-    t(lang, 'checkout.summary_total', { total: Math.round(total).toLocaleString('sw-TZ') }),
-  ].join('\n'));
-
-  await showPaymentOptions(user, lang, total);
-  return;
-}
-
-// Inside-Dar mode
-// Inside / Outside Dar choice
-if (id === 'DAR_INSIDE') {
-  setFlow(user, 'ASK_IN_DAR_MODE');
-  return showInDarModeButtons(user, lang);
-}
-if (id === 'DAR_OUTSIDE') {
-  setFlow(user, null);
-  const items = pendingOrCart(user);
-  const sub = items.reduce((a, it) => a + it.unitPrice * it.qty, 0);
-  const OUTSIDE_DAR_FEE = 10000; // your flat fee
-  const total = sub + OUTSIDE_DAR_FEE;
-  await sendText(user, t(lang, 'flow.outside_dar_notice', { fee: OUTSIDE_DAR_FEE.toLocaleString('sw-TZ') }));
-  await sendText(user, [
-    t(lang, 'checkout.summary_header'),
-    t(lang, 'checkout.summary_total', { total: Math.round(total).toLocaleString('sw-TZ') }),
-  ].join('\n'));
-  await showPaymentOptions(user, lang, total);
-  return;
-}
-
-// In-Dar: Delivery or Pickup
-if (id === 'IN_DAR_DELIVERY') {
-  setFlow(user, 'ASK_GPS');
-  return sendText(user, t(lang, 'flow.ask_gps'));
-}
-if (id === 'IN_DAR_PICKUP') {
-  setFlow(user, null);
-  const items = pendingOrCart(user);
-  const sub = items.reduce((a, it) => a + it.unitPrice * it.qty, 0);
-  const total = sub; // no delivery fee
-  await sendText(user, [
-    t(lang, 'checkout.summary_header'),
-    t(lang, 'checkout.summary_total', { total: Math.round(total).toLocaleString('sw-TZ') }),
-  ].join('\n'));
-  await showPaymentOptions(user, lang, total);
-  return;
-}
-
-// Payment option picked from the list
-if (id.startsWith('PAY_')) {
-  const choice = paymentChoiceById(id);
-  if (choice) {
-    await sendText(user, t(lang, 'payment.selected', { label: choice.label, value: choice.value }));
-    const s = getSession(user);
-    s.state = 'WAIT_PROOF';
-    saveSession(user, s);
-    return sendText(user, t(lang, 'proof.ask'));
-  }
-  return sendText(user, t(lang, 'payment.none'));
-}
-
-
-// Make these responsive if present in the menu
-if (id === 'ACTION_TALK_TO_AGENT') {
-  return sendText(user, t(lang, 'agent.reply'));
-}
-if (id === 'ACTION_TRACK_BY_NAME') {
-  setFlow(user, 'TRACK_ASK_NAME');
-  return sendText(user, t(lang, 'track.ask_name'));
-}
-
   }
 }
 
 /* -------------------------------------------------------------------------- */
-/*                               Local FLOW logic                             */
+/*                            Flow / message handling                          */
 /* -------------------------------------------------------------------------- */
 
 type Incoming = {
@@ -600,54 +530,55 @@ async function onFlow(user: string, step: FlowStep, m: Incoming, lang: Lang) {
       setFlow(user, 'ASK_IF_DAR');
       await sendText(user, t(lang, 'flow.name_saved', { name: txt }));
       return showDarChoiceButtons(user, lang);
-}
+    }
 
+    case 'ASK_IF_DAR': {
+      // Waiting for buttons: DAR_INSIDE / DAR_OUTSIDE
+      return;
+    }
 
-case 'ASK_IF_DAR':      return; // waiting for DAR_INSIDE / DAR_OUTSIDE
-case 'ASK_IN_DAR_MODE': return; // waiting for IN_DAR_DELIVERY / IN_DAR_PICKUP
+    case 'ASK_IN_DAR_MODE': {
+      // Waiting for buttons: IN_DAR_DELIVERY / IN_DAR_PICKUP
+      return;
+    }
 
+    case 'ASK_GPS': {
+      if (m.hasLocation && typeof m.lat === 'number' && typeof m.lon === 'number') {
+        const km = haversineKm(KEKO.lat, KEKO.lon, m.lat, m.lon);
+        const fee = feeForDarDistance(km);
+        const items = pendingOrCart(user);
+        const sub = items.reduce((a, it) => a + it.unitPrice * it.qty, 0);
+        const total = sub + fee;
 
-case 'ASK_GPS': {
-  if (m.hasLocation && typeof m.lat === 'number' && typeof m.lon === 'number') {
-    const km = haversineKm(KEKO.lat, KEKO.lon, m.lat, m.lon);
-    const fee = feeForDarDistance(km);
-    const items = pendingOrCart(user);
-    const sub = items.reduce((a, it) => a + it.unitPrice * it.qty, 0);
-    const total = sub + fee;
+        await sendText(user, t(lang, 'flow.distance_quote', {
+          place: 'GPS Pin',
+          district: '',
+          km: km.toFixed(1),
+          fee: fmtTZS(fee),
+        }));
 
-    await sendText(user, t(lang, 'flow.distance_quote', {
-      place: 'GPS Pin', district: '', km: km.toFixed(1),
-      fee: Math.round(fee).toLocaleString('sw-TZ'),
-    }));
-    await sendText(user, [
-      t(lang, 'checkout.summary_header'),
-      t(lang, 'checkout.summary_name', { name: contact.name || '' }),
-      t(lang, 'checkout.summary_total', { total: Math.round(total).toLocaleString('sw-TZ') }),
-    ].join('\n'));
+        await sendText(user, [
+          t(lang, 'checkout.summary_header'),
+          t(lang, 'checkout.summary_name', { name: contact.name || '' }),
+          t(lang, 'checkout.summary_total', { total: fmtTZS(total) }),
+        ].join('\n'));
 
-    await showPaymentOptions(user, lang, total);
-    setFlow(user, null);
-    return;
+        await showPaymentOptions(user, lang, total);
+        setFlow(user, null);
+        return;
+      }
+      return sendText(user, t(lang, 'flow.ask_gps'));
+    }
+
+    case 'TRACK_ASK_NAME': {
+      if (!txt) return sendText(user, t(lang, 'track.ask_name'));
+      // TODO: hook to your DB to find orders by name
+      await sendText(user, t(lang, 'track.none_found', { name: txt }));
+      setFlow(user, null);
+      return;
+    }
   }
-  return sendText(user, t(lang, 'flow.ask_gps'));
 }
-
-
-case 'TRACK_ASK_NAME': {
-  if (!txt) return sendText(user, t(lang, 'track.ask_name'));
-  // TODO: plug in your DB
-  await sendText(user, t(lang, 'track.none_found', { name: txt }));
-  setFlow(user, null);
-  return;
-}
-
-
-  }
-}
-
-/* -------------------------------------------------------------------------- */
-/*                          Session-controlled messages                       */
-/* -------------------------------------------------------------------------- */
 
 async function onSessionMessage(user: string, m: Incoming, lang: Lang) {
   const s = getSession(user);
@@ -657,17 +588,14 @@ async function onSessionMessage(user: string, m: Incoming, lang: Lang) {
     case 'IDLE': {
       return showMainMenu(user, lang);
     }
-
     case 'SHOW_PRICE': {
       s.state = 'WAIT_PROOF'; saveSession(user, s);
       return sendText(user, t(lang, 'proof.ask'));
     }
-
     case 'WAIT_PROOF': {
-      // Accept text proof with 3+ names; actual media screenshot handled by infra
+      // Accept text proof with 3+ names; actual media handled upstream
       const words = txt.split(/\s+/).filter(Boolean);
       if (words.length >= 3) {
-        // reset after proof
         clearCart(user); setPending(user, null); resetSession(user);
         return sendText(user, t(lang, 'proof.ok_names', { names: txt }));
       }
@@ -683,7 +611,6 @@ async function onSessionMessage(user: string, m: Incoming, lang: Lang) {
 /* -------------------------------------------------------------------------- */
 
 function detailsForSku(lang: Lang, sku: string): string {
-  // Pro Max details come strictly from package A/B/C keys in i18n.ts
   if (sku === 'PROMAX') {
     return [
       '• ' + t(lang, 'product.promax.package_a'),
