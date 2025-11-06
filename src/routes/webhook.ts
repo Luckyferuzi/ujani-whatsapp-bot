@@ -466,11 +466,15 @@ async function onInteractive(user: string, id: string, lang: Lang) {
     return;
   }
   if (N.startsWith('IN_DAR_PICKUP')) {
-    setFlow(user, 'ASK_NAME_PICK');
-    CONTACT.set(user, {});
-    await sendText(user, t(lang, 'flow.ask_name'));
-    return;
-  }
+  // ✅ New behavior: ONLY send the pickup message; no name/phone/muhtasari
+  setFlow(user, null);
+  await sendText(user, (lang === 'sw'
+    ? 'Tupo Keko Modern Furniture, mkabala na Omax Bar. Wasiliana nasi kwa maelezo zaidi.'
+    : 'We are at Keko Modern Furniture, opposite Omax Bar. Contact us for more details.'
+  ));
+  return;
+}
+
 
   /* -------------------------- Payment choice selected ------------------------- */
   if (N.startsWith('PAY_')) {
@@ -561,6 +565,15 @@ async function onInteractive(user: string, id: string, lang: Lang) {
       return;
     }
   }
+  
+  if (id === 'ACTION_PAYMENT_DONE') {
+  const s = getSession(user);
+  s.state = 'WAIT_PROOF';
+  saveSession(user, s);
+  await sendText(user, t(lang, 'proof.ask'));
+  return;
+}
+
 }
 
 /* -------------------------------------------------------------------------- */
@@ -619,6 +632,12 @@ async function onFlow(user: string, step: FlowStep, m: Incoming, lang: Lang) {
           t(lang, 'checkout.summary_phone', { phone: contact.phone || '' }),
           t(lang, 'checkout.summary_total', { total: fmtTZS(total) }),
         ].join('\n'));
+
+        // ➕ Add the "I've paid" button right after the muhtasari
+        await sendButtonsMessageSafe(user, t(lang, 'payment.done_cta'), [
+          { id: 'ACTION_PAYMENT_DONE', title: t(lang, 'payment.done_button') },
+        ]);
+
 
         await showPaymentOptions(user, lang, total);
         setFlow(user, null);
@@ -683,6 +702,11 @@ async function onFlow(user: string, step: FlowStep, m: Incoming, lang: Lang) {
         t(lang, 'checkout.summary_region', { region: contact.region || '' }),
         t(lang, 'checkout.summary_total', { total: fmtTZS(total) }),
       ].join('\n'));
+
+      await sendButtonsMessageSafe(user, t(lang, 'payment.done_cta'), [
+        { id: 'ACTION_PAYMENT_DONE', title: t(lang, 'payment.done_button') },
+      ]);
+
 
       await showPaymentOptions(user, lang, total);
       setFlow(user, null);
