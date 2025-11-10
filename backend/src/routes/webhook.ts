@@ -12,6 +12,8 @@ import {
 import { feeForDarDistance } from '../delivery.js';
 import { buildMainMenu, getProductBySku, resolveProductForSku } from '../menu.js';
 import { getSession, saveSession, resetSession } from '../session.js';
+import { upsertCustomerByWa, getOrCreateConversation, insertInboundMessage, updateConversationLastUserAt } from '../db/queries';
+import { emit } from '../sockets';
 
 export const webhook = Router();
 
@@ -274,6 +276,8 @@ webhook.post('/webhook', async (req: Request, res: Response) => {
   try {
     if (!verifySignature(req)) return res.sendStatus(401);
 
+    
+
     const entries = req.body?.entry ?? [];
     for (const entry of entries) {
       const changes = entry?.changes ?? [];
@@ -306,6 +310,39 @@ webhook.post('/webhook', async (req: Request, res: Response) => {
           const lat = hasLocation ? Number(msg.location?.latitude) : undefined;
           const lon = hasLocation ? Number(msg.location?.longitude) : undefined;
 
+          // --- DB persistence + realtime for every inbound message ---
+          try {
+            // 1) Ensure customer + conversation exist
+            const customerId = await upsertCustomerByWa(from, undefined, from);
+            const conversationId = await getOrCreateConversation(customerId);
+          
+            // 2) Pick a body to store (text, interactive marker, or location coords)
+            let bodyForDb: string | null = text ?? null;
+            if (!bodyForDb && interactiveId) {
+              bodyForDb = `[interactive:${interactiveId}]`;
+            }
+            if (!bodyForDb && hasLocation && typeof lat === 'number' && typeof lon === 'number') {
+              bodyForDb = `LOCATION ${lat},${lon}`;
+            }
+          
+            // 3) Insert inbound message row
+            const inserted = await insertInboundMessage(
+              conversationId,
+              mid ?? null,
+              type ?? 'text',
+              bodyForDb
+            );
+          
+            // 4) Update conversation activity + emit realtime
+            await updateConversationLastUserAt(conversationId);
+          
+            emit('message.created', { conversation_id: conversationId, message: inserted });
+            emit('conversation.updated', {});
+          } catch (err) {
+            console.error('inbound persist error:', err);
+          }
+          // --- end DB persistence + realtime ---
+          
           // 1) handle interactive first
           if (interactiveId) {
             await onInteractive(from, interactiveId, lang);

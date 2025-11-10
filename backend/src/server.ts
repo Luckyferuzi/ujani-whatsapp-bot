@@ -1,12 +1,26 @@
 // src/server.ts
 import express from 'express';
 import { webhook } from './routes/webhook.js';
+import http from 'node:http';
+import cors from 'cors';
+import helmet from 'helmet';
+
+import inboxRoutes from './routes/inbox';
+import sendRoutes from './routes/send';
+import { attachSockets } from './sockets';
+
+
 
 const app = express();
 
 /* ------------------------------ Minimal CORS ------------------------------ */
 // (Avoids the need for 'cors' typings)
 // If you already installed @types/cors, you can swap this for `app.use(cors())`.
+
+// ensure app uses security + CORS (keep your existing imports/middleware)
+app.use(helmet());
+app.use(cors({ origin: (process.env.CORS_ORIGIN || '*').split(',') }));
+
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader(
@@ -52,13 +66,18 @@ app.use((req: any, _res, next) => {
 
 /* --------------------------------- Routes -------------------------------- */
 app.use('/', webhook);
+// mount new routes (keep your existing /status and /webhook)
+app.use(inboxRoutes);
+app.use(sendRoutes);
 
 app.get('/', (_req, res) => res.status(200).send('ok'));
 
 /* ------------------------------- Start server ----------------------------- */
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`[server] listening on :${PORT}`);
-});
+
+// replace app.listen(...) with:
+const server = http.createServer(app);
+attachSockets(server, (process.env.CORS_ORIGIN || '*').split(','));
+const PORT = Number(process.env.PORT || 3000);
+server.listen(PORT, () => console.log(`Backend on :${PORT}`));
 
 export default app;
