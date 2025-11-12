@@ -22,7 +22,7 @@ RUN npm run build
 FROM node:20-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
-ENV PORT=3001
+ENV PORT=3000
 
 # install only prod deps
 COPY package*.json ./
@@ -32,5 +32,5 @@ RUN npm ci --omit=dev --ignore-scripts
 COPY --from=builder /app/dist ./dist
 # COPY --from=builder /app/migrations ./migrations
 
-EXPOSE 3001
+EXPOSE 3000
 CMD ["node","dist/server.js"]

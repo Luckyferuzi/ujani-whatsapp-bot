@@ -1,45 +1,88 @@
-import { Router } from 'express';
-import { insertOutboundMessage, findConversationRecipientWa } from '../db/queries.js';
-import { emit } from '../sockets.js';
-import { request } from 'undici';
+import { Router } from "express";
+import db from "../db/knex.js";
 
-const WA_BASE = 'https://graph.facebook.com/v20.0';
+export const sendRoutes = Router();
 
-const r = Router();
-
-r.post('/api/send', async (req, res) => {
+/**
+ * POST /api/send
+ * body: { conversationId: string, text?: string, templateId?: string, variables?: any }
+ * Enforces: agent_allowed AND (within 24h OR template)
+ */
+sendRoutes.post("/send", async (req, res) => {
   try {
-    const { conversationId, text } = req.body || {};
-    if (!conversationId || !text) return res.status(400).json({ error: 'conversationId and text required' });
+    const { conversationId, text, templateId, variables } = req.body ?? {};
+    if (!conversationId) return res.status(400).json({ error: "conversationId required" });
 
-    const waId = await findConversationRecipientWa(Number(conversationId));
-    if (!waId) return res.status(404).json({ error: 'conversation not found' });
+    const convo = await db("conversations").where({ id: conversationId }).first("*");
+    if (!convo) return res.status(404).json({ error: "Conversation not found" });
 
-    const url = `${WA_BASE}/${process.env.PHONE_NUMBER_ID}/messages`;
-    const payload = { messaging_product: 'whatsapp', to: waId, type: 'text', text: { body: text } };
+    const last = new Date(convo.last_user_message_at ?? 0).getTime();
+    const within24h = Date.now() - last < 24 * 60 * 60 * 1000;
 
-    const resp = await request(url, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${process.env.WHATSAPP_TOKEN || process.env.ACCESS_TOKEN}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(payload)
-    });
-
-    if (resp.statusCode >= 300) {
-      const errTxt = await resp.body.text();
-      console.error('WA send error', resp.statusCode, errTxt);
-      return res.status(502).json({ error: 'whatsapp send failed' });
+    if (!convo.agent_allowed) {
+      return res.status(403).json({ error: "Bot active — customer must tap 'Ongea na mhudumu'." });
+    }
+    if (!within24h && !templateId) {
+      return res.status(403).json({ error: "Outside 24h — send a template instead." });
     }
 
-    const outRow = await insertOutboundMessage(Number(conversationId), 'text', text);
-    emit('message.created', { conversation_id: Number(conversationId), message: outRow });
+    const token = process.env.ACCESS_TOKEN!;
+    const phoneNumberId = process.env.PHONE_NUMBER_ID!;
+    const url = `https://graph.facebook.com/v20.0/${phoneNumberId}/messages`;
+
+    const customer = await db("customers").where({ id: convo.customer_id }).first("*");
+    const to = customer?.wa_id || customer?.phone;
+    if (!to) return res.status(400).json({ error: "Customer phone/wa_id missing" });
+
+    let body: any;
+    if (templateId) {
+      body = {
+        messaging_product: "whatsapp",
+        to,
+        type: "template",
+        template: {
+          name: templateId,
+          language: { code: "en_US" },
+          components: variables ? [{ type: "body", parameters: variables }] : []
+        }
+      };
+    } else if (text) {
+      body = { messaging_product: "whatsapp", to, type: "text", text: { body: text } };
+    } else {
+      return res.status(400).json({ error: "text or templateId required" });
+    }
+
+    // Node 18+ has global fetch; no extra deps
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      return res.status(resp.status).json({ error: "WhatsApp send failed", details: data });
+    }
+
+    // log outbound message
+    const [msg] = await db("messages")
+      .insert({
+        conversation_id: conversationId,
+        direction: "out",
+        type: templateId ? "template" : "text",
+        body: text ?? `[template:${templateId}]`,
+        status: "sent"
+      })
+      .returning("*");
+
+    // notify UI
+    req.app.get("io")?.emit("message.created", {
+      id: msg.id,
+      conversation_id: conversationId
+    });
+
     res.json({ ok: true });
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: 'send failed' });
+  } catch (e: any) {
+    res.status(500).json({ error: e?.message || "send failed" });
   }
 });
-
-export default r;
