@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { listConversations, listMessages } from '../db/queries';
+import { listConversations, listMessages } from '../db/queries.js';
 
 const r = Router();
 

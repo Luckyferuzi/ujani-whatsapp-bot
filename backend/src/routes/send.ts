@@ -1,6 +1,6 @@
 import { Router } from 'express';
-import { insertOutboundMessage, findConversationRecipientWa } from '../db/queries';
-import { emit } from '../sockets';
+import { insertOutboundMessage, findConversationRecipientWa } from '../db/queries.js';
+import { emit } from '../sockets.js';
 import { request } from 'undici';
 
 const WA_BASE = 'https://graph.facebook.com/v20.0';

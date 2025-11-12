@@ -1,4 +1,4 @@
-import db from './knex';
+import db from './knex.js';
 
 export async function upsertCustomerByWa(waId: string, name?: string | null, phone?: string | null) {
   const existing = await db('customers').where({ wa_id: waId }).first();

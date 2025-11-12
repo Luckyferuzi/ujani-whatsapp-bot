@@ -12,8 +12,8 @@ import {
 import { feeForDarDistance } from '../delivery.js';
 import { buildMainMenu, getProductBySku, resolveProductForSku } from '../menu.js';
 import { getSession, saveSession, resetSession } from '../session.js';
-import { upsertCustomerByWa, getOrCreateConversation, insertInboundMessage, updateConversationLastUserAt } from '../db/queries';
-import { emit } from '../sockets';
+import { upsertCustomerByWa, getOrCreateConversation, insertInboundMessage, updateConversationLastUserAt } from '../db/queries.js';
+import { emit } from '../sockets.js';
 
 export const webhook = Router();
 
