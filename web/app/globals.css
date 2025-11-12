@@ -1,0 +1,5 @@
+:root { color-scheme: dark; }
+html, body, #__next { height: 100%; }
+body { background: #0B0D10; color: #E6EDF3; }
+.scroll-thin::-webkit-scrollbar { width: 6px; height: 6px; }
+.scroll-thin::-webkit-scrollbar-thumb { background: #2A323C; border-radius: 6px; }
