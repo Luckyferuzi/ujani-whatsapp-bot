@@ -1,4 +1,3 @@
-// web/app/inbox/page.tsx
 "use client";
 
 import { useState } from "react";
@@ -10,27 +9,27 @@ export default function InboxPage() {
   const [active, setActive] = useState<Convo | null>(null);
 
   return (
-    <div className="h-screen flex flex-col bg-[#f0f2f5]">
-      {/* Top bar similar to your mock */}
+    <div className="h-[calc(100vh-3.5rem)] flex flex-col bg-[#f0f2f5]">
+      {/* Header inside inbox (like WhatsApp web top bar) */}
       <div className="h-12 border-b bg-white px-4 flex items-center justify-between">
         <div className="font-semibold">Ujani Admin — Inbox</div>
-        <div className="flex items-center gap-3">
-          <button className="text-xs px-2 py-1 rounded border text-gray-600 hover:bg-gray-50">
+        <div className="flex items-center gap-3 text-xs text-gray-500">
+          <button className="px-2 py-1 rounded border border-gray-300 hover:bg-gray-50">
             Minimize
           </button>
-          <div className="text-xs text-gray-500">
-            Agent: <span className="font-medium">Admin</span>{" "}
+          <span>
+            Agent: <span className="font-medium text-gray-700">Admin</span>{" "}
             <span className="text-green-600">• Online</span>
-          </div>
+          </span>
         </div>
       </div>
 
-      {/* Main 3-column area */}
+      {/* Main area */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Left: WhatsApp-style chat list */}
-        <ConversationList onPick={setActive} activeId={active?.id ?? null} />
-
-        {/* Middle + right */}
+        <ConversationList
+          onPick={setActive}
+          activeId={active ? active.id : null}
+        />
         {active ? (
           <>
             <Thread convo={active} />

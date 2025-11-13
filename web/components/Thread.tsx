@@ -1,4 +1,3 @@
-// web/components/Thread.tsx
 "use client";
 
 import { useEffect, useRef, useState } from "react";
@@ -7,13 +6,17 @@ import { socket } from "@/lib/socket";
 import type { Convo } from "./ConversationList";
 
 type Msg = {
-  id: number;
-  conversation_id: number;
-  direction: "in" | "out"; // in = customer, out = bot/agent
-  type: string;
+  id: string;
+  conversation_id: string;
+  direction: "in" | "out";
+  type: "text" | "template" | string;
   body: string;
-  status?: "sent" | "delivered" | "read" | string | null;
+  status?: string | null;
   created_at: string;
+};
+
+type ThreadProps = {
+  convo: Convo;
 };
 
 function formatTime(ts: string) {
@@ -28,39 +31,34 @@ function Tick({ status }: { status?: string | null }) {
   return <span>✓</span>;
 }
 
-export default function Thread({ convo }: { convo: Convo }) {
+export default function Thread({ convo }: ThreadProps) {
   const [messages, setMessages] = useState<Msg[]>([]);
-  const [agentAllowed, setAgentAllowed] = useState<boolean>(
-    convo.agent_allowed
-  );
+  const [agentAllowed, setAgentAllowed] = useState<boolean>(convo.agent_allowed);
   const [text, setText] = useState("");
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
-  async function load() {
-    const data = await api<{ messages: Msg[] }>(
+  async function loadMessages() {
+    const data = await api<Msg[]>(
       `/api/conversations/${convo.id}/messages`
     );
-    setMessages(data.messages);
+    setMessages(data);
   }
 
   useEffect(() => {
     setAgentAllowed(convo.agent_allowed);
-    load();
+    loadMessages();
 
     const s = socket();
-
-    const onNew = (payload: {
-      conversation_id: number;
-      message: Msg;
-    }) => {
-      if (payload.conversation_id === convo.id) {
-        setMessages((prev) => [...prev, payload.message]);
+    const onNew = (payload: any) => {
+      const cid =
+        payload?.conversation_id ?? payload?.conversationId ?? payload?.conversation?.id;
+      if (String(cid) === String(convo.id)) {
+        loadMessages();
       }
     };
-
-    const onConvo = (updated: Convo) => {
-      if (updated.id === convo.id) {
-        setAgentAllowed(updated.agent_allowed);
+    const onConvo = (payload: any) => {
+      if (String(payload?.id) === String(convo.id) && "agent_allowed" in payload) {
+        setAgentAllowed(!!payload.agent_allowed);
       }
     };
 
@@ -78,19 +76,19 @@ export default function Thread({ convo }: { convo: Convo }) {
   }, [messages]);
 
   async function send() {
-    if (!text.trim() || !agentAllowed) return;
-    const body = text.trim();
-    setText("");
+    const trimmed = text.trim();
+    if (!trimmed || !agentAllowed) return;
 
+    setText("");
     await api("/api/send", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         conversationId: convo.id,
-        text: body,
+        text: trimmed,
       }),
     });
-    // backend will insert + emit message.created; we don't need to push locally
+    // backend will emit message.created → loadMessages() will run from socket
   }
 
   const bgPattern = {
@@ -101,13 +99,13 @@ export default function Thread({ convo }: { convo: Convo }) {
     backgroundPosition: "0 0, 8px 8px",
   } as const;
 
+  const title = convo.name || convo.phone || "Mteja";
+
   return (
     <div className="flex-1 flex flex-col border-r bg-[#efeae2]">
       {/* Header (like WhatsApp chat header) */}
       <div className="h-12 border-b bg-[#f0f2f5] px-4 flex items-center justify-between">
-        <div className="font-medium text-sm">
-          {convo.name || convo.phone || "Mteja"}
-        </div>
+        <div className="font-medium text-sm truncate">{title}</div>
         <div className="text-[11px] text-gray-500">
           {agentAllowed ? "Agent mode" : "Bot mode"}
         </div>
@@ -151,7 +149,7 @@ export default function Thread({ convo }: { convo: Convo }) {
           value={text}
           disabled={!agentAllowed}
           onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && send()}
+          onKeyDown={(e) => (e.key === "Enter" ? send() : undefined)}
           placeholder={
             agentAllowed
               ? "Type a message"

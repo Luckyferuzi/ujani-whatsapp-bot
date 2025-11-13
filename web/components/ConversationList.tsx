@@ -1,26 +1,22 @@
-// web/components/ConversationList.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { socket } from "@/lib/socket";
-import { Input } from "./ui";
 
 export type Convo = {
-  id: number;
+  id: string;
   name?: string | null;
-  phone?: string | null;
+  phone: string;
   lang?: string | null;
   agent_allowed: boolean;
-  last_user_message_at: string | null;
-  last_message_preview?: string | null;
-  last_message_at?: string | null;
+  last_user_message_at: string;
   unread_count?: number;
 };
 
 type Props = {
-  activeId: number | null;
-  onPick(convo: Convo): void;
+  activeId?: string | null;
+  onPick: (c: Convo) => void;
 };
 
 function formatPhonePretty(raw?: string | null) {
@@ -30,10 +26,16 @@ function formatPhonePretty(raw?: string | null) {
     const body = digits.slice(4);
     return `+255 ${body.slice(0, 3)} ${body.slice(3, 6)} ${body.slice(6)}`;
   }
+  if (digits.startsWith("+") && digits.length > 7) {
+    return digits.replace(/(\+\d{1,3})(\d{3})(\d{3})(\d+)/, "$1 $2 $3 $4");
+  }
+  if (digits.length === 10 && digits.startsWith("0")) {
+    return `${digits.slice(0, 3)} ${digits.slice(3, 6)} ${digits.slice(6)}`;
+  }
   return digits;
 }
 
-function formatTime(ts?: string | null) {
+function formatTime(ts?: string) {
   if (!ts) return "";
   const d = new Date(ts);
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -41,25 +43,23 @@ function formatTime(ts?: string | null) {
 
 export default function ConversationList({ activeId, onPick }: Props) {
   const [items, setItems] = useState<Convo[]>([]);
-  const [q, setQ] = useState("");
+  const [query, setQuery] = useState("");
 
   async function load() {
-    const { items } = await api<{ items: Convo[] }>("/api/conversations");
-    // newest first (by last message from either side)
-    items.sort((a, b) => {
-      const ta = new Date(a.last_message_at ?? a.last_user_message_at ?? 0).getTime();
-      const tb = new Date(b.last_message_at ?? b.last_user_message_at ?? 0).getTime();
-      return tb - ta;
-    });
-    setItems(items);
+    const data = await api<Convo[]>("/api/conversations");
+    data.sort(
+      (a, b) =>
+        new Date(b.last_user_message_at).getTime() -
+        new Date(a.last_user_message_at).getTime()
+    );
+    setItems(data);
   }
 
   useEffect(() => {
     load();
-
     const s = socket();
-    const reload = () => load();
 
+    const reload = () => load();
     s.on("message.created", reload);
     s.on("conversation.updated", reload);
 
@@ -70,7 +70,7 @@ export default function ConversationList({ activeId, onPick }: Props) {
   }, []);
 
   const filtered = useMemo(() => {
-    const t = q.trim().toLowerCase();
+    const t = query.trim().toLowerCase();
     if (!t) return items;
     return items.filter((c) =>
       [c.name, c.phone]
@@ -79,23 +79,26 @@ export default function ConversationList({ activeId, onPick }: Props) {
         .toLowerCase()
         .includes(t)
     );
-  }, [items, q]);
+  }, [items, query]);
 
   return (
     <div className="w-[24rem] border-r bg-white flex flex-col">
-      {/* Search bar like WhatsApp */}
+      {/* Search bar */}
       <div className="p-2">
-        <Input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
           placeholder="Search or start a new chat"
+          className="w-full h-9 px-3 rounded-full bg-[#f0f2f5] text-sm outline-none border border-transparent focus:border-gray-300"
         />
       </div>
 
-      {/* List */}
+      {/* Conversation list */}
       <div className="flex-1 overflow-y-auto">
         {filtered.map((c) => {
           const isActive = c.id === activeId;
+          const displayName = c.name || formatPhonePretty(c.phone);
+
           return (
             <button
               key={c.id}
@@ -105,30 +108,33 @@ export default function ConversationList({ activeId, onPick }: Props) {
                 isActive ? "bg-[#e9edef]" : "",
               ].join(" ")}
             >
-              {/* Avatar placeholder */}
-              <div className="w-10 h-10 rounded-full bg-gray-300 flex items-center justify-center text-xs text-gray-700">
-                {c.name?.[0]?.toUpperCase() ??
-                  formatPhonePretty(c.phone)[0] ??
-                  "?"}
+              {/* Avatar */}
+              <div className="w-10 h-10 rounded-full bg-gray-300 flex items-center justify-center text-xs font-semibold text-gray-800">
+                {displayName[0]?.toUpperCase() ?? "?"}
               </div>
 
               <div className="flex-1 min-w-0">
+                {/* Top row: name + time */}
                 <div className="flex items-center justify-between">
                   <div className="font-medium text-sm truncate">
-                    {c.name || formatPhonePretty(c.phone)}
+                    {displayName}
                     {c.lang && (
-                      <span className="ml-1 text-xs text-gray-500">
+                      <span className="ml-1 text-[11px] text-gray-500">
                         • {c.lang.toUpperCase()}
                       </span>
                     )}
                   </div>
                   <div className="text-[11px] text-gray-500 ml-2">
-                    {formatTime(c.last_message_at ?? c.last_user_message_at)}
+                    {formatTime(c.last_user_message_at)}
                   </div>
                 </div>
+
+                {/* Bottom row: preview + badges */}
                 <div className="flex items-center justify-between mt-0.5">
                   <div className="text-xs text-gray-600 truncate max-w-[11rem]">
-                    {c.last_message_preview || ""}
+                    {c.agent_allowed
+                      ? "Agent mode kwa mazungumzo"
+                      : "Bot anaendeleza mazungumzo"}
                   </div>
                   <div className="flex items-center gap-2">
                     {!c.agent_allowed && (

@@ -9,45 +9,37 @@ export const inboxRoutes = Router();
  * GET /api/conversations
  * Left pane list (like WhatsApp)
  */
+/**
+ * GET /api/conversations
+ * Left pane list
+ */
 inboxRoutes.get("/conversations", async (_req, res) => {
-  try {
-    const items = await db("conversations as c")
-      .leftJoin("customers as u", "u.id", "c.customer_id")
-      .leftJoin(
-        db("messages as m")
-          .select("conversation_id")
-          .max("created_at as last_message_at")
-          .max("id as last_message_id")
-          .as("lm"),
-        "lm.conversation_id",
-        "c.id"
-      )
-      .leftJoin("messages as lm_msg", "lm_msg.id", "lm.last_message_id")
-      .select(
-        "c.id",
-        "u.name",
-        "u.phone",
-        "u.lang",
-        "c.agent_allowed",
-        "c.last_user_message_at",
-        "lm.last_message_at",
-        "lm_msg.body as last_message_preview"
-      )
-      .orderBy("lm.last_message_at", "desc")
-      .orderBy("c.created_at", "desc");
+  const items = await db("conversations as c")
+    .join("customers as u", "u.id", "c.customer_id")
+    .select(
+      "c.id",
+      "u.name",
+      "u.phone",
+      "u.lang",
+      "c.agent_allowed",
+      "c.last_user_message_at"
+    )
+    .orderBy("c.last_user_message_at", "desc")
+    .limit(100);
 
-    // You can compute unread_count here if you track read receipts.
-    const withUnread = items.map((row: any) => ({
-      ...row,
-      unread_count: 0,
-    }));
+  // unread counts — avoid TS2488 by using .first() (not array destructuring)
+  for (const row of items) {
+    const unreadRow = await db("messages")
+      .where({ conversation_id: row.id, direction: "in", status: "delivered" })
+      .count<{ count: string }>("id as count")
+      .first();
 
-    res.json({ items: withUnread });
-  } catch (e: any) {
-    console.error("GET /conversations failed", e);
-    res.status(500).json({ error: e?.message ?? "failed" });
+    (row as any).unread_count = Number(unreadRow?.count ?? 0);
   }
+
+  res.json({ items });
 });
+
 
 /**
  * GET /api/conversations/:id/messages
