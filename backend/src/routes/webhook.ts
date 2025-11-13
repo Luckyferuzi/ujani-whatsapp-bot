@@ -314,9 +314,9 @@ webhook.post('/webhook', async (req: Request, res: Response) => {
           const lon = hasLocation ? Number(msg.location?.longitude) : undefined;
 
           // --- DB persistence + realtime for every inbound message ---
+                  // --- DB persistence + realtime ---
           try {
-            // 1) Ensure customer + conversation exist
-            const customerId = await upsertCustomerByWa(from, null, from);
+            const customerId = await upsertCustomerByWa(from, undefined, from);
             const conversationId = await getOrCreateConversation(customerId);
           
             // 2) Pick a body to store (text, interactive marker, or location coords)
@@ -329,50 +329,43 @@ webhook.post('/webhook', async (req: Request, res: Response) => {
             }
           
             // 3) Insert inbound message row
-            // 3) Insert inbound message row
-            const inserted = await insertInboundMessage(conversationId, {
-              type: type ?? 'text',
-              body: bodyForDb ?? '',
-              status: null,
-            });
-
+            const inserted = await insertInboundMessage(
+              conversationId,
+              mid ?? null,
+              type ?? 'text',
+              bodyForDb
+            );
             
-          
             // 4) Update conversation activity + emit realtime
-            await updateConversationLastUserAt(conversationId,new Date());           // keep list fresh
+            await updateConversationLastUserAt(conversationId);           // keep list fresh
              
             emit("conversation.updated", { id: conversationId });         // refresh left list
 
-          
             emit('message.created', { conversation_id: conversationId, message: inserted });
             emit('conversation.updated', {});
           } catch (err) {
             console.error('inbound persist error:', err);
           }
           // --- end DB persistence + realtime ---
+
+          // --- end DB persistence + realtime ---
           
           // 1) handle interactive first
+                   // 1) handle interactive first
           if (interactiveId) {
             await onInteractive(from, interactiveId, lang);
             continue;
           }
 
           // 2) start menu on greetings if idle
-                    // 2) start / reset menu on greetings
           const activeFlow = FLOW.get(from);
-          const txt = (text || "").trim().toLowerCase();
-          const isGreeting =
-            !text ||
-            ["hi", "hello", "hey", "mambo", "habari", "start", "anza", "menu", "menyu"].includes(
-              txt
-            );
-
-          // If user sends a greeting, always show main menu (even if a flow was half-way)
-          if (isGreeting && (!s || s.state === "IDLE" || !activeFlow)) {
-            await showMainMenu(from, lang);
-            continue;
+          if ((!s || s.state === 'IDLE') && !activeFlow) {
+            const txt = (text || '').trim().toLowerCase();
+            if (!text || ['hi','hello','mambo','start','anza','menu','menyu'].includes(txt)) {
+              await showMainMenu(from, lang);
+              continue;
+            }
           }
-
 
           // 3) route
           if (activeFlow) {
@@ -380,6 +373,7 @@ webhook.post('/webhook', async (req: Request, res: Response) => {
           } else {
             await onSessionMessage(from, { text, hasLocation, lat, lon }, lang);
           }
+
         }
       }
     }
@@ -619,7 +613,7 @@ async function onInteractive(user: string, id: string, lang: Lang) {
     return;
   }
 
-  if (id === 'ACTION_CHANGE_LANGUAGE') {
+    if (id === 'ACTION_CHANGE_LANGUAGE') {
     const next = otherLang(getLang(user));
     setLang(user, next);
     return showMainMenu(user, next);
@@ -627,9 +621,52 @@ async function onInteractive(user: string, id: string, lang: Lang) {
 
   if (id === 'ACTION_BACK') return showMainMenu(user, lang);
 
+  // --- NEW: customer asks to talk to an agent ---
   if (id === 'ACTION_TALK_TO_AGENT') {
-    return sendText(user, t(lang, 'agent.reply'));
+    // Make sure we have a conversation row
+    const customerId = await upsertCustomerByWa(user, undefined, user);
+    const conversationId = await getOrCreateConversation(customerId);
+
+    // Enable agent for this conversation
+    await db('conversations')
+      .where({ id: conversationId })
+      .update({ agent_allowed: true });
+
+    // Tell the inbox UI to refresh & unlock the composer
+    emit('conversation.updated', { id: conversationId, agent_allowed: true });
+
+    // Send the usual agent message (existing translation)
+    await sendText(user, t(lang, 'agent.reply'));
+
+    // Also send a small button so customer can go back to the bot later
+    await sendButtonsMessageSafe(user, 'Ukitaka kurudi kwa bot:', [
+      { id: 'ACTION_RETURN_TO_BOT', title: 'Rudi kwa bot' },
+    ]);
+
+    return;
   }
+
+  // --- NEW: customer goes back from agent to bot ---
+  if (id === 'ACTION_RETURN_TO_BOT') {
+    const customerId = await upsertCustomerByWa(user, undefined, user);
+    const conversationId = await getOrCreateConversation(customerId);
+
+    // Turn agent off so the bot talks again
+    await db('conversations')
+      .where({ id: conversationId })
+      .update({ agent_allowed: false });
+
+    emit('conversation.updated', { id: conversationId, agent_allowed: false });
+
+    await sendText(
+      user,
+      'Umerudi kwa bot 🤖. Tutaendelea na menyu ya kawaida ya oda.'
+    );
+
+    // Show the normal main menu again
+    return showMainMenu(user, lang);
+  }
+
   if (id === 'ACTION_TRACK_BY_NAME') {
     setFlow(user, 'TRACK_ASK_NAME');
     return sendText(user, t(lang, 'track.ask_name'));
