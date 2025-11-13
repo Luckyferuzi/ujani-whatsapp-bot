@@ -14,6 +14,7 @@ import { buildMainMenu, getProductBySku, resolveProductForSku } from '../menu.js
 import { getSession, saveSession, resetSession } from '../session.js';
 import { upsertCustomerByWa, getOrCreateConversation, insertInboundMessage, updateConversationLastUserAt } from '../db/queries.js';
 import { emit } from '../sockets.js';
+import db from '../db/knex.js';
 
 export const webhook = Router();
 
@@ -26,6 +27,8 @@ const MAX_LIST_DESC = 72;
 const MAX_SECTION_TITLE = 24;
 const MAX_LIST_ROWS = 10;
 const MAX_BUTTON_TITLE = 20;
+
+
 
 type SafeListRow = { id: string; title: string; description?: string };
 type SafeListSection = { title: string; rows: SafeListRow[] };
@@ -313,7 +316,7 @@ webhook.post('/webhook', async (req: Request, res: Response) => {
           // --- DB persistence + realtime for every inbound message ---
           try {
             // 1) Ensure customer + conversation exist
-            const customerId = await upsertCustomerByWa(from, undefined, from);
+            const customerId = await upsertCustomerByWa(from, null, from);
             const conversationId = await getOrCreateConversation(customerId);
           
             // 2) Pick a body to store (text, interactive marker, or location coords)
@@ -326,15 +329,20 @@ webhook.post('/webhook', async (req: Request, res: Response) => {
             }
           
             // 3) Insert inbound message row
-            const inserted = await insertInboundMessage(
-              conversationId,
-              mid ?? null,
-              type ?? 'text',
-              bodyForDb
-            );
+            // 3) Insert inbound message row
+            const inserted = await insertInboundMessage(conversationId, {
+              type: type ?? 'text',
+              body: bodyForDb ?? '',
+              status: null,
+            });
+
+            
           
             // 4) Update conversation activity + emit realtime
-            await updateConversationLastUserAt(conversationId);
+            await updateConversationLastUserAt(conversationId,new Date());           // keep list fresh
+             
+            emit("conversation.updated", { id: conversationId });         // refresh left list
+
           
             emit('message.created', { conversation_id: conversationId, message: inserted });
             emit('conversation.updated', {});
@@ -350,14 +358,21 @@ webhook.post('/webhook', async (req: Request, res: Response) => {
           }
 
           // 2) start menu on greetings if idle
+                    // 2) start / reset menu on greetings
           const activeFlow = FLOW.get(from);
-          if ((!s || s.state === 'IDLE') && !activeFlow) {
-            const txt = (text || '').trim().toLowerCase();
-            if (!text || ['hi','hello','mambo','start','anza','menu','menyu'].includes(txt)) {
-              await showMainMenu(from, lang);
-              continue;
-            }
+          const txt = (text || "").trim().toLowerCase();
+          const isGreeting =
+            !text ||
+            ["hi", "hello", "hey", "mambo", "habari", "start", "anza", "menu", "menyu"].includes(
+              txt
+            );
+
+          // If user sends a greeting, always show main menu (even if a flow was half-way)
+          if (isGreeting && (!s || s.state === "IDLE" || !activeFlow)) {
+            await showMainMenu(from, lang);
+            continue;
           }
+
 
           // 3) route
           if (activeFlow) {
@@ -480,6 +495,69 @@ const PICKUP_INFO_EN = 'We are at Keko Modern Furniture, opposite Omax Bar. Cont
 
 async function onInteractive(user: string, id: string, lang: Lang) {
   const N = normId(id);
+    // --- Agent handover actions (talk to agent / back to bot) ---
+  if (id === "ACTION_TALK_TO_AGENT") {
+    try {
+      // Make sure we are operating on the same conversation as other handlers
+      const customerId = await upsertCustomerByWa(user, null, user);
+      const conversationId = await getOrCreateConversation(customerId);
+
+      // Enable agent on this conversation
+      await db("conversations")
+        .where({ id: conversationId })
+        .update({ agent_allowed: true });
+
+      // Notify the inbox UI so the middle panel unlocks
+      emit("conversation.updated", {
+        id: conversationId,
+        agent_allowed: true,
+      });
+
+      // Tell the customer they are now chatting with a human
+      await sendText(
+        user,
+        "Umeunganishwa na mhudumu wa Ujani 👩‍💻. Unaweza kuuliza swali lolote kuhusu oda yako.\n\nUkihitaji kurudi kwa bot, bonyeza kitufe *Rudi kwa bot* hapa chini."
+      );
+
+      // Give the customer a button to go back to the bot later
+      await sendButtonsMessageSafe(user, "Ukitaka kurudi kwa bot:", [
+        { id: "ACTION_RETURN_TO_BOT", title: "Rudi kwa bot" },
+      ]);
+
+      return;
+    } catch (err) {
+      console.error("failed to enable agent mode", err);
+    }
+  }
+
+  if (id === "ACTION_RETURN_TO_BOT") {
+    try {
+      const customerId = await upsertCustomerByWa(user, null, user);
+      const conversationId = await getOrCreateConversation(customerId);
+
+      // Turn agent off so bot takes over again
+      await db("conversations")
+        .where({ id: conversationId })
+        .update({ agent_allowed: false });
+
+      emit("conversation.updated", {
+        id: conversationId,
+        agent_allowed: false,
+      });
+
+      await sendText(
+        user,
+        "Umerudi kwa bot 🤖. Tutaendelea na menyu ya kawaida ya oda."
+      );
+
+      // Show the main menu again
+      await showMainMenu(user, lang);
+      return;
+    } catch (err) {
+      console.error("failed to disable agent mode", err);
+    }
+  }
+
 
   /* --------- Location / service selection FIRST (robust to truncation) -------- */
   if (N.startsWith('DAR_INSIDE')) {
@@ -807,3 +885,4 @@ function detailsForSku(lang: Lang, sku: string): string {
 
   return lang === 'sw' ? 'Maelezo yatapatikana hivi karibuni.' : 'Details coming soon.';
 }
+

@@ -1,109 +1,179 @@
+// web/components/RightPanel.tsx
 "use client";
+
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { socket } from "@/lib/socket";
+import { Card, Button } from "./ui";
 
-type Summary = {
-  customer: { name?: string; phone: string; lang?: string } | null;
-  delivery: { mode: string; km: number; fee_tzs: number } | null;
-  payment: { id?: string; method?: string; status: "awaiting" | "verifying" | "paid" | "failed"; recipient?: string } | null;
+type Customer = {
+  name?: string | null;
+  phone?: string | null;
+  lang?: string | null;
 };
 
-export default function RightPanel({ conversationId }: { conversationId: string }) {
-  const [data, setData] = useState<Summary | null>(null);
+type Delivery = {
+  mode: "dar" | "outside" | string;
+  description?: string | null;
+  km?: number | null;
+  fee_tzs?: number | null;
+};
+
+type Payment = {
+  id: number;
+  method?: string | null;
+  status: "awaiting" | "verifying" | "paid" | "failed" | string;
+  recipient?: string | null;
+  amount_tzs?: number | null;
+};
+
+type SummaryResponse = {
+  customer: Customer | null;
+  delivery: Delivery | null;
+  payment: Payment | null;
+};
+
+function formatPhonePretty(raw?: string | null) {
+  if (!raw) return "—";
+  const digits = raw.replace(/[^\d+]/g, "");
+  if (digits.startsWith("+255") && digits.length >= 10) {
+    const body = digits.slice(4);
+    return `+255 ${body.slice(0, 3)} ${body.slice(3, 6)} ${body.slice(6)}`;
+  }
+  return digits;
+}
+
+export default function RightPanel({
+  conversationId,
+}: {
+  conversationId: number;
+}) {
+  const [summary, setSummary] = useState<SummaryResponse | null>(null);
 
   async function load() {
-    const d = await api<Summary>(`/api/conversations/${conversationId}/summary`);
-    setData(d);
+    const data = await api<SummaryResponse>(
+      `/api/conversations/${conversationId}/summary`
+    );
+    setSummary(data);
   }
 
   useEffect(() => {
     load();
     const s = socket();
-    s.on("order.updated", load);
-    s.on("payment.updated", load);
+    const reload = () => load();
+    s.on("order.updated", reload);
+    s.on("payment.updated", reload);
     return () => {
-      s.off("order.updated", load);
-      s.off("payment.updated", load);
+      s.off("order.updated", reload);
+      s.off("payment.updated", reload);
     };
   }, [conversationId]);
 
-  if (!data) return <div className="w-96" />;
+  if (!summary) {
+    return <div className="w-[22rem] bg-[#f0f2f5] border-l" />;
+  }
 
-  const { customer, delivery, payment } = data;
+  const { customer, delivery, payment } = summary;
 
   return (
-    <div className="w-96 bg-gray-50 border-l p-3 space-y-3">
-      <section className="rounded-2xl border bg-white p-3">
-        <div className="font-semibold">Customer</div>
-        <div className="text-sm mt-1">Name: {customer?.name || "—"}</div>
-        <div className="text-sm">Phone: {customer?.phone || "—"}</div>
-        <div className="text-sm">Lang: {customer?.lang || "—"}</div>
-      </section>
+    <div className="w-[22rem] bg-[#f0f2f5] border-l p-3 space-y-3 overflow-y-auto">
+      <Card className="p-3">
+        <div className="text-xs uppercase text-gray-500 mb-1">Customer</div>
+        <div className="text-sm font-medium">
+          {customer?.name || "Mteja"}
+        </div>
+        <div className="text-sm text-gray-600">
+          Phone: {formatPhonePretty(customer?.phone)}
+        </div>
+        <div className="text-sm text-gray-600">
+          Lang: {customer?.lang?.toUpperCase() ?? "—"}
+        </div>
+      </Card>
 
       {delivery && (
-        <section className="rounded-2xl border bg-white p-3">
-          <div className="font-semibold">Delivery</div>
-          <div className="text-sm mt-1">Mode: {delivery.mode}</div>
-          <div className="text-sm">GPS: {delivery.km.toFixed(1)} km</div>
-          <div className="text-sm">Fee: TZS {delivery.fee_tzs.toLocaleString()}</div>
-        </section>
+        <Card className="p-3">
+          <div className="text-xs uppercase text-gray-500 mb-1">
+            Delivery
+          </div>
+          <div className="text-sm text-gray-700">
+            Mode: {delivery.mode === "dar" ? "Ndani ya Dar" : delivery.mode}
+          </div>
+          {delivery.description && (
+            <div className="text-sm text-gray-700">
+              Location: {delivery.description}
+            </div>
+          )}
+          {typeof delivery.km === "number" && (
+            <div className="text-sm text-gray-700">
+              GPS: {delivery.km.toFixed(1)} km
+            </div>
+          )}
+          {typeof delivery.fee_tzs === "number" && (
+            <div className="text-sm text-gray-700">
+              Fee: TZS {delivery.fee_tzs.toLocaleString("en-US")}
+            </div>
+          )}
+        </Card>
       )}
 
-      <section className="rounded-2xl border bg-white p-3">
-        <div className="font-semibold">Payment</div>
-        <div className="text-sm mt-1">Chosen: {payment?.method || "—"}</div>
-        <div className="text-sm">Recipient: {payment?.recipient || "Ujani Herbals"}</div>
-        <div className="text-sm">
+      <Card className="p-3">
+        <div className="text-xs uppercase text-gray-500 mb-1">Payment</div>
+        <div className="text-sm text-gray-700">
+          Method: {payment?.method ?? "—"}
+        </div>
+        <div className="text-sm text-gray-700">
+          Recipient: {payment?.recipient ?? "Ujani Herbals"}
+        </div>
+        {payment?.amount_tzs && (
+          <div className="text-sm text-gray-700">
+            Amount: TZS {payment.amount_tzs.toLocaleString("en-US")}
+          </div>
+        )}
+        <div className="text-sm mt-1">
           Status:{" "}
           <span
             className={
               payment?.status === "paid"
                 ? "text-green-600"
-                : payment?.status === "verifying"
-                ? "text-blue-600"
                 : payment?.status === "failed"
                 ? "text-red-600"
                 : "text-orange-600"
             }
           >
-            {payment?.status || "awaiting"}
+            {payment?.status ?? "awaiting"}
           </span>
         </div>
 
-        {payment?.id && (
-          <div className="mt-2 flex gap-2">
-            <button
-              className="px-3 py-1.5 rounded bg-blue-600 text-white"
-              onClick={() =>
-                api(`/api/payments/${payment.id}/status`, {
+        {payment && payment.status !== "paid" && (
+          <div className="mt-3 flex gap-2">
+            <Button
+              onClick={async () => {
+                await api(`/api/payments/${payment.id}/status`, {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ status: "verifying" })
-                })
-                  .then(load)
-                  .catch((e) => alert(e.message))
-              }
+                  body: JSON.stringify({ status: "verifying" }),
+                });
+                load();
+              }}
             >
               Mark verifying
-            </button>
-            <button
-              className="px-3 py-1.5 rounded bg-green-600 text-white"
-              onClick={() =>
-                api(`/api/payments/${payment.id}/status`, {
+            </Button>
+            <Button
+              variant="primary"
+              onClick={async () => {
+                await api(`/api/payments/${payment.id}/status`, {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ status: "paid" })
-                })
-                  .then(load)
-                  .catch((e) => alert(e.message))
-              }
+                  body: JSON.stringify({ status: "paid" }),
+                });
+                load();
+              }}
             >
               Mark paid
-            </button>
+            </Button>
           </div>
         )}
-      </section>
+      </Card>
     </div>
   );
 }

@@ -1,114 +1,225 @@
+// backend/src/routes/inbox.ts
 import { Router } from "express";
-import db from "../db/knex.js"; // exists in your ZIP
+import db from "../db/knex.js";
+import { sendText } from "../whatsapp.js";
 
 export const inboxRoutes = Router();
 
 /**
  * GET /api/conversations
- * Left pane list
+ * Left pane list (like WhatsApp)
  */
 inboxRoutes.get("/conversations", async (_req, res) => {
-  const items = await db("conversations as c")
-    .join("customers as u", "u.id", "c.customer_id")
-    .select(
-      "c.id",
-      "u.name",
-      "u.phone",
-      "u.lang",
-      "c.agent_allowed",
-      "c.last_user_message_at"
-    )
-    .orderBy("c.last_user_message_at", "desc")
-    .limit(100);
+  try {
+    const items = await db("conversations as c")
+      .leftJoin("customers as u", "u.id", "c.customer_id")
+      .leftJoin(
+        db("messages as m")
+          .select("conversation_id")
+          .max("created_at as last_message_at")
+          .max("id as last_message_id")
+          .as("lm"),
+        "lm.conversation_id",
+        "c.id"
+      )
+      .leftJoin("messages as lm_msg", "lm_msg.id", "lm.last_message_id")
+      .select(
+        "c.id",
+        "u.name",
+        "u.phone",
+        "u.lang",
+        "c.agent_allowed",
+        "c.last_user_message_at",
+        "lm.last_message_at",
+        "lm_msg.body as last_message_preview"
+      )
+      .orderBy("lm.last_message_at", "desc")
+      .orderBy("c.created_at", "desc");
 
-  // unread counts — avoid TS2488 by using .first() (not array destructuring)
-  for (const row of items) {
-    const unreadRow = await db("messages")
-      .where({ conversation_id: row.id, direction: "in", status: "delivered" })
-      .count<{ count: string }>("id as count")
-      .first();
+    // You can compute unread_count here if you track read receipts.
+    const withUnread = items.map((row: any) => ({
+      ...row,
+      unread_count: 0,
+    }));
 
-    (row as any).unread_count = Number(unreadRow?.count ?? 0);
+    res.json({ items: withUnread });
+  } catch (e: any) {
+    console.error("GET /conversations failed", e);
+    res.status(500).json({ error: e?.message ?? "failed" });
   }
-
-  res.json({ items });
 });
 
 /**
  * GET /api/conversations/:id/messages
- * Center thread
+ * Full message history for a conversation
  */
 inboxRoutes.get("/conversations/:id/messages", async (req, res) => {
-  const { id } = req.params;
-  const messages = await db("messages")
-    .where({ conversation_id: id })
-    .orderBy("created_at", "asc")
-    .select("id", "direction", "type", "body", "status", "created_at");
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) {
+    return res.status(400).json({ error: "Invalid id" });
+  }
+  try {
+    const messages = await db("messages")
+      .where({ conversation_id: id })
+      .select(
+        "id",
+        "conversation_id",
+        "direction",
+        "type",
+        "body",
+        "status",
+        "created_at"
+      )
+      .orderBy("created_at", "asc")
+      .limit(1000);
 
-  res.json({ messages });
+    res.json({ messages });
+  } catch (e: any) {
+    console.error("GET /conversations/:id/messages failed", e);
+    res.status(500).json({ error: e?.message ?? "failed" });
+  }
 });
 
 /**
  * GET /api/conversations/:id/summary
- * Right pane: customer, latest order, latest payment
+ * Customer + delivery + payment summary for right panel
  */
 inboxRoutes.get("/conversations/:id/summary", async (req, res) => {
-  const { id } = req.params;
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) {
+    return res.status(400).json({ error: "Invalid id" });
+  }
 
-  const convo = await db("conversations as c")
-    .join("customers as u", "u.id", "c.customer_id")
-    .where("c.id", id)
-    .first("c.id", "c.customer_id", "c.agent_allowed", "u.name", "u.phone", "u.lang");
+  try {
+    const convo = await db("conversations as c")
+      .leftJoin("customers as u", "u.id", "c.customer_id")
+      .leftJoin("orders as o", "o.conversation_id", "c.id")
+      .leftJoin("payments as p", "p.order_id", "o.id")
+      .where("c.id", id)
+      .select(
+        "u.name as customer_name",
+        "u.phone as customer_phone",
+        "u.lang as customer_lang",
+        "o.mode as delivery_mode",
+        "o.delivery_description",
+        "o.delivery_km",
+        "o.delivery_fee_tzs",
+        "p.id as payment_id",
+        "p.method as payment_method",
+        "p.status as payment_status",
+        "p.recipient as payment_recipient",
+        "p.amount_tzs as payment_amount_tzs"
+      )
+      .first();
 
-  if (!convo) return res.status(404).json({ error: "Conversation not found" });
-
-  const order = await db("orders")
-    .where({ customer_id: convo.customer_id })
-    .orderBy("created_at", "desc")
-    .first();
-
-  const payment = order
-    ? await db("payments")
-        .where({ order_id: order.id })
-        .orderBy("created_at", "desc")
-        .first()
-    : null;
-
-  res.json({
-    customer: { name: convo.name, phone: convo.phone, lang: convo.lang },
-    delivery: order
-      ? { mode: order.delivery_mode, km: order.km, fee_tzs: order.fee_tzs }
-      : null,
-    payment: payment
+    const customer = convo
       ? {
-          id: payment.id,
-          method: payment.method,
-          status: payment.status,
-          recipient: "Ujani Herbals"
+          name: convo.customer_name,
+          phone: convo.customer_phone,
+          lang: convo.customer_lang,
         }
-      : { status: "awaiting" }
-  });
+      : null;
+
+    const delivery =
+      convo && convo.delivery_mode
+        ? {
+            mode: convo.delivery_mode,
+            description: convo.delivery_description,
+            km: convo.delivery_km,
+            fee_tzs: convo.delivery_fee_tzs,
+          }
+        : null;
+
+    const payment =
+      convo && convo.payment_id
+        ? {
+            id: convo.payment_id,
+            method: convo.payment_method,
+            status: convo.payment_status,
+            recipient: convo.payment_recipient,
+            amount_tzs: convo.payment_amount_tzs,
+          }
+        : null;
+
+    res.json({ customer, delivery, payment });
+  } catch (e: any) {
+    console.error("GET /conversations/:id/summary failed", e);
+    res.status(500).json({ error: e?.message ?? "failed" });
+  }
 });
 
 /**
  * POST /api/payments/:id/status
- * Body: { status: "verifying" | "paid" | "failed" }
+ * { status: "verifying" | "paid" | "failed" }
+ *
+ * - updates DB
+ * - emits socket event payment.updated
+ * - when status === "paid", sends WhatsApp confirmation to customer
  */
 inboxRoutes.post("/payments/:id/status", async (req, res) => {
-  const { id } = req.params;
+  const id = Number(req.params.id);
   const { status } = req.body ?? {};
 
+  if (!Number.isFinite(id)) {
+    return res.status(400).json({ error: "Invalid id" });
+  }
   if (!["verifying", "paid", "failed"].includes(status)) {
     return res.status(400).json({ error: "Invalid status" });
   }
 
-  const existing = await db("payments").where({ id }).first("id");
-  if (!existing) return res.status(404).json({ error: "Payment not found" });
+  try {
+    const payment = await db("payments as p")
+      .leftJoin("orders as o", "o.id", "p.order_id")
+      .leftJoin("conversations as c", "c.id", "o.conversation_id")
+      .leftJoin("customers as u", "u.id", "c.customer_id")
+      .where("p.id", id)
+      .select(
+        "p.id",
+        "p.status",
+        "p.amount_tzs",
+        "p.order_id",
+        "c.id as conversation_id",
+        "u.wa_id",
+        "u.lang"
+      )
+      .first();
 
-  await db("payments").where({ id }).update({ status });
+    if (!payment) {
+      return res.status(404).json({ error: "Payment not found" });
+    }
 
-  // emit via socket.io (available via app.set in server.ts)
-  req.app.get("io")?.emit("payment.updated", { id, status });
+    await db("payments").where({ id }).update({ status });
 
-  res.json({ ok: true });
+    // Emit to UI (for RightPanel refresh)
+    req.app.get("io")?.emit("payment.updated", { id, status });
+
+    // If paid: send confirmation message to customer + store outbound message
+    if (status === "paid" && payment.wa_id && payment.conversation_id) {
+      const msg =
+        "Tumepokea malipo. Order yako inaandaliwa. Asante kwa kununua bidhaa zetu 🌿";
+
+      try {
+        await sendText(payment.wa_id, msg);
+      } catch (e) {
+        console.warn("Failed to send payment confirmation:", e);
+      }
+
+      await db("messages").insert({
+        conversation_id: payment.conversation_id,
+        direction: "out",
+        type: "text",
+        body: msg,
+        status: "sent",
+      });
+
+      req.app.get("io")?.emit("message.created", {
+        conversation_id: payment.conversation_id,
+      });
+    }
+
+    res.json({ ok: true });
+  } catch (e: any) {
+    console.error("POST /payments/:id/status failed", e);
+    res.status(500).json({ error: e?.message ?? "failed" });
+  }
 });
