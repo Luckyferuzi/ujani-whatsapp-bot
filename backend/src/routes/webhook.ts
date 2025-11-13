@@ -346,6 +346,15 @@ webhook.post('/webhook', async (req: Request, res: Response) => {
           } catch (err) {
             console.error('inbound persist error:', err);
           }
+
+            // If this conversation is in agent mode, do not let the bot answer.
+          // We still saved the message above and emitted events for the admin UI.
+          const agentAllowed = await isAgentAllowed(from);
+          if (agentAllowed) {
+            console.log("[webhook] agent mode for", from, "— skipping bot reply");
+          continue;
+          }
+
           // --- end DB persistence + realtime ---
 
           // --- end DB persistence + realtime ---
@@ -727,6 +736,20 @@ async function onInteractive(user: string, id: string, lang: Lang) {
 }
 
 }
+
+async function isAgentAllowed(waId: string): Promise<boolean> {
+  // Reuse your existing helpers
+  const customerId = await upsertCustomerByWa(waId, undefined, waId);
+  const conversationId = await getOrCreateConversation(customerId);
+
+  const row = await db("conversations")
+    .where({ id: conversationId })
+    .select("agent_allowed")
+    .first();
+
+  return !!row?.agent_allowed;
+}
+
 
 /* -------------------------------------------------------------------------- */
 /*                            Flow / message handling                          */

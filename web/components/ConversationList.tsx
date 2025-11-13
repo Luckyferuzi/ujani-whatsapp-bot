@@ -46,13 +46,16 @@ export default function ConversationList({ activeId, onPick }: Props) {
   const [query, setQuery] = useState("");
 
   async function load() {
-    const data = await api<Convo[]>("/api/conversations");
-    data.sort(
+    // IMPORTANT: backend returns { items: [...] }
+    const { items } = await api<{ items: Convo[] }>("/api/conversations");
+
+    items.sort(
       (a, b) =>
         new Date(b.last_user_message_at).getTime() -
         new Date(a.last_user_message_at).getTime()
     );
-    setItems(data);
+
+    setItems(items);
   }
 
   useEffect(() => {
