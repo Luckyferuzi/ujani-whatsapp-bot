@@ -32,26 +32,32 @@ function Tick({ status }: { status?: string | null }) {
 }
 
 export default function Thread({ convo }: ThreadProps) {
+  // IMPORTANT: start as [] so map() always works
   const [messages, setMessages] = useState<Msg[]>([]);
   const [agentAllowed, setAgentAllowed] = useState<boolean>(convo.agent_allowed);
   const [text, setText] = useState("");
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
   async function loadMessages() {
-    const data = await api<Msg[]>(
+    // backend returns { items: [...] }
+    const { items } = await api<{ items: Msg[] }>(
       `/api/conversations/${convo.id}/messages`
     );
-    setMessages(data);
+    setMessages(items || []);
   }
 
   useEffect(() => {
+    // when switching conversations, clear view then load
+    setMessages([]);
     setAgentAllowed(convo.agent_allowed);
     loadMessages();
 
     const s = socket();
     const onNew = (payload: any) => {
       const cid =
-        payload?.conversation_id ?? payload?.conversationId ?? payload?.conversation?.id;
+        payload?.conversation_id ??
+        payload?.conversationId ??
+        payload?.conversation?.id;
       if (String(cid) === String(convo.id)) {
         loadMessages();
       }
@@ -88,7 +94,7 @@ export default function Thread({ convo }: ThreadProps) {
         text: trimmed,
       }),
     });
-    // backend will emit message.created → loadMessages() will run from socket
+    // server will broadcast message.created → loadMessages via socket
   }
 
   const bgPattern = {
