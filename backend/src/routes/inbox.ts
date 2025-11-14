@@ -83,29 +83,19 @@ inboxRoutes.get("/conversations/:id/summary", async (req, res) => {
   const id = req.params.id;
 
   try {
-    const row = await db("conversations as c")
+    // 1) Conversation + customer
+    const conv = await db("conversations as c")
       .leftJoin("customers as u", "u.id", "c.customer_id")
-      // FIXED: orders join on customer_id, NOT conversation_id
-      .leftJoin("orders as o", "o.customer_id", "c.customer_id")
-      .leftJoin("payments as p", "p.order_id", "o.id")
       .where("c.id", id)
       .select(
+        "c.customer_id as c_customer_id",
         "u.name as customer_name",
         "u.phone as customer_phone",
-        "u.lang as customer_lang",
-        "o.mode as delivery_mode",
-        "o.delivery_description",
-        "o.delivery_km",
-        "o.delivery_fee_tzs",
-        "p.id as payment_id",
-        "p.method as payment_method",
-        "p.status as payment_status",
-        "p.recipient as payment_recipient",
-        "p.amount_tzs as payment_amount_tzs"
+        "u.lang as customer_lang"
       )
       .first();
 
-    if (!row) {
+    if (!conv) {
       return res.json({
         customer: null,
         delivery: null,
@@ -113,32 +103,47 @@ inboxRoutes.get("/conversations/:id/summary", async (req, res) => {
       });
     }
 
-    const customer = row.customer_phone
+    const customer = conv.customer_phone
       ? {
-          name: row.customer_name,
-          phone: row.customer_phone,
-          lang: row.customer_lang,
+          name: conv.customer_name,
+          phone: conv.customer_phone,
+          lang: conv.customer_lang,
         }
       : null;
 
-    const delivery = row.delivery_mode
-      ? {
-          mode: row.delivery_mode,
-          description: row.delivery_description,
-          km: row.delivery_km,
-          fee_tzs: row.delivery_fee_tzs,
-        }
-      : null;
+    // 2) Latest order for this customer
+    const order = await db("orders")
+      .where({ customer_id: conv.c_customer_id })
+      .orderBy("created_at", "desc")
+      .first();
 
-    const payment = row.payment_id
-      ? {
-          id: row.payment_id,
-          method: row.payment_method,
-          status: row.payment_status,
-          recipient: row.payment_recipient,
-          amount_tzs: row.payment_amount_tzs,
-        }
-      : null;
+    let delivery: any = null;
+    let payment: any = null;
+
+    if (order) {
+      delivery = {
+        mode: order.mode,
+        description: order.delivery_description,
+        km: order.delivery_km,
+        fee_tzs: order.delivery_fee_tzs,
+      };
+
+      // 3) Latest payment for that order
+      const payRow = await db("payments")
+        .where({ order_id: order.id })
+        .orderBy("created_at", "desc")
+        .first();
+
+      if (payRow) {
+        payment = {
+          id: payRow.id,
+          method: payRow.method,
+          status: payRow.status,
+          recipient: payRow.recipient,
+          amount_tzs: payRow.amount_tzs,
+        };
+      }
+    }
 
     res.json({ customer, delivery, payment });
   } catch (err) {
