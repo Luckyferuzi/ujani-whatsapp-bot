@@ -39,12 +39,12 @@ export default function Thread({ convo }: ThreadProps) {
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
   async function loadMessages() {
-    // backend returns { items: [...] }
-    const { items } = await api<{ items: Msg[] }>(
-      `/api/conversations/${convo.id}/messages`
-    );
-    setMessages(items || []);
-  }
+  const { items } = await api<{ items: Msg[] }>(
+    `/api/conversations/${convo.id}/messages`
+  );
+  setMessages(items || []);
+}
+
 
   useEffect(() => {
     // when switching conversations, clear view then load
