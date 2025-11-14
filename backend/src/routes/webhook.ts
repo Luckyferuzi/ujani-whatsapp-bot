@@ -315,37 +315,38 @@ webhook.post('/webhook', async (req: Request, res: Response) => {
 
           // --- DB persistence + realtime for every inbound message ---
                   // --- DB persistence + realtime ---
-          try {
-            const customerId = await upsertCustomerByWa(from, undefined, from);
-            const conversationId = await getOrCreateConversation(customerId);
-          
-            // 2) Pick a body to store (text, interactive marker, or location coords)
-            let bodyForDb: string | null = text ?? null;
-            if (!bodyForDb && interactiveId) {
-              bodyForDb = `[interactive:${interactiveId}]`;
-            }
-            if (!bodyForDb && hasLocation && typeof lat === 'number' && typeof lon === 'number') {
-              bodyForDb = `LOCATION ${lat},${lon}`;
-            }
-          
-            // 3) Insert inbound message row
-            const inserted = await insertInboundMessage(
-              conversationId,
-              mid ?? null,
-              type ?? 'text',
-              bodyForDb
-            );
-            
-            // 4) Update conversation activity + emit realtime
-            await updateConversationLastUserAt(conversationId);           // keep list fresh
-             
-            emit("conversation.updated", { id: conversationId });         // refresh left list
+// --- DB persistence + realtime for every inbound message ---
+try {
+  // 1) Ensure customer + conversation exist
+  const customerId = await upsertCustomerByWa(from, undefined, from);
+  const conversationId = await getOrCreateConversation(customerId);
 
-            emit('message.created', { conversation_id: conversationId, message: inserted });
-            emit('conversation.updated', {});
-          } catch (err) {
-            console.error('inbound persist error:', err);
-          }
+  // 2) Pick a body to store (text, interactive marker, or location coords)
+  let bodyForDb: string | null = text ?? null;
+  if (!bodyForDb && interactiveId) {
+    bodyForDb = `[interactive:${interactiveId}]`;
+  }
+  if (!bodyForDb && hasLocation && typeof lat === "number" && typeof lon === "number") {
+    bodyForDb = `LOCATION ${lat},${lon}`;
+  }
+
+  // 3) Insert inbound message row
+  const inserted = await insertInboundMessage(
+    conversationId,
+    mid ?? null,
+    type ?? "text",
+    bodyForDb
+  );
+
+  // 4) Update conversation activity + emit realtime
+  await updateConversationLastUserAt(conversationId);
+
+  emit("message.created", { conversation_id: conversationId, message: inserted });
+  emit("conversation.updated", {});
+} catch (err) {
+  console.error("inbound persist error:", err);
+}
+
 
             // If this conversation is in agent mode, do not let the bot answer.
           // We still saved the message above and emitted events for the admin UI.
@@ -499,67 +500,55 @@ const PICKUP_INFO_EN = 'We are at Keko Modern Furniture, opposite Omax Bar. Cont
 async function onInteractive(user: string, id: string, lang: Lang) {
   const N = normId(id);
     // --- Agent handover actions (talk to agent / back to bot) ---
+  if (id === "ACTION_BACK") return showMainMenu(user, lang);
+
   if (id === "ACTION_TALK_TO_AGENT") {
-    try {
-      // Make sure we are operating on the same conversation as other handlers
-      const customerId = await upsertCustomerByWa(user, null, user);
-      const conversationId = await getOrCreateConversation(customerId);
+    // 1) Flip agent_allowed = true for this conversation
+    const customerId = await upsertCustomerByWa(user, undefined, user);
+    const conversationId = await getOrCreateConversation(customerId);
 
-      // Enable agent on this conversation
-      await db("conversations")
-        .where({ id: conversationId })
-        .update({ agent_allowed: true });
+    await db("conversations")
+      .where({ id: conversationId })
+      .update({ agent_allowed: true });
 
-      // Notify the inbox UI so the middle panel unlocks
-      emit("conversation.updated", {
-        id: conversationId,
-        agent_allowed: true,
-      });
+    // Notify UI so admin can type
+    emit("conversation.updated", { id: conversationId, agent_allowed: true });
 
-      // Tell the customer they are now chatting with a human
-      await sendText(
-        user,
-        "Umeunganishwa na mhudumu wa Ujani 👩‍💻. Unaweza kuuliza swali lolote kuhusu oda yako.\n\nUkihitaji kurudi kwa bot, bonyeza kitufe *Rudi kwa bot* hapa chini."
-      );
+    // 2) Tell the customer they are now with an agent
+    await sendText(user, t(lang, "agent.reply"));
 
-      // Give the customer a button to go back to the bot later
-      await sendButtonsMessageSafe(user, "Ukitaka kurudi kwa bot:", [
-        { id: "ACTION_RETURN_TO_BOT", title: "Rudi kwa bot" },
-      ]);
+    // 3) Offer a button to return to the bot (IMPORTANT: 3 args)
+    await sendButtonsMessage(
+      user,
+      lang === "sw"
+        ? "Ukimaliza kuongea na mhudumu, unaweza kurudi kwa bot."
+        : "When you are done with the agent, you can go back to the bot.",
+      [
+        {
+          id: "ACTION_RETURN_TO_BOT",
+          title: lang === "sw" ? "Rudi kwa bot" : "Return to bot",
+        },
+      ]
+    );
 
-      return;
-    } catch (err) {
-      console.error("failed to enable agent mode", err);
-    }
+    return;
   }
 
   if (id === "ACTION_RETURN_TO_BOT") {
-    try {
-      const customerId = await upsertCustomerByWa(user, null, user);
-      const conversationId = await getOrCreateConversation(customerId);
+    const customerId = await upsertCustomerByWa(user, undefined, user);
+    const conversationId = await getOrCreateConversation(customerId);
 
-      // Turn agent off so bot takes over again
-      await db("conversations")
-        .where({ id: conversationId })
-        .update({ agent_allowed: false });
+    await db("conversations")
+      .where({ id: conversationId })
+      .update({ agent_allowed: false });
 
-      emit("conversation.updated", {
-        id: conversationId,
-        agent_allowed: false,
-      });
+    emit("conversation.updated", { id: conversationId, agent_allowed: false });
 
-      await sendText(
-        user,
-        "Umerudi kwa bot 🤖. Tutaendelea na menyu ya kawaida ya oda."
-      );
-
-      // Show the main menu again
-      await showMainMenu(user, lang);
-      return;
-    } catch (err) {
-      console.error("failed to disable agent mode", err);
-    }
+    // Go back to main menu
+    return showMainMenu(user, lang);
   }
+
+
 
 
   /* --------- Location / service selection FIRST (robust to truncation) -------- */

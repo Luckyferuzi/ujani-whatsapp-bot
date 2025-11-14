@@ -45,31 +45,16 @@ inboxRoutes.get("/conversations", async (_req, res) => {
  * GET /api/conversations/:id/messages
  * Full message history for a conversation
  */
+// GET /api/conversations/:id/messages
 inboxRoutes.get("/conversations/:id/messages", async (req, res) => {
   const id = Number(req.params.id);
-  if (!Number.isFinite(id)) {
-    return res.status(400).json({ error: "Invalid id" });
-  }
-  try {
-    const messages = await db("messages")
-      .where({ conversation_id: id })
-      .select(
-        "id",
-        "conversation_id",
-        "direction",
-        "type",
-        "body",
-        "status",
-        "created_at"
-      )
-      .orderBy("created_at", "asc")
-      .limit(1000);
+  const items = await db("messages")
+    .where({ conversation_id: id })
+    .select("id", "conversation_id", "direction", "type", "body", "status", "created_at")
+    .orderBy("created_at", "asc")
+    .limit(500);
 
-    res.json({ messages });
-  } catch (e: any) {
-    console.error("GET /conversations/:id/messages failed", e);
-    res.status(500).json({ error: e?.message ?? "failed" });
-  }
+  res.json({ items });
 });
 
 /**
