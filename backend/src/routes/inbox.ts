@@ -76,16 +76,17 @@ inboxRoutes.get("/conversations/:id/messages", async (req, res) => {
  * GET /api/conversations/:id/summary
  * Customer + delivery + payment summary for right panel
  */
+// ==============================
+// GET /api/conversations/:id/summary
+// ==============================
 inboxRoutes.get("/conversations/:id/summary", async (req, res) => {
-  const id = Number(req.params.id);
-  if (!Number.isFinite(id)) {
-    return res.status(400).json({ error: "Invalid id" });
-  }
+  const id = req.params.id;
 
   try {
-    const convo = await db("conversations as c")
+    const row = await db("conversations as c")
       .leftJoin("customers as u", "u.id", "c.customer_id")
-      .leftJoin("orders as o", "o.conversation_id", "c.id")
+      // FIXED: orders join on customer_id, NOT conversation_id
+      .leftJoin("orders as o", "o.customer_id", "c.customer_id")
       .leftJoin("payments as p", "p.order_id", "o.id")
       .where("c.id", id)
       .select(
@@ -104,39 +105,45 @@ inboxRoutes.get("/conversations/:id/summary", async (req, res) => {
       )
       .first();
 
-    const customer = convo
+    if (!row) {
+      return res.json({
+        customer: null,
+        delivery: null,
+        payment: null,
+      });
+    }
+
+    const customer = row.customer_phone
       ? {
-          name: convo.customer_name,
-          phone: convo.customer_phone,
-          lang: convo.customer_lang,
+          name: row.customer_name,
+          phone: row.customer_phone,
+          lang: row.customer_lang,
         }
       : null;
 
-    const delivery =
-      convo && convo.delivery_mode
-        ? {
-            mode: convo.delivery_mode,
-            description: convo.delivery_description,
-            km: convo.delivery_km,
-            fee_tzs: convo.delivery_fee_tzs,
-          }
-        : null;
+    const delivery = row.delivery_mode
+      ? {
+          mode: row.delivery_mode,
+          description: row.delivery_description,
+          km: row.delivery_km,
+          fee_tzs: row.delivery_fee_tzs,
+        }
+      : null;
 
-    const payment =
-      convo && convo.payment_id
-        ? {
-            id: convo.payment_id,
-            method: convo.payment_method,
-            status: convo.payment_status,
-            recipient: convo.payment_recipient,
-            amount_tzs: convo.payment_amount_tzs,
-          }
-        : null;
+    const payment = row.payment_id
+      ? {
+          id: row.payment_id,
+          method: row.payment_method,
+          status: row.payment_status,
+          recipient: row.payment_recipient,
+          amount_tzs: row.payment_amount_tzs,
+        }
+      : null;
 
     res.json({ customer, delivery, payment });
-  } catch (e: any) {
-    console.error("GET /conversations/:id/summary failed", e);
-    res.status(500).json({ error: e?.message ?? "failed" });
+  } catch (err) {
+    console.error("summary error:", err);
+    res.status(500).json({ error: String(err) });
   }
 });
 
