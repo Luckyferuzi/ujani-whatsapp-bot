@@ -290,7 +290,7 @@ webhook.post('/webhook', async (req: Request, res: Response) => {
           const from = msg?.from as string;
           const mid = msg?.id as string | undefined;
           if (!from) continue;
-          if (mid) await markAsRead(mid).catch(() => {});
+          //if (mid) await markAsRead(mid).catch(() => {});
 
           const lang = getLang(from);
           const s = getSession(from);
@@ -500,33 +500,29 @@ const PICKUP_INFO_EN = 'We are at Keko Modern Furniture, opposite Omax Bar. Cont
 async function onInteractive(user: string, id: string, lang: Lang) {
   const N = normId(id);
     // --- Agent handover actions (talk to agent / back to bot) ---
-  if (id === "ACTION_BACK") return showMainMenu(user, lang);
+  if (id === 'ACTION_BACK') return showMainMenu(user, lang);
 
-  if (id === "ACTION_TALK_TO_AGENT") {
-    // 1) Flip agent_allowed = true for this conversation
+  if (id === 'ACTION_TALK_TO_AGENT') {
     const customerId = await upsertCustomerByWa(user, undefined, user);
     const conversationId = await getOrCreateConversation(customerId);
 
-    await db("conversations")
+    await db('conversations')
       .where({ id: conversationId })
       .update({ agent_allowed: true });
 
-    // Notify UI so admin can type
-    emit("conversation.updated", { id: conversationId, agent_allowed: true });
+    emit('conversation.updated', { id: conversationId, agent_allowed: true });
 
-    // 2) Tell the customer they are now with an agent
-    await sendText(user, t(lang, "agent.reply"));
+    await sendText(user, t(lang, 'agent.reply'));
 
-    // 3) Offer a button to return to the bot (IMPORTANT: 3 args)
     await sendButtonsMessage(
       user,
-      lang === "sw"
-        ? "Ukimaliza kuongea na mhudumu, unaweza kurudi kwa bot."
-        : "When you are done with the agent, you can go back to the bot.",
+      lang === 'sw'
+        ? 'Ukimaliza kuongea na mhudumu, unaweza kurudi kwa bot.'
+        : 'When you are done with the agent, you can go back to the bot.',
       [
         {
-          id: "ACTION_RETURN_TO_BOT",
-          title: lang === "sw" ? "Rudi kwa bot" : "Return to bot",
+          id: 'ACTION_RETURN_TO_BOT',
+          title: lang === 'sw' ? 'Rudi kwa bot' : 'Return to bot',
         },
       ]
     );
@@ -534,22 +530,18 @@ async function onInteractive(user: string, id: string, lang: Lang) {
     return;
   }
 
-  if (id === "ACTION_RETURN_TO_BOT") {
+  if (id === 'ACTION_RETURN_TO_BOT') {
     const customerId = await upsertCustomerByWa(user, undefined, user);
     const conversationId = await getOrCreateConversation(customerId);
 
-    await db("conversations")
+    await db('conversations')
       .where({ id: conversationId })
       .update({ agent_allowed: false });
 
-    emit("conversation.updated", { id: conversationId, agent_allowed: false });
+    emit('conversation.updated', { id: conversationId, agent_allowed: false });
 
-    // Go back to main menu
     return showMainMenu(user, lang);
   }
-
-
-
 
   /* --------- Location / service selection FIRST (robust to truncation) -------- */
   if (N.startsWith('DAR_INSIDE')) {
