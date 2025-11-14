@@ -64,14 +64,19 @@ inboxRoutes.get("/conversations/:id/messages", async (req, res) => {
 // ==============================
 // GET /api/conversations/:id/summary
 // ==============================
+// backend/src/routes/inbox.ts
+
 inboxRoutes.get("/conversations/:id/summary", async (req, res) => {
-  const id = req.params.id;
+  const conversationId = Number(req.params.id);
+  if (!Number.isFinite(conversationId)) {
+    return res.status(400).json({ error: "Invalid conversation id" });
+  }
 
   try {
     // 1) Conversation + customer
     const conv = await db("conversations as c")
       .leftJoin("customers as u", "u.id", "c.customer_id")
-      .where("c.id", id)
+      .where("c.id", conversationId)
       .select(
         "c.customer_id as c_customer_id",
         "u.name as customer_name",
@@ -81,6 +86,7 @@ inboxRoutes.get("/conversations/:id/summary", async (req, res) => {
       .first();
 
     if (!conv) {
+      // No such conversation – nothing to show
       return res.json({
         customer: null,
         delivery: null,
@@ -88,15 +94,16 @@ inboxRoutes.get("/conversations/:id/summary", async (req, res) => {
       });
     }
 
-    const customer = conv.customer_phone
-      ? {
-          name: conv.customer_name,
-          phone: conv.customer_phone,
-          lang: conv.customer_lang,
-        }
-      : null;
+    const customer =
+      conv.customer_phone || conv.customer_name
+        ? {
+            name: conv.customer_name,
+            phone: conv.customer_phone,
+            lang: conv.customer_lang,
+          }
+        : null;
 
-    // 2) Latest order for this customer
+    // 2) Latest order for that customer (if any)
     const order = await db("orders")
       .where({ customer_id: conv.c_customer_id })
       .orderBy("created_at", "desc")
@@ -107,13 +114,14 @@ inboxRoutes.get("/conversations/:id/summary", async (req, res) => {
 
     if (order) {
       delivery = {
-        mode: order.mode,
-        description: order.delivery_description,
-        km: order.delivery_km,
-        fee_tzs: order.delivery_fee_tzs,
+        // match actual DB columns
+        mode: order.delivery_mode, // e.g. "delivery" | "pickup"
+        description: null, // you can later build a human string if you want
+        km: order.km,
+        fee_tzs: order.fee_tzs,
       };
 
-      // 3) Latest payment for that order
+      // 3) Latest payment for that order (if any)
       const payRow = await db("payments")
         .where({ order_id: order.id })
         .orderBy("created_at", "desc")
@@ -124,18 +132,27 @@ inboxRoutes.get("/conversations/:id/summary", async (req, res) => {
           id: payRow.id,
           method: payRow.method,
           status: payRow.status,
-          recipient: payRow.recipient,
-          amount_tzs: payRow.amount_tzs,
+          // these fields don't exist in your schema yet,
+          // so we just send null so the UI can handle it.
+          recipient: null,
+          amount_tzs: null,
         };
       }
     }
 
-    res.json({ customer, delivery, payment });
-  } catch (err) {
+    res.json({
+      customer,
+      delivery,
+      payment,
+    });
+  } catch (err: any) {
     console.error("summary error:", err);
-    res.status(500).json({ error: String(err) });
+    res
+      .status(500)
+      .json({ error: err?.message || "Failed to load conversation summary" });
   }
 });
+
 
 /**
  * POST /api/payments/:id/status
