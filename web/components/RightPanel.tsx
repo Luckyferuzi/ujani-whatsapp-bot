@@ -1,7 +1,8 @@
+// web/components/RightPanel.tsx
 "use client";
 
 import { useEffect, useState } from "react";
-import { api } from "@/lib/api";
+import { api, API } from "@/lib/api";
 import { socket } from "@/lib/socket";
 
 type Summary = {
@@ -15,6 +16,10 @@ type Summary = {
   } | null;
 };
 
+type Props = {
+  conversationId: string | null;
+};
+
 function formatPhonePretty(raw?: string) {
   if (!raw) return "—";
   const digits = raw.replace(/[^\d+]/g, "");
@@ -22,25 +27,40 @@ function formatPhonePretty(raw?: string) {
     const body = digits.slice(4);
     return `+255 ${body.slice(0, 3)} ${body.slice(3, 6)} ${body.slice(6)}`;
   }
-  return digits;
+  if (digits.startsWith("+") && digits.length > 7) {
+    return digits;
+  }
+  return raw;
 }
 
-export default function RightPanel({
-  conversationId,
-}: {
-  conversationId: string | null;
-}) {
+function formatKm(km?: number | null) {
+  if (km == null) return "—";
+  return `${km.toFixed(1)} km`;
+}
+
+function formatTzs(v?: number | null) {
+  if (v == null) return "—";
+  return `TZS ${v.toLocaleString("en-TZ")}`;
+}
+
+export default function RightPanel({ conversationId }: Props) {
   const [summary, setSummary] = useState<Summary | null>(null);
+  const [loading, setLoading] = useState(false);
 
   async function load() {
     if (!conversationId) {
       setSummary(null);
       return;
     }
-    const data = await api<Summary>(
-      `/api/conversations/${conversationId}/summary`
-    );
-    setSummary(data);
+    setLoading(true);
+    try {
+      const data = await api<Summary>(
+        `/api/conversations/${conversationId}/summary`
+      );
+      setSummary(data);
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -49,20 +69,24 @@ export default function RightPanel({
 
   useEffect(() => {
     const s = socket();
-    const reload = () => load();
-    s.on("order.updated", reload);
-    s.on("payment.updated", reload);
-    s.on("conversation.updated", reload);
+    const handler = (payload: any) => {
+      const cid =
+        payload?.conversation_id ??
+        payload?.conversationId ??
+        payload?.conversation?.id;
+      if (String(cid) === String(conversationId)) {
+        load();
+      }
+    };
+    s.on("payment.updated", handler);
     return () => {
-      s.off("order.updated", reload);
-      s.off("payment.updated", reload);
-      s.off("conversation.updated", reload);
+      s.off("payment.updated", handler);
     };
   }, [conversationId]);
 
   if (!conversationId) {
     return (
-      <div className="w-[22rem] bg-[#f0f2f5] border-l grid place-items-center text-xs text-gray-400">
+      <div className="right-panel right-panel--empty">
         No conversation selected
       </div>
     );
@@ -73,104 +97,167 @@ export default function RightPanel({
   const payment = summary?.payment ?? null;
 
   return (
-    <div className="w-[22rem] bg-[#f0f2f5] border-l p-3 space-y-3 overflow-y-auto">
-      {/* Customer */}
-      <section className="bg-white rounded-xl border border-gray-200 p-3">
-        <div className="text-xs uppercase text-gray-500 mb-1">Customer</div>
-        <div className="text-sm font-medium">
-          {customer?.name || formatPhonePretty(customer?.phone)}
-        </div>
-        <div className="text-xs text-gray-500 mt-1">
-          Phone: {formatPhonePretty(customer?.phone)}
-        </div>
-        <div className="text-xs text-gray-500">
-          Language: {customer?.lang?.toUpperCase() ?? "—"}
-        </div>
-      </section>
+    <div className="right-panel">
+      <div className="panel-header">
+        <span className="panel-header-title">
+          Order • {customer?.name || "Ujani Kiboko"}
+        </span>
+      </div>
 
-      {/* Delivery */}
-      {delivery && (
-        <section className="bg-white rounded-xl border border-gray-200 p-3">
-          <div className="text-xs uppercase text-gray-500 mb-1">
-            Delivery
-          </div>
-          <div className="text-sm text-gray-700">
-            Mode: {delivery.mode === "dar" ? "Ndani ya Dar" : delivery.mode}
-          </div>
-          <div className="text-xs text-gray-500 mt-1">
-            GPS distance: {delivery.km.toFixed(1)} km
-          </div>
-          <div className="text-xs text-gray-500">
-            Fee: TZS {delivery.fee_tzs.toLocaleString("en-US")}
-          </div>
-        </section>
-      )}
-
-      {/* Payment */}
-      <section className="bg-white rounded-xl border border-gray-200 p-3">
-        <div className="text-xs uppercase text-gray-500 mb-1">Payment</div>
-        {payment ? (
-          <>
-            <div className="text-sm text-gray-700">
-              Method: {payment.method ?? "—"}
-            </div>
-            <div className="text-xs text-gray-500">
-              Recipient: {payment.recipient ?? "Ujani"}
-            </div>
-            <div className="text-xs mt-1">
-              Status:{" "}
-              <span
-                className={
-                  payment.status === "paid"
-                    ? "text-green-600"
-                    : payment.status === "failed"
-                    ? "text-red-600"
-                    : "text-orange-600"
-                }
-              >
-                {payment.status}
-              </span>
-            </div>
-
-            {payment.status !== "paid" && payment.id && (
-              <div className="mt-3 flex gap-2">
-                <button
-                  className="flex-1 h-9 rounded-lg text-xs border border-gray-300 hover:bg-gray-50"
-                  onClick={() =>
-                    fetch(`/api/payments/${payment.id}/status`, {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ status: "verifying" }),
-                    })
-                      .then(load)
-                      .catch((e) => alert(e.message))
-                  }
-                >
-                  Mark verifying
-                </button>
-                <button
-                  className="flex-1 h-9 rounded-lg text-xs bg-green-600 text-white hover:bg-green-700"
-                  onClick={() =>
-                    fetch(`/api/payments/${payment.id}/status`, {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ status: "paid" }),
-                    })
-                      .then(load)
-                      .catch((e) => alert(e.message))
-                  }
-                >
-                  Mark paid
-                </button>
+      <div className="panel-section">
+        <div className="panel-card">
+          <div className="panel-card-title">Customer</div>
+          {customer ? (
+            <div className="panel-card-body">
+              <div className="panel-row">
+                <span className="panel-label">Name:</span>
+                <span className="panel-value">{customer.name}</span>
               </div>
-            )}
-          </>
-        ) : (
-          <div className="text-xs text-gray-500">
-            Hakuna taarifa ya malipo bado.
-          </div>
-        )}
-      </section>
+              <div className="panel-row">
+                <span className="panel-label">Phone:</span>
+                <span className="panel-value">
+                  {formatPhonePretty(customer.phone)}
+                </span>
+              </div>
+              <div className="panel-row">
+                <span className="panel-label">Lang:</span>
+                <span className="panel-value">
+                  {(customer.lang || "SW").toUpperCase()}
+                </span>
+              </div>
+            </div>
+          ) : loading ? (
+            <div className="panel-card-body panel-card-body--muted">
+              Loading…
+            </div>
+          ) : (
+            <div className="panel-card-body panel-card-body--muted">
+              Hakuna taarifa ya mteja bado.
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="panel-section">
+        <div className="panel-card">
+          <div className="panel-card-title">Delivery</div>
+          {delivery ? (
+            <div className="panel-card-body">
+              <div className="panel-row">
+                <span className="panel-label">Mode:</span>
+                <span className="panel-value">
+                  {delivery.mode === "delivery"
+                    ? "Ndani ya Dar"
+                    : delivery.mode === "pickup"
+                    ? "Pickup"
+                    : delivery.mode}
+                </span>
+              </div>
+              <div className="panel-row">
+                <span className="panel-label">GPS:</span>
+                <span className="panel-value">
+                  {formatKm(delivery.km)}
+                </span>
+              </div>
+              <div className="panel-row">
+                <span className="panel-label">Fee:</span>
+                <span className="panel-value">
+                  {formatTzs(delivery.fee_tzs)} (680/km, rounded)
+                </span>
+              </div>
+            </div>
+          ) : (
+            <div className="panel-card-body panel-card-body--muted">
+              Hakuna taarifa ya delivery bado.
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="panel-section">
+        <div className="panel-card">
+          <div className="panel-card-title">Payment</div>
+          {payment ? (
+            <>
+              <div className="panel-card-body">
+                {payment.method && (
+                  <div className="panel-row">
+                    <span className="panel-label">Chosen:</span>
+                    <span className="panel-value">
+                      {payment.method}
+                    </span>
+                  </div>
+                )}
+                {payment.recipient && (
+                  <div className="panel-row">
+                    <span className="panel-label">Recipient:</span>
+                    <span className="panel-value">
+                      {payment.recipient}
+                    </span>
+                  </div>
+                )}
+                <div className="panel-row">
+                  <span className="panel-label">Status:</span>
+                  <span
+                    className={
+                      "panel-status panel-status--" + payment.status
+                    }
+                  >
+                    {payment.status === "awaiting"
+                      ? "Awaiting proof"
+                      : payment.status}
+                  </span>
+                </div>
+              </div>
+
+              {payment.status !== "paid" && payment.id && (
+                <div className="panel-actions">
+                  <button
+                    className="btn btn-secondary"
+                    onClick={async () => {
+                      await fetch(
+                        `${API}/api/payments/${payment.id}/status`,
+                        {
+                          method: "POST",
+                          headers: {
+                            "Content-Type": "application/json",
+                          },
+                          body: JSON.stringify({ status: "verifying" }),
+                        }
+                      );
+                      load();
+                    }}
+                  >
+                    Mark verifying
+                  </button>
+                  <button
+                    className="btn btn-success"
+                    onClick={async () => {
+                      await fetch(
+                        `${API}/api/payments/${payment.id}/status`,
+                        {
+                          method: "POST",
+                          headers: {
+                            "Content-Type": "application/json",
+                          },
+                          body: JSON.stringify({ status: "paid" }),
+                        }
+                      );
+                      load();
+                    }}
+                  >
+                    Mark paid
+                  </button>
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="panel-card-body panel-card-body--muted">
+              Hakuna taarifa ya malipo bado.
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

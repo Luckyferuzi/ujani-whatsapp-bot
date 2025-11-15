@@ -1,3 +1,4 @@
+// web/components/ui/index.tsx
 import * as React from "react";
 import { clsx } from "clsx";
 
@@ -6,7 +7,7 @@ export function Card(props: React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div
       className={clsx(
-        "rounded-2xl bg-ui-panel border border-ui-border",
+        "rounded-2xl bg-white border border-gray-200",
         className
       )}
       {...rest}
@@ -16,32 +17,20 @@ export function Card(props: React.HTMLAttributes<HTMLDivElement>) {
 
 export function Button(
   props: React.ButtonHTMLAttributes<HTMLButtonElement> & {
-    variant?: "primary" | "ghost" | "danger";
+    variant?: "primary" | "secondary" | "ghost";
   }
 ) {
   const { className, variant = "primary", ...rest } = props;
   const base =
-    "px-4 h-10 rounded-xl font-medium transition text-sm flex items-center justify-center";
-  const v =
+    "inline-flex items-center justify-center rounded-full text-sm font-medium px-4 py-2 transition disabled:opacity-50 disabled:cursor-not-allowed";
+  const styles =
     variant === "primary"
-      ? "bg-ui-primary/15 border border-ui-primary/40 hover:border-ui-primary/70 text-ui-text"
-      : variant === "danger"
-      ? "bg-ui-danger/15 border border-ui-danger/40 hover:border-ui-danger/70 text-ui-text"
-      : "hover:bg-ui-soft/80 border border-transparent text-ui-text";
-  return <button className={clsx(base, v, className)} {...rest} />;
-}
+      ? "bg-[#128C7E] text-white hover:bg-[#0c6a5d]"
+      : variant === "secondary"
+      ? "bg-blue-600 text-white hover:bg-blue-700"
+      : "bg-transparent text-gray-700 hover:bg-gray-100";
 
-export function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
-  const { className, ...rest } = props;
-  return (
-    <input
-      className={clsx(
-        "h-10 px-3 rounded-xl bg-ui-soft border border-ui-border text-sm text-ui-text placeholder:text-ui-dim outline-none focus:ring-1 focus:ring-ui-primary/60 focus:border-ui-primary/60 w-full",
-        className
-      )}
-      {...rest}
-    />
-  );
+  return <button className={clsx(base, styles, className)} {...rest} />;
 }
 
 export function Textarea(
@@ -51,7 +40,22 @@ export function Textarea(
   return (
     <textarea
       className={clsx(
-        "p-3 rounded-xl bg-ui-soft border border-ui-border text-sm text-ui-text placeholder:text-ui-dim outline-none focus:ring-1 focus:ring-ui-primary/60 focus:border-ui-primary/60 w-full resize-none",
+        "w-full rounded-xl border border-gray-300 px-3 py-2 text-sm resize-none outline-none focus:ring-2 focus:ring-[#128C7E] focus:border-[#128C7E] bg-white disabled:bg-gray-100 disabled:text-gray-400",
+        className
+      )}
+      {...rest}
+    />
+  );
+}
+
+export function TextInput(
+  props: React.InputHTMLAttributes<HTMLInputElement>
+) {
+  const { className, ...rest } = props;
+  return (
+    <input
+      className={clsx(
+        "w-full rounded-full border border-gray-300 px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white",
         className
       )}
       {...rest}
@@ -61,16 +65,8 @@ export function Textarea(
 
 export function Badge({ children }: { children: React.ReactNode }) {
   return (
-    <span className="inline-flex items-center px-2 h-6 rounded-full bg-ui-soft border border-ui-border text-xs text-ui-dim">
+    <span className="inline-flex items-center px-2 h-6 rounded-full bg-gray-100 border border-gray-200 text-xs text-gray-600">
       {children}
     </span>
   );
 }
-
-// handy alias classes for theme colors
-export const ui = {
-  panel: "bg-ui-panel",
-  border: "border-ui-border",
-  text: "text-ui-text",
-  dim: "text-ui-dim",
-};

@@ -1,5 +1,606 @@
-:root { color-scheme: dark; }
-html, body, #__next { height: 100%; }
-body { background: #0B0D10; color: #E6EDF3; }
-.scroll-thin::-webkit-scrollbar { width: 6px; height: 6px; }
-.scroll-thin::-webkit-scrollbar-thumb { background: #2A323C; border-radius: 6px; }
+/* ===== Reset / base ===== */
+
+html,
+body,
+#__next {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  background-color: #f0f2f5;
+  color: #111827;
+}
+
+/* ===== Layout ===== */
+
+.inbox-root {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.inbox-header {
+  height: 48px;
+  border-bottom: 1px solid #e5e7eb;
+  background-color: #ffffff;
+  padding: 0 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.inbox-header-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.inbox-header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.header-button {
+  padding: 4px 8px;
+  font-size: 11px;
+  border-radius: 6px;
+  border: 1px solid #d1d5db;
+  background-color: #ffffff;
+  cursor: pointer;
+}
+
+.header-button:hover {
+  background-color: #f9fafb;
+}
+
+.header-status {
+  font-size: 11px;
+  color: #6b7280;
+}
+
+.header-status-label {
+  font-weight: 600;
+  color: #374151;
+}
+
+.header-status-state {
+  color: #16a34a;
+}
+
+/* Small green dot for online */
+.status-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background-color: #16a34a;
+  margin-right: 4px;
+}
+
+.inbox-main {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+/* Center text when no conversation selected */
+.center-muted {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  color: #9ca3af;
+}
+
+/* ===== Conversation list (left column) ===== */
+
+.conversation-list {
+  width: 280px;
+  border-right: 1px solid #e5e7eb;
+  background-color: #f7f9fb;
+  display: flex;
+  flex-direction: column;
+}
+
+.conversation-search {
+  padding: 12px;
+}
+
+.conversation-search-input {
+  width: 100%;
+  padding: 6px 10px;
+  border-radius: 9999px;
+  border: 1px solid #d1d5db;
+  font-size: 13px;
+  outline: none;
+}
+
+.conversation-search-input:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.3);
+}
+
+.conversation-list-scroll {
+  flex: 1;
+}
+
+/* Generic vertical scroll */
+.scroll-y {
+  overflow-y: auto;
+}
+
+.scroll-y::-webkit-scrollbar {
+  width: 6px;
+}
+
+.scroll-y::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scroll-y::-webkit-scrollbar-thumb {
+  background-color: rgba(0, 0, 0, 0.15);
+  border-radius: 9999px;
+}
+
+.scroll-y {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
+}
+
+.conversation-item {
+  width: 100%;
+  border: none;
+  outline: none;
+  background: transparent;
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.conversation-item:hover {
+  background-color: #ffffff;
+}
+
+.conversation-item--active {
+  background-color: #ffffff;
+}
+
+.conversation-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 9999px;
+  background-color: #9ca3af;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.conversation-avatar-text {
+  font-size: 11px;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.conversation-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.conversation-top-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.conversation-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: #111827;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 150px;
+}
+
+.conversation-time {
+  font-size: 11px;
+  color: #9ca3af;
+}
+
+.conversation-bottom-row {
+  margin-top: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.conversation-subtitle {
+  font-size: 11px;
+  color: #6b7280;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 150px;
+}
+
+.conversation-badges {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 9999px;
+}
+
+.badge--bot {
+  background-color: #fef3c7;
+  color: #92400e;
+}
+
+.badge--unread {
+  min-width: 18px;
+  background-color: #22c55e;
+  color: #ffffff;
+}
+
+/* ===== Thread (middle column) ===== */
+
+.thread {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid #e5e7eb;
+  background-color: #efeae2;
+}
+
+.thread-header {
+  height: 48px;
+  border-bottom: 1px solid #e5e7eb;
+  background-color: #f0f2f5;
+  padding: 0 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.thread-header-title {
+  font-size: 13px;
+  font-weight: 500;
+  max-width: 60%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.thread-header-mode {
+  font-size: 11px;
+  color: #9ca3af;
+}
+
+/* WhatsApp-esque background */
+.chat-bg {
+  background-color: #efeae2;
+  background-image: radial-gradient(
+      rgba(0, 0, 0, 0.03) 1px,
+      transparent 1px
+    ),
+    radial-gradient(rgba(0, 0, 0, 0.03) 1px, transparent 1px);
+  background-size: 16px 16px;
+  background-position: 0 0, 8px 8px;
+}
+
+.thread-messages {
+  flex: 1;
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.thread-message {
+  max-width: 70%;
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.thread-message--incoming {
+  align-self: flex-start;
+  background-color: #ffffff;
+}
+
+.thread-message--outgoing {
+  align-self: flex-end;
+  background-color: #dcf8c6;
+}
+
+.thread-message-body {
+  white-space: pre-wrap;
+}
+
+.thread-message-meta {
+  margin-top: 2px;
+  font-size: 10px;
+  color: #6b7280;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.tick-read {
+  color: #34b7f1;
+}
+
+/* banner when bot in control */
+.thread-lock-banner {
+  background-color: #fffbeb;
+  border-top: 1px solid #facc15;
+  padding: 8px 12px;
+  font-size: 11px;
+  color: #854d0e;
+}
+
+/* Composer */
+.thread-composer {
+  border-top: 1px solid #e5e7eb;
+  background-color: #f0f2f5;
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.thread-composer-input {
+  flex: 1;
+  border-radius: 9999px;
+  border: 1px solid #d1d5db;
+  padding: 6px 12px;
+  font-size: 13px;
+  outline: none;
+}
+
+.thread-composer-input:focus {
+  border-color: #128c7e;
+  box-shadow: 0 0 0 1px rgba(18, 140, 126, 0.3);
+}
+
+.thread-composer-input:disabled {
+  background-color: #f3f4f6;
+  color: #9ca3af;
+}
+
+/* ===== Buttons ===== */
+
+.btn {
+  border: none;
+  border-radius: 9999px;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.btn-primary {
+  background-color: #128c7e;
+  color: #ffffff;
+}
+
+.btn-primary:hover:not(.btn-disabled) {
+  background-color: #0c6a5d;
+}
+
+.btn-secondary {
+  background-color: #2563eb;
+  color: #ffffff;
+}
+
+.btn-secondary:hover:not(.btn-disabled) {
+  background-color: #1d4ed8;
+}
+
+.btn-success {
+  background-color: #16a34a;
+  color: #ffffff;
+}
+
+.btn-success:hover:not(.btn-disabled) {
+  background-color: #15803d;
+}
+
+.btn-disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Toggle switch in thread header */
+
+.thread-header-left {
+  display: flex;
+  flex-direction: column;
+}
+
+.thread-header-sub {
+  font-size: 11px;
+  color: #6b7280;
+  margin-top: 2px;
+}
+
+.thread-header-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.thread-header-mode-label {
+  font-size: 11px;
+  color: #6b7280;
+}
+
+.toggle-switch {
+  width: 34px;
+  height: 18px;
+  border-radius: 9999px;
+  border: 1px solid #d1d5db;
+  background-color: #e5e7eb;
+  padding: 1px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.toggle-switch--on {
+  background-color: #22c55e;
+  border-color: #22c55e;
+  justify-content: flex-end;
+}
+
+.toggle-switch .toggle-knob {
+  width: 14px;
+  height: 14px;
+  border-radius: 9999px;
+  background-color: #ffffff;
+}
+
+.toggle-switch:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ===== Right panel (order / payment) ===== */
+
+.right-panel {
+  width: 320px;
+  background-color: #f7f9fb;
+  border-left: 1px solid #e5e7eb;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.right-panel--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  color: #9ca3af;
+}
+
+.panel-header {
+  margin-bottom: 4px;
+}
+
+.panel-header-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.panel-section {
+  margin-top: 2px;
+}
+
+.panel-card {
+  border-radius: 16px;
+  border: 1px solid #e5e7eb;
+  background-color: #ffffff;
+  padding: 12px;
+}
+
+.panel-card-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.panel-card-body {
+  font-size: 12px;
+  color: #374151;
+}
+
+.panel-card-body--muted {
+  color: #9ca3af;
+}
+
+.panel-row {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.panel-label {
+  color: #6b7280;
+}
+
+.panel-value {
+  font-weight: 500;
+}
+
+/* payment status text */
+.panel-status {
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.panel-status--awaiting {
+  color: #ea580c;
+}
+
+.panel-status--verifying {
+  color: #f97316;
+}
+
+.panel-status--paid {
+  color: #16a34a;
+}
+
+.panel-status--failed {
+  color: #dc2626;
+}
+
+.panel-actions {
+  margin-top: 10px;
+  display: flex;
+  gap: 8px;
+}
+
+/* ===== Responsive layout ===== */
+
+/* Base widths for large screens */
+.conversation-list {
+  flex: 0 0 280px;
+}
+
+.thread {
+  flex: 1 1 auto;
+}
+
+.right-panel {
+  flex: 0 0 320px;
+}
+
+/* Medium screens: hide right panel, shrink list */
+@media (max-width: 1024px) {
+  .conversation-list {
+    flex-basis: 220px;
+  }
+
+  .right-panel {
+    display: none;
+  }
+}
+
+/* Small screens: stack list and thread vertically */

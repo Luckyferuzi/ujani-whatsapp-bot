@@ -1,3 +1,4 @@
+// web/components/ConversationList.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -15,7 +16,7 @@ export type Convo = {
 };
 
 type Props = {
-  activeId?: string | null;
+  activeId: string | null;
   onPick: (c: Convo) => void;
 };
 
@@ -27,126 +28,104 @@ function formatPhonePretty(raw?: string | null) {
     return `+255 ${body.slice(0, 3)} ${body.slice(3, 6)} ${body.slice(6)}`;
   }
   if (digits.startsWith("+") && digits.length > 7) {
-    return digits.replace(/(\+\d{1,3})(\d{3})(\d{3})(\d+)/, "$1 $2 $3 $4");
+    return digits;
   }
-  if (digits.length === 10 && digits.startsWith("0")) {
-    return `${digits.slice(0, 3)} ${digits.slice(3, 6)} ${digits.slice(6)}`;
-  }
-  return digits;
+  return raw;
 }
 
-function formatTime(ts?: string) {
-  if (!ts) return "";
-  const d = new Date(ts);
+function formatTime(iso: string) {
+  const d = new Date(iso);
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
 export default function ConversationList({ activeId, onPick }: Props) {
   const [items, setItems] = useState<Convo[]>([]);
-  const [query, setQuery] = useState("");
+  const [search, setSearch] = useState("");
 
   async function load() {
-    // IMPORTANT: backend returns { items: [...] }
     const { items } = await api<{ items: Convo[] }>("/api/conversations");
-
-    items.sort(
-      (a, b) =>
-        new Date(b.last_user_message_at).getTime() -
-        new Date(a.last_user_message_at).getTime()
-    );
-
-    setItems(items);
+    setItems(items || []);
   }
 
   useEffect(() => {
     load();
     const s = socket();
-
-    const reload = () => load();
-    s.on("message.created", reload);
-    s.on("conversation.updated", reload);
-
+    const handler = () => load();
+    s.on("message.created", handler);
+    s.on("conversation.updated", handler);
     return () => {
-      s.off("message.created", reload);
-      s.off("conversation.updated", reload);
+      s.off("message.created", handler);
+      s.off("conversation.updated", handler);
     };
   }, []);
 
   const filtered = useMemo(() => {
-    const t = query.trim().toLowerCase();
-    if (!t) return items;
-    return items.filter((c) =>
-      [c.name, c.phone]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase()
-        .includes(t)
-    );
-  }, [items, query]);
+    const q = search.trim().toLowerCase();
+    if (!q) return items;
+    return items.filter((c) => {
+      const name = (c.name || "").toLowerCase();
+      const phone = (c.phone || "").toLowerCase();
+      return name.includes(q) || phone.includes(q);
+    });
+  }, [items, search]);
 
   return (
-    <div className="w-[24rem] border-r bg-white flex flex-col">
-      {/* Search bar */}
-      <div className="p-2">
+    <div className="conversation-list">
+      {/* Search */}
+      <div className="conversation-search">
         <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search or start a new chat"
-          className="w-full h-9 px-3 rounded-full bg-[#f0f2f5] text-sm outline-none border border-transparent focus:border-gray-300"
+          className="conversation-search-input"
+          placeholder="Search chats..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
         />
       </div>
 
-      {/* Conversation list */}
-      <div className="flex-1 overflow-y-auto">
+      {/* List */}
+      <div className="conversation-list-scroll scroll-y">
         {filtered.map((c) => {
-          const isActive = c.id === activeId;
-          const displayName = c.name || formatPhonePretty(c.phone);
-
+          const isActive = String(c.id) === String(activeId);
+          const title = c.name || formatPhonePretty(c.phone);
           return (
             <button
               key={c.id}
+              type="button"
               onClick={() => onPick(c)}
-              className={[
-                "w-full px-3 py-2 flex items-center gap-3 hover:bg-[#f5f6f6]",
-                isActive ? "bg-[#e9edef]" : "",
-              ].join(" ")}
+              className={
+                "conversation-item" +
+                (isActive ? " conversation-item--active" : "")
+              }
             >
-              {/* Avatar */}
-              <div className="w-10 h-10 rounded-full bg-gray-300 flex items-center justify-center text-xs font-semibold text-gray-800">
-                {displayName[0]?.toUpperCase() ?? "?"}
+              <div className="conversation-avatar">
+                <span className="conversation-avatar-text">
+                  {title.slice(0, 2).toUpperCase()}
+                </span>
               </div>
 
-              <div className="flex-1 min-w-0">
-                {/* Top row: name + time */}
-                <div className="flex items-center justify-between">
-                  <div className="font-medium text-sm truncate">
-                    {displayName}
-                    {c.lang && (
-                      <span className="ml-1 text-[11px] text-gray-500">
-                        • {c.lang.toUpperCase()}
-                      </span>
-                    )}
+              <div className="conversation-content">
+                {/* Top row */}
+                <div className="conversation-top-row">
+                  <div className="conversation-title" title={title}>
+                    {title}
                   </div>
-                  <div className="text-[11px] text-gray-500 ml-2">
+                  <div className="conversation-time">
                     {formatTime(c.last_user_message_at)}
                   </div>
                 </div>
 
-                {/* Bottom row: preview + badges */}
-                <div className="flex items-center justify-between mt-0.5">
-                  <div className="text-xs text-gray-600 truncate max-w-[11rem]">
+                {/* Bottom row */}
+                <div className="conversation-bottom-row">
+                  <div className="conversation-subtitle">
                     {c.agent_allowed
                       ? "Agent mode kwa mazungumzo"
                       : "Bot anaendeleza mazungumzo"}
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="conversation-badges">
                     {!c.agent_allowed && (
-                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-700">
-                        Bot
-                      </span>
+                      <span className="badge badge--bot">Bot</span>
                     )}
                     {!!c.unread_count && (
-                      <span className="min-w-[1.4rem] text-center text-[11px] px-1.5 py-0.5 rounded-full bg-green-500 text-white">
+                      <span className="badge badge--unread">
                         {c.unread_count}
                       </span>
                     )}
