@@ -153,6 +153,35 @@ inboxRoutes.get("/conversations/:id/summary", async (req, res) => {
   }
 });
 
+// Allow or disallow agent replies for a conversation
+// POST /api/conversations/:id/agent-allow
+inboxRoutes.post("/conversations/:id/agent-allow", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) {
+      return res.status(400).json({ error: "Invalid conversation id" });
+    }
+
+    const raw = req.body?.agent_allowed ?? req.body?.allowed;
+    const agentAllowed = !!raw;
+
+    // Update DB
+    await db("conversations")
+      .where({ id })
+      .update({ agent_allowed: agentAllowed });
+
+    // Notify sockets so UI updates in real-time
+    emit("conversation.updated", { id, agent_allowed: agentAllowed });
+
+    res.json({ ok: true, agent_allowed: agentAllowed });
+  } catch (err: any) {
+    console.error("agent-allow error:", err);
+    res
+      .status(500)
+      .json({ error: err?.message || "Failed to update agent mode" });
+  }
+});
+
 
 /**
  * POST /api/payments/:id/status
@@ -229,3 +258,7 @@ inboxRoutes.post("/payments/:id/status", async (req, res) => {
     res.status(500).json({ error: e?.message ?? "failed" });
   }
 });
+function emit(arg0: string, arg1: { id: number; agent_allowed: boolean; }) {
+  throw new Error("Function not implemented.");
+}
+
