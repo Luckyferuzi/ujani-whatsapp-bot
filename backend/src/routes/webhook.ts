@@ -612,29 +612,18 @@ async function onInteractive(user: string, id: string, lang: Lang) {
   if (id === 'ACTION_BACK') return showMainMenu(user, lang);
 
   // --- NEW: customer asks to talk to an agent ---
-  if (id === 'ACTION_TALK_TO_AGENT') {
-    // Make sure we have a conversation row
-    const customerId = await upsertCustomerByWa(user, undefined, user);
-    const conversationId = await getOrCreateConversation(customerId);
+if (id === 'ACTION_TALK_TO_AGENT') {
+  const customerId = await upsertCustomerByWa(user, undefined, user);
+  const conversationId = await getOrCreateConversation(customerId);
 
-    // Enable agent for this conversation
-    await db('conversations')
-      .where({ id: conversationId })
-      .update({ agent_allowed: true });
+  await db('conversations')
+    .where({ id: conversationId })
+    .update({ agent_allowed: true });
 
-    // Tell the inbox UI to refresh & unlock the composer
-    emit('conversation.updated', { id: conversationId, agent_allowed: true });
+  emit('conversation.updated', { id: conversationId, agent_allowed: true });
 
-    // Send the usual agent message (existing translation)
-    await sendText(user, t(lang, 'agent.reply'));
-
-    // Also send a small button so customer can go back to the bot later
-    await sendButtonsMessageSafe(user, 'Ukitaka kurudi kwa bot:', [
-      { id: 'ACTION_RETURN_TO_BOT', title: 'Rudi kwa bot' },
-    ]);
-
-    return;
-  }
+  await sendText(user, t(lang, 'agent.reply'));
+}
 
   // --- NEW: customer goes back from agent to bot ---
   if (id === 'ACTION_RETURN_TO_BOT') {
