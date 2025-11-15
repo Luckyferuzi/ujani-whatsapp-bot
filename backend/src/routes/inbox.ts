@@ -2,6 +2,7 @@
 import { Router } from "express";
 import db from "../db/knex.js";
 import { sendText } from "../whatsapp.js";
+import { emit } from "../sockets.js";
 
 export const inboxRoutes = Router();
 
@@ -258,7 +259,4 @@ inboxRoutes.post("/payments/:id/status", async (req, res) => {
     res.status(500).json({ error: e?.message ?? "failed" });
   }
 });
-function emit(arg0: string, arg1: { id: number; agent_allowed: boolean; }) {
-  throw new Error("Function not implemented.");
-}
 
