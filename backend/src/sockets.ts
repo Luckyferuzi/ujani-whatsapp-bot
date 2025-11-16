@@ -1,3 +1,4 @@
+// backend/src/sockets.ts
 import type { Server as HttpServer } from 'http';
 import { Server } from 'socket.io';
 
