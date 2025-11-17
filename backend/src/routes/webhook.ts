@@ -795,7 +795,7 @@ async function onFlow(user: string, step: FlowStep, m: Incoming, lang: Lang) {
         const sub = items.reduce((a, it) => a + it.unitPrice * it.qty, 0);
         const total = sub + fee;
 
-        await sendText(
+        await sendBotMessage(
           user,
           t(lang, "flow.distance_quote", {
             place: "GPS Pin",
@@ -805,7 +805,7 @@ async function onFlow(user: string, step: FlowStep, m: Incoming, lang: Lang) {
           })
         );
 
-        await sendText(
+        await sendBotMessage(
           user,
           [
             t(lang, "checkout.summary_header"),
