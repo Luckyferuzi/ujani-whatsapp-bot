@@ -12,10 +12,12 @@ import {
 import { feeForDarDistance } from '../delivery.js';
 import { buildMainMenu, getProductBySku, resolveProductForSku } from '../menu.js';
 import { getSession, saveSession, resetSession } from '../session.js';
+// backend/src/routes/webhook.ts
 import {
   upsertCustomerByWa,
   getOrCreateConversation,
   insertInboundMessage,
+  insertOutboundMessage,          // 👈 add this
   updateConversationLastUserMessageAt,
   createOrderWithPayment,
 } from "../db/queries.js";
@@ -24,6 +26,27 @@ import { emit } from '../sockets.js';
 import db from '../db/knex.js';
 
 export const webhook = Router();
+
+async function sendBotMessage(user: string, body: string) {
+  // 1) Send the message to WhatsApp as usual
+  await sendText(user, body);
+
+  try {
+    // 2) Make sure we have a customer + conversation
+    const customerId = await upsertCustomerByWa(user, undefined, user);
+    const conversationId = await getOrCreateConversation(customerId);
+
+    // 3) Insert outbound message so it appears in the inbox
+    const inserted = await insertOutboundMessage(conversationId, 'text', body);
+
+    // 4) Notify the frontend via sockets
+    emit('message.created', { conversation_id: conversationId, message: inserted });
+    emit('conversation.updated', {});
+  } catch (err) {
+    console.error('[webhook] failed to log bot message', err);
+  }
+}
+
 
 /* -------------------------------------------------------------------------- */
 /*                    WhatsApp list/button safety wrappers                    */
@@ -753,16 +776,16 @@ async function onFlow(user: string, step: FlowStep, m: Incoming, lang: Lang) {
 
     /* ----------------------- INSIDE Dar — DELIVERY path ------------------------- */
     case 'ASK_NAME_IN': {
-      if (!txt) return sendText(user, t(lang, 'flow.ask_name'));
+      if (!txt) return sendBotMessage(user, t(lang, 'flow.ask_name'));
       contact.name = txt; CONTACT.set(user, contact);
       setFlow(user, 'ASK_PHONE_IN');
-      return sendText(user, t(lang, 'flow.ask_phone'));
+      return sendBotMessage(user, t(lang, 'flow.ask_phone'));
     }
     case 'ASK_PHONE_IN': {
-      if (!txt) return sendText(user, t(lang, 'flow.ask_phone'));
+      if (!txt) return sendBotMessage(user, t(lang, 'flow.ask_phone'));
       contact.phone = txt; CONTACT.set(user, contact);
       setFlow(user, 'ASK_GPS');
-      return sendText(user, t(lang, 'flow.ask_gps'));
+      return sendBotMessage(user, t(lang, 'flow.ask_gps'));
     }
         case "ASK_GPS": {
       if (m.hasLocation && typeof m.lat === "number" && typeof m.lon === "number") {
@@ -833,19 +856,19 @@ async function onFlow(user: string, step: FlowStep, m: Incoming, lang: Lang) {
         return;
       }
 
-      return sendText(user, t(lang, "flow.ask_gps"));
+      return sendBotMessage(user, t(lang, "flow.ask_gps"));
     }
 
 
     /* ------------------------ INSIDE Dar — PICKUP path -------------------------- */
     case 'ASK_NAME_PICK': {
-      if (!txt) return sendText(user, t(lang, 'flow.ask_name'));
+      if (!txt) return sendBotMessage(user, t(lang, 'flow.ask_name'));
       contact.name = txt; CONTACT.set(user, contact);
       setFlow(user, 'ASK_PHONE_PICK');
-      return sendText(user, t(lang, 'flow.ask_phone'));
+      return sendBotMessage(user, t(lang, 'flow.ask_phone'));
     }
     case 'ASK_PHONE_PICK': {
-      if (!txt) return sendText(user, t(lang, 'flow.ask_phone'));
+      if (!txt) return sendBotMessage(user, t(lang, 'flow.ask_phone'));
       contact.phone = txt; CONTACT.set(user, contact);
 
       const items = pendingOrCart(user);
@@ -867,19 +890,19 @@ async function onFlow(user: string, step: FlowStep, m: Incoming, lang: Lang) {
 
     /* ----------------------------- OUTSIDE Dar path ----------------------------- */
     case 'ASK_NAME_OUT': {
-      if (!txt) return sendText(user, t(lang, 'flow.ask_name'));
+      if (!txt) return sendBotMessage(user, t(lang, 'flow.ask_name'));
       contact.name = txt; CONTACT.set(user, contact);
       setFlow(user, 'ASK_PHONE_OUT');
-      return sendText(user, t(lang, 'flow.ask_phone'));
+      return sendBotMessage(user, t(lang, 'flow.ask_phone'));
     }
     case 'ASK_PHONE_OUT': {
-      if (!txt) return sendText(user, t(lang, 'flow.ask_phone'));
+      if (!txt) return sendBotMessage(user, t(lang, 'flow.ask_phone'));
       contact.phone = txt; CONTACT.set(user, contact);
       setFlow(user, 'ASK_REGION_OUT');
-      return sendText(user, t(lang, 'flow.ask_region'));
+      return sendBotMessage(user, t(lang, 'flow.ask_region'));
     }
         case "ASK_REGION_OUT": {
-      if (!txt) return sendText(user, t(lang, "flow.ask_region"));
+      if (!txt) return sendBotMessage(user, t(lang, "flow.ask_region"));
       contact.region = txt;
       CONTACT.set(user, contact);
 
@@ -940,8 +963,8 @@ async function onFlow(user: string, step: FlowStep, m: Incoming, lang: Lang) {
 
     /* ------------------------------- Tracking stub ------------------------------ */
     case 'TRACK_ASK_NAME': {
-      if (!txt) return sendText(user, t(lang, 'track.ask_name'));
-      await sendText(user, t(lang, 'track.none_found', { name: txt }));
+      if (!txt) return sendBotMessage(user, t(lang, 'track.ask_name'));
+      await sendBotMessage(user, t(lang, 'track.none_found', { name: txt }));
       setFlow(user, null);
       return;
     }
@@ -958,16 +981,16 @@ async function onSessionMessage(user: string, m: Incoming, lang: Lang) {
     }
     case 'SHOW_PRICE': {
       s.state = 'WAIT_PROOF'; saveSession(user, s);
-      return sendText(user, t(lang, 'proof.ask'));
+      return sendBotMessage(user, t(lang, 'proof.ask'));
     }
     case 'WAIT_PROOF': {
       // Accept proof as 2+ names OR (media handled by infra)
       const words = txt.split(/\s+/).filter(Boolean);
       if (words.length >= 2) {
         clearCart(user); setPending(user, null); resetSession(user);
-        return sendText(user, t(lang, 'proof.ok_names', { names: txt }));
+        return sendBotMessage(user, t(lang, 'proof.ok_names', { names: txt }));
       }
-      return sendText(user, t(lang, 'proof.invalid'));
+      return sendBotMessage(user, t(lang, 'proof.invalid'));
     }
   }
 
