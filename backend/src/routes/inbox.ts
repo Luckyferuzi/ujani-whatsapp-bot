@@ -183,7 +183,6 @@ inboxRoutes.post("/conversations/:id/agent-allow", async (req, res) => {
   }
 });
 
-
 /**
  * POST /api/payments/:id/status
  * { status: "verifying" | "paid" | "failed" }
@@ -204,17 +203,16 @@ inboxRoutes.post("/payments/:id/status", async (req, res) => {
   }
 
   try {
+    // Get payment + order + customer (no conversation_id / amount_tzs here)
     const payment = await db("payments as p")
       .leftJoin("orders as o", "o.id", "p.order_id")
-      .leftJoin("conversations as c", "c.id", "o.conversation_id")
-      .leftJoin("customers as u", "u.id", "c.customer_id")
+      .leftJoin("customers as u", "u.id", "o.customer_id")
       .where("p.id", id)
       .select(
         "p.id",
         "p.status",
-        "p.amount_tzs",
         "p.order_id",
-        "c.id as conversation_id",
+        "o.customer_id",
         "u.wa_id",
         "u.lang"
       )
@@ -230,7 +228,15 @@ inboxRoutes.post("/payments/:id/status", async (req, res) => {
     req.app.get("io")?.emit("payment.updated", { id, status });
 
     // If paid: send confirmation message to customer + store outbound message
-    if (status === "paid" && payment.wa_id && payment.conversation_id) {
+    if (status === "paid" && payment.wa_id && payment.customer_id) {
+      // Find the most recent conversation for this customer
+      const convo = await db("conversations")
+        .where({ customer_id: payment.customer_id })
+        .orderBy("created_at", "desc")
+        .first();
+
+      const conversationId = convo?.id as number | undefined;
+
       const msg =
         "Tumepokea malipo. Order yako inaandaliwa. Asante kwa kununua bidhaa zetu 🌿";
 
@@ -240,17 +246,19 @@ inboxRoutes.post("/payments/:id/status", async (req, res) => {
         console.warn("Failed to send payment confirmation:", e);
       }
 
-      await db("messages").insert({
-        conversation_id: payment.conversation_id,
-        direction: "out",
-        type: "text",
-        body: msg,
-        status: "sent",
-      });
+      if (conversationId) {
+        await db("messages").insert({
+          conversation_id: conversationId,
+          direction: "out",
+          type: "text",
+          body: msg,
+          status: "sent",
+        });
 
-      req.app.get("io")?.emit("message.created", {
-        conversation_id: payment.conversation_id,
-      });
+        req.app.get("io")?.emit("message.created", {
+          conversation_id: conversationId,
+        });
+      }
     }
 
     res.json({ ok: true });
@@ -259,4 +267,5 @@ inboxRoutes.post("/payments/:id/status", async (req, res) => {
     res.status(500).json({ error: e?.message ?? "failed" });
   }
 });
+
 

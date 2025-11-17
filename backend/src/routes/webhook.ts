@@ -12,7 +12,14 @@ import {
 import { feeForDarDistance } from '../delivery.js';
 import { buildMainMenu, getProductBySku, resolveProductForSku } from '../menu.js';
 import { getSession, saveSession, resetSession } from '../session.js';
-import { upsertCustomerByWa, getOrCreateConversation, insertInboundMessage, updateConversationLastUserAt } from '../db/queries.js';
+import {
+  upsertCustomerByWa,
+  getOrCreateConversation,
+  insertInboundMessage,
+  updateConversationLastUserMessageAt,
+  createOrderWithPayment,
+} from "../db/queries.js";
+
 import { emit } from '../sockets.js';
 import db from '../db/knex.js';
 
@@ -339,7 +346,8 @@ try {
   );
 
   // 4) Update conversation activity + emit realtime
-  await updateConversationLastUserAt(conversationId);
+  await updateConversationLastUserMessageAt(conversationId);
+
 
   emit("message.created", { conversation_id: conversationId, message: inserted });
   emit("conversation.updated", {});
@@ -756,40 +764,78 @@ async function onFlow(user: string, step: FlowStep, m: Incoming, lang: Lang) {
       setFlow(user, 'ASK_GPS');
       return sendText(user, t(lang, 'flow.ask_gps'));
     }
-    case 'ASK_GPS': {
-      if (m.hasLocation && typeof m.lat === 'number' && typeof m.lon === 'number') {
+        case "ASK_GPS": {
+      if (m.hasLocation && typeof m.lat === "number" && typeof m.lon === "number") {
         const km = haversineKm(KEKO.lat, KEKO.lon, m.lat, m.lon);
         const fee = feeForDarDistance(km);
         const items = pendingOrCart(user);
         const sub = items.reduce((a, it) => a + it.unitPrice * it.qty, 0);
         const total = sub + fee;
 
-        await sendText(user, t(lang, 'flow.distance_quote', {
-          place: 'GPS Pin',
-          district: '',
-          km: km.toFixed(1),
-          fee: fmtTZS(fee),
-        }));
+        await sendText(
+          user,
+          t(lang, "flow.distance_quote", {
+            place: "GPS Pin",
+            district: "",
+            km: km.toFixed(1),
+            fee: fmtTZS(fee),
+          })
+        );
 
-        await sendText(user, [
-          t(lang, 'checkout.summary_header'),
-          t(lang, 'checkout.summary_name', { name: contact.name || '' }),
-          t(lang, 'checkout.summary_phone', { phone: contact.phone || '' }),
-          t(lang, 'checkout.summary_total', { total: fmtTZS(total) }),
-        ].join('\n'));
+        await sendText(
+          user,
+          [
+            t(lang, "checkout.summary_header"),
+            t(lang, "checkout.summary_name", { name: contact.name || "" }),
+            t(lang, "checkout.summary_phone", { phone: contact.phone || "" }),
+            t(lang, "checkout.summary_total", { total: fmtTZS(total) }),
+          ].join("\n")
+        );
+
+        // NEW: persist order + initial payment in Neon
+        try {
+          const customerId = await upsertCustomerByWa(
+            user,
+            contact.name,
+            contact.phone ?? user
+          );
+
+          await createOrderWithPayment({
+            customerId,
+            deliveryMode: "delivery",
+            status: "pending",
+            km,
+            feeTzs: fee,
+            totalTzs: total,
+            phone: contact.phone ?? null,
+            region: contact.region ?? null,
+            lat: m.lat,
+            lon: m.lon,
+            items: items.map((it) => ({
+              sku: it.sku,
+              name: it.name,
+              qty: it.qty,
+              unitPrice: it.unitPrice,
+            })),
+          });
+        } catch (err) {
+          console.error("[checkout] failed to persist ASK_GPS order:", err);
+          // We still continue with payment instructions so the customer is not blocked.
+        }
 
         // ➕ Add the "I've paid" button right after the muhtasari
-        await sendButtonsMessageSafe(user, t(lang, 'payment.done_cta'), [
-          { id: 'ACTION_PAYMENT_DONE', title: t(lang, 'payment.done_button') },
+        await sendButtonsMessageSafe(user, t(lang, "payment.done_cta"), [
+          { id: "ACTION_PAYMENT_DONE", title: t(lang, "payment.done_button") },
         ]);
-
 
         await showPaymentOptions(user, lang, total);
         setFlow(user, null);
         return;
       }
-      return sendText(user, t(lang, 'flow.ask_gps'));
+
+      return sendText(user, t(lang, "flow.ask_gps"));
     }
+
 
     /* ------------------------ INSIDE Dar — PICKUP path -------------------------- */
     case 'ASK_NAME_PICK': {
@@ -832,31 +878,65 @@ async function onFlow(user: string, step: FlowStep, m: Incoming, lang: Lang) {
       setFlow(user, 'ASK_REGION_OUT');
       return sendText(user, t(lang, 'flow.ask_region'));
     }
-    case 'ASK_REGION_OUT': {
-      if (!txt) return sendText(user, t(lang, 'flow.ask_region'));
-      contact.region = txt; CONTACT.set(user, contact);
+        case "ASK_REGION_OUT": {
+      if (!txt) return sendText(user, t(lang, "flow.ask_region"));
+      contact.region = txt;
+      CONTACT.set(user, contact);
 
       const items = pendingOrCart(user);
       const sub = items.reduce((a, it) => a + it.unitPrice * it.qty, 0);
       const total = sub + OUTSIDE_DAR_FEE;
 
-      await sendText(user, [
-        t(lang, 'checkout.summary_header'),
-        t(lang, 'checkout.summary_name', { name: contact.name || '' }),
-        t(lang, 'checkout.summary_phone', { phone: contact.phone || '' }),
-        t(lang, 'checkout.summary_region', { region: contact.region || '' }),
-        t(lang, 'checkout.summary_total', { total: fmtTZS(total) }),
-      ].join('\n'));
+      await sendText(
+        user,
+        [
+          t(lang, "checkout.summary_header"),
+          t(lang, "checkout.summary_name", { name: contact.name || "" }),
+          t(lang, "checkout.summary_phone", { phone: contact.phone || "" }),
+          t(lang, "checkout.summary_region", { region: contact.region || "" }),
+          t(lang, "checkout.summary_total", { total: fmtTZS(total) }),
+        ].join("\n")
+      );
 
-      await sendButtonsMessageSafe(user, t(lang, 'payment.done_cta'), [
-        { id: 'ACTION_PAYMENT_DONE', title: t(lang, 'payment.done_button') },
+      // NEW: persist order + initial payment in Neon
+      try {
+        const customerId = await upsertCustomerByWa(
+          user,
+          contact.name,
+          contact.phone ?? user
+        );
+
+        await createOrderWithPayment({
+          customerId,
+          deliveryMode: "delivery", // still treated as a delivery
+          status: "pending",
+          km: null,
+          feeTzs: OUTSIDE_DAR_FEE,
+          totalTzs: total,
+          phone: contact.phone ?? null,
+          region: contact.region ?? null,
+          lat: null,
+          lon: null,
+          items: items.map((it) => ({
+            sku: it.sku,
+            name: it.name,
+            qty: it.qty,
+            unitPrice: it.unitPrice,
+          })),
+        });
+      } catch (err) {
+        console.error("[checkout] failed to persist ASK_REGION_OUT order:", err);
+      }
+
+      await sendButtonsMessageSafe(user, t(lang, "payment.done_cta"), [
+        { id: "ACTION_PAYMENT_DONE", title: t(lang, "payment.done_button") },
       ]);
-
 
       await showPaymentOptions(user, lang, total);
       setFlow(user, null);
       return;
     }
+
 
     /* ------------------------------- Tracking stub ------------------------------ */
     case 'TRACK_ASK_NAME': {
