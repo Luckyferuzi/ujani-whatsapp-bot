@@ -27,23 +27,28 @@ import db from '../db/knex.js';
 
 export const webhook = Router();
 
-async function sendBotMessage(user: string, body: string) {
-  // 1) Send the message to WhatsApp as usual
+/**
+ * Send a text message from the bot and ALSO log it as an outbound message
+ * so that it appears in the Inbox thread.
+ */
+async function sendBotText(user: string, body: string) {
+  // 1) Send to WhatsApp
   await sendText(user, body);
 
+  // 2) Persist and emit for the inbox
   try {
-    // 2) Make sure we have a customer + conversation
     const customerId = await upsertCustomerByWa(user, undefined, user);
     const conversationId = await getOrCreateConversation(customerId);
 
-    // 3) Insert outbound message so it appears in the inbox
-    const inserted = await insertOutboundMessage(conversationId, 'text', body);
+    const inserted = await insertOutboundMessage(conversationId, "text", body);
 
-    // 4) Notify the frontend via sockets
-    emit('message.created', { conversation_id: conversationId, message: inserted });
-    emit('conversation.updated', {});
+    emit("message.created", {
+      conversation_id: conversationId,
+      message: inserted,
+    });
+    emit("conversation.updated", {});
   } catch (err) {
-    console.error('[webhook] failed to log bot message', err);
+    console.error("[webhook] failed to log bot message:", err);
   }
 }
 
@@ -457,27 +462,27 @@ async function showMainMenu(user: string, lang: Lang) {
 
 async function showCart(user: string, lang: Lang) {
   const items = getCart(user);
-  if (!items.length) return sendText(user, t(lang, 'cart.empty'));
+  if (!items.length) return sendBotText(user, t(lang, "cart.empty"));
 
-  const lines = [t(lang, 'cart.summary_header')];
+  const lines = [t(lang, "cart.summary_header")];
   let total = 0;
   for (const it of items) {
     total += it.unitPrice * it.qty;
     lines.push(
-      t(lang, 'cart.summary_line', {
+      t(lang, "cart.summary_line", {
         title: it.name,
         qty: it.qty,
         price: fmtTZS(it.unitPrice * it.qty),
       })
     );
   }
-  lines.push('');
-  lines.push(t(lang, 'cart.summary_total', { total: fmtTZS(total) }));
-  await sendText(user, lines.join('\n'));
+  lines.push("");
+  lines.push(t(lang, "cart.summary_total", { total: fmtTZS(total) }));
+  await sendBotText(user, lines.join("\n"));
 
-  await sendButtonsMessageSafe(user, t(lang, 'cart.choose_action'), [
-    { id: 'ACTION_CHECKOUT', title: t(lang, 'menu.checkout') },
-    { id: 'ACTION_BACK', title: t(lang, 'menu.back_to_menu') },
+  await sendButtonsMessageSafe(user, t(lang, "cart.choose_action"), [
+    { id: "ACTION_CHECKOUT", title: t(lang, "menu.checkout") },
+    { id: "ACTION_BACK", title: t(lang, "menu.back_to_menu") },
   ]);
 }
 
@@ -776,16 +781,16 @@ async function onFlow(user: string, step: FlowStep, m: Incoming, lang: Lang) {
 
     /* ----------------------- INSIDE Dar — DELIVERY path ------------------------- */
     case 'ASK_NAME_IN': {
-      if (!txt) return sendBotMessage(user, t(lang, 'flow.ask_name'));
+      if (!txt) return sendBotText(user, t(lang, 'flow.ask_name'));
       contact.name = txt; CONTACT.set(user, contact);
       setFlow(user, 'ASK_PHONE_IN');
-      return sendBotMessage(user, t(lang, 'flow.ask_phone'));
+      return sendBotText(user, t(lang, 'flow.ask_phone'));
     }
     case 'ASK_PHONE_IN': {
-      if (!txt) return sendBotMessage(user, t(lang, 'flow.ask_phone'));
+      if (!txt) return sendBotText(user, t(lang, 'flow.ask_phone'));
       contact.phone = txt; CONTACT.set(user, contact);
       setFlow(user, 'ASK_GPS');
-      return sendBotMessage(user, t(lang, 'flow.ask_gps'));
+      return sendBotText(user, t(lang, 'flow.ask_gps'));
     }
         case "ASK_GPS": {
       if (m.hasLocation && typeof m.lat === "number" && typeof m.lon === "number") {
@@ -795,7 +800,7 @@ async function onFlow(user: string, step: FlowStep, m: Incoming, lang: Lang) {
         const sub = items.reduce((a, it) => a + it.unitPrice * it.qty, 0);
         const total = sub + fee;
 
-        await sendBotMessage(
+        await sendBotText(
           user,
           t(lang, "flow.distance_quote", {
             place: "GPS Pin",
@@ -805,7 +810,7 @@ async function onFlow(user: string, step: FlowStep, m: Incoming, lang: Lang) {
           })
         );
 
-        await sendBotMessage(
+        await sendBotText(
           user,
           [
             t(lang, "checkout.summary_header"),
@@ -856,19 +861,19 @@ async function onFlow(user: string, step: FlowStep, m: Incoming, lang: Lang) {
         return;
       }
 
-      return sendBotMessage(user, t(lang, "flow.ask_gps"));
+      return sendBotText(user, t(lang, "flow.ask_gps"));
     }
 
 
     /* ------------------------ INSIDE Dar — PICKUP path -------------------------- */
     case 'ASK_NAME_PICK': {
-      if (!txt) return sendBotMessage(user, t(lang, 'flow.ask_name'));
+      if (!txt) return sendBotText(user, t(lang, 'flow.ask_name'));
       contact.name = txt; CONTACT.set(user, contact);
       setFlow(user, 'ASK_PHONE_PICK');
-      return sendBotMessage(user, t(lang, 'flow.ask_phone'));
+      return sendBotText(user, t(lang, 'flow.ask_phone'));
     }
     case 'ASK_PHONE_PICK': {
-      if (!txt) return sendBotMessage(user, t(lang, 'flow.ask_phone'));
+      if (!txt) return sendBotText(user, t(lang, 'flow.ask_phone'));
       contact.phone = txt; CONTACT.set(user, contact);
 
       const items = pendingOrCart(user);
@@ -890,19 +895,19 @@ async function onFlow(user: string, step: FlowStep, m: Incoming, lang: Lang) {
 
     /* ----------------------------- OUTSIDE Dar path ----------------------------- */
     case 'ASK_NAME_OUT': {
-      if (!txt) return sendBotMessage(user, t(lang, 'flow.ask_name'));
+      if (!txt) return sendBotText(user, t(lang, 'flow.ask_name'));
       contact.name = txt; CONTACT.set(user, contact);
       setFlow(user, 'ASK_PHONE_OUT');
-      return sendBotMessage(user, t(lang, 'flow.ask_phone'));
+      return sendBotText(user, t(lang, 'flow.ask_phone'));
     }
     case 'ASK_PHONE_OUT': {
-      if (!txt) return sendBotMessage(user, t(lang, 'flow.ask_phone'));
+      if (!txt) return sendBotText(user, t(lang, 'flow.ask_phone'));
       contact.phone = txt; CONTACT.set(user, contact);
       setFlow(user, 'ASK_REGION_OUT');
-      return sendBotMessage(user, t(lang, 'flow.ask_region'));
+      return sendBotText(user, t(lang, 'flow.ask_region'));
     }
         case "ASK_REGION_OUT": {
-      if (!txt) return sendBotMessage(user, t(lang, "flow.ask_region"));
+      if (!txt) return sendBotText(user, t(lang, "flow.ask_region"));
       contact.region = txt;
       CONTACT.set(user, contact);
 
@@ -963,8 +968,8 @@ async function onFlow(user: string, step: FlowStep, m: Incoming, lang: Lang) {
 
     /* ------------------------------- Tracking stub ------------------------------ */
     case 'TRACK_ASK_NAME': {
-      if (!txt) return sendBotMessage(user, t(lang, 'track.ask_name'));
-      await sendBotMessage(user, t(lang, 'track.none_found', { name: txt }));
+      if (!txt) return sendBotText(user, t(lang, 'track.ask_name'));
+      await sendBotText(user, t(lang, 'track.none_found', { name: txt }));
       setFlow(user, null);
       return;
     }
@@ -973,24 +978,27 @@ async function onFlow(user: string, step: FlowStep, m: Incoming, lang: Lang) {
 
 async function onSessionMessage(user: string, m: Incoming, lang: Lang) {
   const s = getSession(user);
-  const txt = (m.text || '').trim();
+  const txt = (m.text || "").trim();
 
   switch (s.state) {
-    case 'IDLE': {
+    case "IDLE": {
       return showMainMenu(user, lang);
     }
-    case 'SHOW_PRICE': {
-      s.state = 'WAIT_PROOF'; saveSession(user, s);
-      return sendBotMessage(user, t(lang, 'proof.ask'));
+    case "SHOW_PRICE": {
+      s.state = "WAIT_PROOF";
+      saveSession(user, s);
+      return sendBotText(user, t(lang, "proof.ask"));
     }
-    case 'WAIT_PROOF': {
+    case "WAIT_PROOF": {
       // Accept proof as 2+ names OR (media handled by infra)
       const words = txt.split(/\s+/).filter(Boolean);
       if (words.length >= 2) {
-        clearCart(user); setPending(user, null); resetSession(user);
-        return sendBotMessage(user, t(lang, 'proof.ok_names', { names: txt }));
+        clearCart(user);
+        setPending(user, null);
+        resetSession(user);
+        return sendBotText(user, t(lang, "proof.ok_names", { names: txt }));
       }
-      return sendBotMessage(user, t(lang, 'proof.invalid'));
+      return sendBotText(user, t(lang, "proof.invalid"));
     }
   }
 
