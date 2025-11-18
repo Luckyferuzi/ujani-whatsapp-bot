@@ -1004,12 +1004,14 @@ async function onFlow(user: string, step: FlowStep, m: Incoming, lang: Lang) {
 
 
     /* ------------------------------- Tracking stub ------------------------------ */
-    case 'TRACK_ASK_NAME': {
-      if (!txt) return sendBotText(user, t(lang, 'track.ask_name'));
-      await sendBotText(user, t(lang, 'track.none_found', { name: txt }));
-      setFlow(user, null);
-      return;
-    }
+    /* ------------------------------- Tracking stub ------------------------------ */
+case 'TRACK_ASK_NAME': {
+  if (!txt) return sendBotText(user, t(lang, 'track.ask_name'));
+  await sendBotText(user, t(lang, 'track.none_found', { name: txt }));
+  setFlow(user, null);
+  return;
+}
+
   }
 }
 

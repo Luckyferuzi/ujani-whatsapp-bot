@@ -157,6 +157,40 @@ inboxRoutes.get("/conversations/:id/summary", async (req, res) => {
   }
 });
 
+// DELETE /api/conversations/:id/messages
+// ?mediaOnly=1 → only delete media (image/document/audio/video)
+inboxRoutes.delete("/conversations/:id/messages", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) {
+      return res.status(400).json({ error: "Invalid conversation id" });
+    }
+
+    const mediaOnly =
+      req.query.mediaOnly === "1" || req.query.mediaOnly === "true";
+
+    if (mediaOnly) {
+      await db("messages")
+        .where({ conversation_id: id })
+        .whereIn("type", ["image", "document", "audio", "video"])
+        .del();
+    } else {
+      await db("messages").where({ conversation_id: id }).del();
+    }
+
+    // Optionally notify frontend via sockets
+    req.app.get("io")?.emit("conversation.cleared", {
+      conversation_id: id,
+    });
+
+    res.json({ ok: true });
+  } catch (err: any) {
+    console.error("DELETE /conversations/:id/messages failed", err);
+    res.status(500).json({ error: err?.message ?? "failed" });
+  }
+});
+
+
 // Allow or disallow agent replies for a conversation
 // POST /api/conversations/:id/agent-allow
 inboxRoutes.post("/conversations/:id/agent-allow", async (req, res) => {
