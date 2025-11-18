@@ -14,7 +14,7 @@ export default function InboxPage() {
       {/* Header */}
       <div className="inbox-header">
         <div className="inbox-header-left">
-          <span className="inbox-header-title">Ujani Admin — Inbox</span>
+          <span className="inbox-header-title">Ujani Herbals Chatbot — Inbox</span>
         </div>
         <div className="inbox-header-right">
           <button className="header-button">Minimize</button>

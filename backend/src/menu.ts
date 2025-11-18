@@ -13,6 +13,7 @@ export type ActionId =
   | 'ACTION_TALK_TO_AGENT'
   | 'ACTION_CHANGE_LANGUAGE'
   | 'ACTION_BACK'
+  | 'ACTION_FAQ'
   | `PRODUCT_${string}`
   | `BUY_${string}`
   | `ADD_${string}`
@@ -146,6 +147,7 @@ export function buildMainMenu(t: (key: string) => string): MenuModel {
           { id: 'ACTION_VIEW_CART',      title: t('menu.view_cart') },
           { id: 'ACTION_CHECKOUT',       title: t('menu.checkout') },
           { id: 'ACTION_TRACK_BY_NAME',  title: t('menu.track_by_name') },
+          { id: 'ACTION_FAQ',            title: t('menu.faq') },
           { id: 'ACTION_TALK_TO_AGENT',  title: t('menu.talk_to_agent') },
           { id: 'ACTION_CHANGE_LANGUAGE',title: t('menu.change_language') },
         ],

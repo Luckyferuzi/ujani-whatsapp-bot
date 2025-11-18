@@ -1,14 +1,14 @@
-// web/components/Thread.tsx
 "use client";
 
 import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
+import { formatPhonePretty } from "@/lib/phone";
 import { socket } from "@/lib/socket";
 import type { Convo } from "./ConversationList";
 
 type Msg = {
-  id: string;
-  conversation_id: string;
+  id: string | number;
+  conversation_id: string | number;
   direction: "in" | "out";
   type: "text" | "template" | string;
   body: string;
@@ -20,214 +20,272 @@ type ThreadProps = {
   convo: Convo;
 };
 
-function formatTime(ts: string) {
-  const d = new Date(ts);
-  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+function formatTime(iso: string) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleTimeString("sw-TZ", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
-function Tick({ status }: { status?: string | null }) {
-  if (!status || status === "sent") return <span>✓</span>;
-  if (status === "delivered") return <span>✓✓</span>;
-  if (status === "read") return <span className="tick-read">✓✓</span>;
-  return <span>✓</span>;
+/**
+ * Turn technical bodies like "[interactive:PRODUCT_KIBOKO]" into human text
+ * for the inbox UI.
+ */
+function formatMessageBody(body: string) {
+  if (!body) return "";
+
+  // 1) [interactive:XYZ] → nice Swahili description
+  const interactiveMatch = body.match(/^\[interactive:([A-Z0-9_]+)\]$/);
+  if (interactiveMatch) {
+    const id = interactiveMatch[1];
+
+    const labels: Record<string, string> = {
+      PRODUCT_KIBOKO: "Mteja amefungua bidhaa: Ujani Kiboko",
+      BUY_KIBOKO: "Mteja amechagua: Nunua Kiboko sasa",
+      DAR_INSIDE: "Mteja amechagua: Ndani ya Dar es Salaam",
+      DAR_OUTSIDE: "Mteja amechagua: Nje ya Dar es Salaam",
+      IN_DAR_DELIV: "Mteja amechagua: Delivery ndani ya Dar",
+      IN_DAR_PICKUP: "Mteja amechagua: Kuchukua mwenyewe (pickup)",
+      ACTION_VIEW_CART: "Mteja ameomba kuona kikapu",
+      ACTION_CHECKOUT: "Mteja amechagua kwenda malipo",
+      ACTION_TALK_TO_AGENT: "Mteja ameomba kuongea na agent",
+      // ongeza zingine kadri unavyoziona kwenye DB
+    };
+
+    return labels[id] ?? `Mteja amechagua: ${id}`;
+  }
+
+  // 2) LOCATION lat,lon → friendly text
+  if (body.startsWith("LOCATION ")) {
+    return "Mteja ametuma lokesheni (GPS pin)";
+  }
+
+  // 3) default plain text
+  return body;
 }
 
 export default function Thread({ convo }: ThreadProps) {
   const [messages, setMessages] = useState<Msg[]>([]);
+  const [loading, setLoading] = useState(false);
   const [agentAllowed, setAgentAllowed] = useState<boolean>(
     convo.agent_allowed
   );
   const [text, setText] = useState("");
   const [toggling, setToggling] = useState(false);
+  const [sending, setSending] = useState(false);
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
   async function loadMessages() {
-    const { items } = await api<{ items: Msg[] }>(
-      `/api/conversations/${convo.id}/messages`
-    );
-    setMessages(items || []);
+    setLoading(true);
+    try {
+      const { items } = await api<{ items: Msg[] }>(
+        `/api/conversations/${convo.id}/messages`
+      );
+      setMessages(items ?? []);
+    } catch (err) {
+      console.error("Failed to load messages", err);
+      setMessages([]);
+    } finally {
+      setLoading(false);
+    }
   }
 
-  // Load messages and subscribe to socket events
+  function scrollToBottom(behavior: ScrollBehavior = "auto") {
+    if (bottomRef.current) {
+      bottomRef.current.scrollIntoView({ behavior, block: "end" });
+    }
+  }
+
+  // Initial load + when conversation changes
   useEffect(() => {
-    setMessages([]);
     setAgentAllowed(convo.agent_allowed);
-    loadMessages();
+    loadMessages().then(() => scrollToBottom("auto"));
+  }, [convo.id, convo.agent_allowed]);
 
+  // Smooth scroll when new messages arrive
+  useEffect(() => {
+    if (messages.length > 0) scrollToBottom("smooth");
+  }, [messages.length]);
+
+  // Live Socket.IO updates: append new messages
+  useEffect(() => {
     const s = socket();
-    const onNew = (payload: any) => {
-      const cid =
-        payload?.conversation_id ??
-        payload?.conversationId ??
-        payload?.conversation?.id;
-      if (String(cid) === String(convo.id)) {
-        loadMessages();
-      }
-    };
-    const onConvo = (payload: any) => {
-      if (
-        String(payload?.id) === String(convo.id) &&
-        "agent_allowed" in payload
-      ) {
-        setAgentAllowed(!!payload.agent_allowed);
-      }
+    if (!s) return;
+
+    const handler = (payload: any) => {
+      if (!payload || !payload.message) return;
+      if (String(payload.conversation_id) !== String(convo.id)) return;
+
+      const msg = payload.message as Msg;
+
+      setMessages((prev) => {
+        if (!prev) return [msg];
+        if (prev.some((m) => String(m.id) === String(msg.id))) return prev;
+        return [...prev, msg];
+      });
     };
 
-    s.on("message.created", onNew);
-    s.on("conversation.updated", onConvo);
-
+    s.on("message.created", handler);
     return () => {
-      s.off("message.created", onNew);
-      s.off("conversation.updated", onConvo);
+      s.off("message.created", handler);
     };
   }, [convo.id]);
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
-
-  async function send() {
-    const trimmed = text.trim();
-    if (!trimmed || !agentAllowed) return;
-
-    setText("");
-    await api("/api/send", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        conversationId: convo.id,
-        text: trimmed,
-      }),
-    });
-    // messages will reload via socket "message.created"
-  }
-
-  // Admin toggle: switch between bot mode and agent mode
   async function toggleAgentMode() {
     const next = !agentAllowed;
     setToggling(true);
-
-    // optimistic UI update
-    setAgentAllowed(next);
+    setAgentAllowed(next); // optimistic
 
     try {
       await api(`/api/conversations/${convo.id}/agent-allow`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        // send both fields so we match whichever the backend expects
-        body: JSON.stringify({
-          agent_allowed: next,
-          allowed: next,
-        }),
+        body: JSON.stringify({ agent_allowed: next, allowed: next }),
       });
-      // backend should emit conversation.updated; our socket listener will re-sync
     } catch (err) {
       console.error("Failed to toggle agent mode", err);
-      // revert UI on failure
       setAgentAllowed(!next);
-      alert("Failed to change mode. Check the server logs for /agent-allow.");
+      alert("Imeshindikana kubadilisha mode, angalia server logs.");
     } finally {
       setToggling(false);
     }
   }
 
+  async function handleSend(e: React.FormEvent) {
+    e.preventDefault();
+    const value = text.trim();
+    if (!value) return;
 
-  const title = convo.name || convo.phone || "Mteja";
+    if (!agentAllowed) {
+      alert("Bot mode iko ON. Washa Agent Mode ili kujibu.");
+      return;
+    }
+
+    setSending(true);
+    try {
+      await api("/api/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          // 🔴 Backend expects `conversationId` exactly like this
+          conversationId: convo.id,
+          text: value,
+        }),
+      });
+
+      // new message will arrive via socket
+      setText("");
+    } catch (err) {
+      console.error("Failed to send message", err);
+      alert("Imeshindikana kutuma ujumbe, angalia server logs.");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  const title = convo.name || formatPhonePretty(convo.phone);
 
   return (
     <div className="thread">
-      {/* Header */}
+      {/* HEADER */}
       <div className="thread-header">
-        <div className="thread-header-left">
-          <div className="thread-header-title" title={title}>
+        <div className="thread-header-main">
+          <div className="thread-title" title={title}>
             {title}
           </div>
-          <div className="thread-header-sub">
-            {agentAllowed
-              ? "Agent anaweza kujibu sasa"
-              : "Bot anaendelea kuongea na mteja"}
-          </div>
-        </div>
-        <div className="thread-header-right">
-          <span className="thread-header-mode-label">Agent replies</span>
-          <button
-            className={
-              "toggle-switch" + (agentAllowed ? " toggle-switch--on" : "")
-            }
-            onClick={toggleAgentMode}
-            disabled={toggling}
-            title={
-              agentAllowed
-                ? "Bonyeza kuzima na kurudisha mazungumzo kwa bot"
-                : "Bonyeza kuruhusu admin kuongea na mteja"
-            }
-          >
-            <span className="toggle-knob" />
-          </button>
-        </div>
-      </div>
-
-      {/* Messages */}
-      <div className="thread-messages chat-bg scroll-y">
-        {messages.map((m) => (
-          <div
-            key={m.id}
-            className={
-              "thread-message" +
-              (m.direction === "out"
-                ? " thread-message--outgoing"
-                : " thread-message--incoming")
-            }
-          >
-            <div className="thread-message-body">{m.body}</div>
-            <div className="thread-message-meta">
-              <span className="thread-message-time">
-                {formatTime(m.created_at)}
+          <div className="thread-subtitle">
+            {formatPhonePretty(convo.phone)}
+            {convo.lang && (
+              <span className="thread-lang">
+                {" "}
+                · {convo.lang.toUpperCase()}
               </span>
-              {m.direction === "out" && (
-                <span className="thread-message-status">
-                  <Tick status={m.status} />
-                </span>
-              )}
-            </div>
+            )}
           </div>
-        ))}
-        <div ref={bottomRef} />
-      </div>
-
-      {/* Bot lock banner */}
-      {!agentAllowed && (
-        <div className="thread-lock-banner">
-          Bot inaongea na mteja. Ataenda kwa mhudumu akibonyeza{" "}
-          <b>“Ongea na mhudumu”</b>. Ujumbe wa admin umefungwa kwa sasa.
         </div>
-      )}
 
-      {/* Composer */}
-      <div className="thread-composer">
-        <input
-          className="thread-composer-input"
-          value={text}
-          disabled={!agentAllowed}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => (e.key === "Enter" ? send() : undefined)}
-          placeholder={
-            agentAllowed
-              ? "Type a message"
-              : "Locked by bot until customer chooses agent"
-          }
-        />
         <button
+          type="button"
           className={
-            "btn btn-primary" +
-            (!agentAllowed || !text.trim() ? " btn-disabled" : "")
+            "thread-agent-toggle" +
+            (agentAllowed ? " thread-agent-toggle--on" : "")
           }
-          onClick={send}
-          disabled={!agentAllowed || !text.trim()}
+          onClick={toggleAgentMode}
+          disabled={toggling}
         >
-          Send
+          <span>{agentAllowed ? "Agent Mode" : "Chatbot Mode"}</span>
+          <span className="thread-agent-pill">
+            <span
+              className={
+                "thread-agent-dot" +
+                (agentAllowed ? " thread-agent-dot--on" : "")
+              }
+            />
+          </span>
         </button>
       </div>
+
+      {/* MESSAGES */}
+      <div className="thread-body">
+        {loading && messages.length === 0 ? (
+          <div className="thread-empty">Loading messages…</div>
+        ) : messages.length === 0 ? (
+          <div className="thread-empty">Hakuna ujumbe bado.</div>
+        ) : (
+          <div className="thread-messages">
+            {messages.map((m) => (
+              <div
+                key={m.id}
+                className={
+                  "thread-message " +
+                  (m.direction === "out"
+                    ? "thread-message--outgoing"
+                    : "thread-message--incoming")
+                }
+              >
+                <div className="thread-bubble">
+                  <div className="thread-text">
+                    {formatMessageBody(m.body)}
+                  </div>
+                  <div className="thread-meta">
+                    <span className="thread-time">
+                      {formatTime(m.created_at)}
+                    </span>
+                    {m.status && (
+                      <span className="thread-status"> · {m.status}</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+            <div ref={bottomRef} />
+          </div>
+        )}
+      </div>
+
+      {/* COMPOSER */}
+      <form className="thread-composer" onSubmit={handleSend}>
+        <textarea
+          className="thread-input"
+          placeholder={
+            agentAllowed
+              ? "Andika jibu kwa mteja…"
+              : "Bot mode iko ON, agent hawezi kujibu."
+          }
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          disabled={!agentAllowed || sending}
+        />
+        <button
+          type="submit"
+          className="thread-send"
+          disabled={!agentAllowed || sending || !text.trim()}
+        >
+          Tuma
+        </button>
+      </form>
     </div>
   );
 }

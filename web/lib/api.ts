@@ -3,6 +3,8 @@
 // Base URL of your backend API, e.g.
 // NEXT_PUBLIC_API_BASE=https://ujani-whatsapp-bot.onrender.com
 export const API = (process.env.NEXT_PUBLIC_API_BASE ?? "").replace(/\/+$/, "");
+const INBOX_KEY = process.env.NEXT_PUBLIC_INBOX_ACCESS_KEY ?? "";
+
 
 // Small helper type so consumers can see HTTP status if needed
 export type ApiError = Error & { status?: number };
@@ -17,59 +19,45 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
 
   const url = `${API}${path}`;
 
+  // 👇 Build headers as a plain object so we can safely add our custom header
+  const originalHeaders = init?.headers ?? {};
+  const headersObj: Record<string, string> =
+    originalHeaders instanceof Headers
+      ? Object.fromEntries(originalHeaders.entries())
+      : Array.isArray(originalHeaders)
+      ? Object.fromEntries(originalHeaders)
+      : { ...originalHeaders };
+
+  if (INBOX_KEY) {
+    headersObj["x-inbox-key"] = INBOX_KEY;
+  }
+
   let res: Response;
   try {
     res = await fetch(url, {
       ...init,
+      headers: headersObj,
       cache: "no-store",
     });
-  } catch (err) {
-    console.error("API network error", { url, error: err });
-    const e: ApiError = new Error("Network error while calling API");
-    e.status = undefined;
-    throw e;
-  }
-
-  const contentType = res.headers.get("content-type") || "";
-  const isJson = contentType.includes("application/json");
-
-  let payload: unknown = null;
-
-  if (isJson) {
-    try {
-      payload = await res.json();
-    } catch {
-      payload = null;
-    }
-  } else {
-    try {
-      payload = await res.text();
-    } catch {
-      payload = null;
-    }
+  } catch (err: any) {
+    console.error("[api] request failed", err);
+    throw new Error("Failed to reach API");
   }
 
   if (!res.ok) {
-    const baseMsg = `API error ${res.status} ${res.statusText}`;
-    const maybeError =
-      payload && typeof payload === "object" && "error" in (payload as any)
-        ? `: ${(payload as any).error}`
-        : "";
-
-    const e: ApiError = new Error(baseMsg + maybeError);
-    e.status = res.status;
-
-    console.error("API HTTP error", {
-      url,
-      status: res.status,
-      payload,
-    });
-
-    throw e;
+    let body: any = undefined;
+    try {
+      body = await res.json();
+    } catch {
+      // ignore
+    }
+    console.error("[api] non-OK response", res.status, body);
+    throw new Error(body?.error ?? `API error (${res.status})`);
   }
 
-  return payload as T;
+  return (await res.json()) as T;
 }
+
 
 // Optional helpers – safe even if not used elsewhere
 export function get<T>(path: string, init?: RequestInit) {

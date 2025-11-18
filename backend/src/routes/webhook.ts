@@ -405,13 +405,29 @@ try {
 
           // 2) start menu on greetings if idle
           const activeFlow = FLOW.get(from);
-          if ((!s || s.state === 'IDLE') && !activeFlow) {
-            const txt = (text || '').trim().toLowerCase();
-            if (!text || ['hi','hello','mambo','start','anza','menu','menyu'].includes(txt)) {
-              await showMainMenu(from, lang);
-              continue;
-            }
-          }
+const txt = (text || "").trim().toLowerCase();
+
+// 0) Reset / start over command – works at any time
+if (txt === "anza upya" || txt === "reset" || txt === "start over") {
+  resetSession(from);
+  FLOW.delete(from);
+  CONTACT.delete(from);
+  await sendBotText(from, t(lang, "flow.reset_done"));
+  await showMainMenu(from, lang);
+  continue;
+}
+
+// 1) start menu on greetings if idle
+if ((!s || s.state === "IDLE") && !activeFlow) {
+  if (
+    !text ||
+    ["hi", "hello", "mambo", "start", "anza", "menu", "menyu"].includes(txt)
+  ) {
+    await showMainMenu(from, lang);
+    continue;
+  }
+}
+
 
           // 3) route
           if (activeFlow) {
@@ -687,6 +703,13 @@ if (id === 'ACTION_TALK_TO_AGENT') {
     return sendText(user, t(lang, 'track.ask_name'));
   }
 
+  if (id === "ACTION_FAQ") {
+  await sendText(user, t(lang, "faq.intro"));
+  await sendText(user, t(lang, "faq.list"));
+  return;
+}
+
+
   /* ------------------------------ Product flows ------------------------------ */
   if (id.startsWith('PRODUCT_')) {
     const sku = id.replace('PRODUCT_', '');
@@ -828,24 +851,31 @@ async function onFlow(user: string, step: FlowStep, m: Incoming, lang: Lang) {
             contact.phone ?? user
           );
 
-          await createOrderWithPayment({
-            customerId,
-            deliveryMode: "delivery",
-            status: "pending",
-            km,
-            feeTzs: fee,
-            totalTzs: total,
-            phone: contact.phone ?? null,
-            region: contact.region ?? null,
-            lat: m.lat,
-            lon: m.lon,
-            items: items.map((it) => ({
-              sku: it.sku,
-              name: it.name,
-              qty: it.qty,
-              unitPrice: it.unitPrice,
-            })),
-          });
+                const { orderId, orderCode } = await createOrderWithPayment({
+        customerId,
+        deliveryMode: "delivery",
+        status: "pending",
+        km,
+        feeTzs: fee,
+        totalTzs: total,
+        phone: contact.phone ?? null,
+        region: contact.region ?? null,
+        lat: m.lat,
+        lon: m.lon,
+        items: items.map((it) => ({
+          sku: it.sku,
+          name: it.name,
+          qty: it.qty,
+          unitPrice: it.unitPrice,
+        })),
+      });
+
+      const codeToShow = orderCode || `UJ-${orderId}`;
+      await sendBotText(
+        user,
+        `Namba ya order yako ni: *${codeToShow}*.\nTafadhali ihifadhi kwa ajili ya ufuatiliaji.`
+      );
+
         } catch (err) {
           console.error("[checkout] failed to persist ASK_GPS order:", err);
           // We still continue with payment instructions so the customer is not blocked.
@@ -934,24 +964,31 @@ async function onFlow(user: string, step: FlowStep, m: Incoming, lang: Lang) {
           contact.phone ?? user
         );
 
-        await createOrderWithPayment({
-          customerId,
-          deliveryMode: "delivery", // still treated as a delivery
-          status: "pending",
-          km: null,
-          feeTzs: OUTSIDE_DAR_FEE,
-          totalTzs: total,
-          phone: contact.phone ?? null,
-          region: contact.region ?? null,
-          lat: null,
-          lon: null,
-          items: items.map((it) => ({
-            sku: it.sku,
-            name: it.name,
-            qty: it.qty,
-            unitPrice: it.unitPrice,
-          })),
-        });
+       const { orderId, orderCode } = await createOrderWithPayment({
+      customerId,
+      deliveryMode: "delivery", // still treated as a delivery
+      status: "pending",
+      km: null,
+      feeTzs: OUTSIDE_DAR_FEE,
+      totalTzs: total,
+      phone: contact.phone ?? null,
+      region: contact.region ?? null,
+      lat: null,
+      lon: null,
+      items: items.map((it) => ({
+        sku: it.sku,
+        name: it.name,
+        qty: it.qty,
+        unitPrice: it.unitPrice,
+      })),
+    });
+
+    const codeToShow = orderCode || `UJ-${orderId}`;
+    await sendBotText(
+      user,
+      `Namba ya order yako ni: *${codeToShow}*.\nTafadhali ihifadhi kwa ajili ya ufuatiliaji.`
+    );
+
       } catch (err) {
         console.error("[checkout] failed to persist ASK_REGION_OUT order:", err);
       }
@@ -1010,20 +1047,32 @@ async function onSessionMessage(user: string, m: Incoming, lang: Lang) {
 /* -------------------------------------------------------------------------- */
 
 function detailsForSku(lang: Lang, sku: string): string {
-  if (sku === 'PROMAX') {
-    return [
-      '• ' + t(lang, 'product.promax.package_a'),
-      '• ' + t(lang, 'product.promax.package_b'),
-      '• ' + t(lang, 'product.promax.package_c'),
-    ].join('\n');
+  let body: string;
+
+  if (sku === "PROMAX") {
+    body = [
+      "• " + t(lang, "product.promax.package_a"),
+      "• " + t(lang, "product.promax.package_b"),
+      "• " + t(lang, "product.promax.package_c"),
+    ].join("\n");
+  } else if (sku === "PROMAX_A") {
+    body = t(lang, "product.promax.package_a");
+  } else if (sku === "PROMAX_B") {
+    body = t(lang, "product.promax.package_b");
+  } else if (sku === "PROMAX_C") {
+    body = t(lang, "product.promax.package_c");
+  } else if (sku === "KIBOKO") {
+    body = t(lang, "product.kiboko.details");
+  } else if (sku === "FURAHA") {
+    body = t(lang, "product.furaha.details");
+  } else {
+    body =
+      lang === "sw"
+        ? "Maelezo yatapatikana hivi karibuni."
+        : "Details coming soon.";
   }
-  if (sku === 'PROMAX_A') return t(lang, 'product.promax.package_a');
-  if (sku === 'PROMAX_B') return t(lang, 'product.promax.package_b');
-  if (sku === 'PROMAX_C') return t(lang, 'product.promax.package_c');
 
-  if (sku === 'KIBOKO') return t(lang, 'product.kiboko.details');
-  if (sku === 'FURAHA') return t(lang, 'product.furaha.details');
-
-  return lang === 'sw' ? 'Maelezo yatapatikana hivi karibuni.' : 'Details coming soon.';
+  const disclaimer = t(lang, "disclaimer.general");
+  return `${body}\n\n${disclaimer}`;
 }
 

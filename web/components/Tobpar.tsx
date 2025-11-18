@@ -2,7 +2,7 @@ export default function Topbar() {
   return (
     <div className="h-14 border-b border-ui-border flex items-center px-4 bg-ui-panel">
       <div className="font-semibold tracking-wide text-ui-text">
-        Ujani Inbox
+        Ujani Herbals Inbox
       </div>
       <div className="ml-auto text-ui-dim text-sm">
         Live · WhatsApp Cloud API

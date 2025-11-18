@@ -1,5 +1,6 @@
 // backend/src/db/queries.ts
 import db from "./knex.js";
+import knex from "./knex.js";
 
 /* ---------------------------- Customers / convos --------------------------- */
 
@@ -175,8 +176,34 @@ export interface CreateOrderInput {
  *
  * Everything is wrapped in a transaction so it either fully succeeds or fails.
  */
+
+async function generateOrderCode(trx: any): Promise<string> {
+  const now = new Date();
+  const datePart = [
+    now.getFullYear(),
+    String(now.getMonth() + 1).padStart(2, "0"),
+    String(now.getDate()).padStart(2, "0"),
+  ].join("");
+
+  for (let i = 0; i < 5; i++) {
+    const randomPart = Math.floor(Math.random() * 10000)
+      .toString()
+      .padStart(4, "0");
+    const code = `UJ-${datePart}-${randomPart}`;
+
+    const existing = await trx("orders").where({ order_code: code }).first();
+    if (!existing) return code;
+  }
+
+  // Very unlikely fallback
+  return `UJ-${datePart}-${Date.now().toString().slice(-6)}`;
+}
+
+
 export async function createOrderWithPayment(input: CreateOrderInput) {
   return db.transaction(async (trx) => {
+    const orderCode = await generateOrderCode(trx);
+
     const [order] = await trx("orders")
       .insert({
         customer_id: input.customerId,
@@ -189,8 +216,9 @@ export async function createOrderWithPayment(input: CreateOrderInput) {
         region: input.region ?? null,
         lat: input.lat ?? null,
         lon: input.lon ?? null,
+        order_code: orderCode,
       })
-      .returning<{ id: number }[]>("id");
+      .returning<{ id: number; order_code: string }[]>("id");
 
     const orderId = order.id;
 
@@ -215,6 +243,41 @@ export async function createOrderWithPayment(input: CreateOrderInput) {
       })
       .returning<{ id: number }[]>("id");
 
-    return { orderId, paymentId: payment.id };
+    return {
+      orderId,
+      orderCode: order.order_code,
+      paymentId: payment.id,
+    };
   });
 }
+
+
+export interface OrderSummary {
+  id: number;
+  customer_id: number;
+  order_code: string | null;
+  status: string;
+  total_amount: number;
+  created_at: string;
+}
+
+export async function getOrdersForCustomer(
+  customerId: number,
+  limit = 20
+): Promise<OrderSummary[]> {
+  const rows = await knex("orders")
+    .where({ customer_id: customerId })
+    .orderBy("created_at", "desc")
+    .limit(limit);
+
+  return rows.map((row) => ({
+    id: row.id,
+    customer_id: row.customer_id,
+    order_code: row.order_code ?? null,
+    status: row.status,
+    total_amount: Number(row.total_amount ?? row.total ?? 0),
+    created_at: row.created_at,
+  }));
+}
+
+

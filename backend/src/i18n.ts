@@ -6,7 +6,7 @@ type Dict = Record<Lang, Record<string, string>>;
 const dict: Dict = {
   sw: {
     /* ===== Menu (aligns with menu.ts) ===== */
-    'menu.header': 'Karibu Ujani Herbal 🌿',
+    'menu.header': 'Karibu Ujani Herbals Chatbot 🌿',
     'menu.footer': 'Chagua kutoka kwenye menyu hapa chini.',
     'menu.products_section': 'Angalia Bidhaa zetu',
     'menu.actions_section': 'Vitendo',
@@ -127,10 +127,29 @@ const dict: Dict = {
     'generic.ok': 'Sawa',
     'generic.open': 'Fungua',
     'generic.choose': 'Chagua',
+        /* ===== Disclaimers ===== */
+    'disclaimer.general': [
+      '⚠️ *Tahadhari muhimu:*',
+      '• Bidhaa za Ujani Herbals ni virutubisho vya kiasili, na hazibadilishi ushauri au matibabu ya daktari.',
+      '• Ikiwa una tatizo sugu (mf. presha, kisukari, moyo) au unatumia dawa za hospitali, wasiliana na daktari kabla ya kutumia.',
+      '• Usizidishe dozi iliyoelekezwa. Acha kutumia na wasiliana na mtaalamu wa afya ukipata dalili zisizo za kawaida.',
+    ].join('\n'),
+
+    'flow.reset_done': 'Tumeanza upya mazungumzo yako. Hii hapa menyu ya Ujani Herbals Chatbot 🌿.',
+    'menu.faq': 'Maswali ya mara kwa mara (FAQ)',
+    'faq.intro': 'Haya ni maswali machache ya mara kwa mara kuhusu bidhaa za Ujani Herbals:',
+    'faq.list': [
+      '1) *Matokeo yanaanza lini?* — Kawaida ndani ya siku 7–14 ukitumia kwa usahihi.',
+      '2) *Naweza kutumia kama nina presha/kisukari?* — Tafadhali wasiliana na daktari wako kwanza kabla ya kuanza.',
+      '3) *Najulishwaje kuhusu order yangu?* — Utapata ujumbe wa muhtasari wa order na maelekezo ya malipo WhatsApp.',
+      '4) *Mna-deliver nje ya Dar?* — Ndiyo, tunatuma mikoani. Ada hutegemea umbali na aina ya usafiri.',
+    ].join('\n'),
+
+
   },
 
   en: {
-    'menu.header': 'Welcome to Ujani Herbal 🌿',
+    'menu.header': 'Welcome to Ujani Herbals Chatbot 🌿',
     'menu.footer': 'Choose from the menu below.',
     'menu.products_section': 'Browse our Products',
     'menu.actions_section': 'Actions',
@@ -239,6 +258,26 @@ const dict: Dict = {
     'generic.ok': 'OK',
     'generic.open': 'Open',
     'generic.choose': 'Choose',
+
+        /* ===== Disclaimers ===== */
+    'disclaimer.general': [
+      '⚠️ *Important safety notice:*',
+      '• Ujani Herbals products are natural supplements and do not replace medical advice or treatment.',
+      '• If you have a chronic condition (e.g. hypertension, diabetes, heart issues) or take hospital medicines, talk to your doctor before use.',
+      '• Do not exceed the recommended dosage. Stop using and consult a health professional if you notice unusual symptoms.',
+    ].join('\n'),
+
+    'flow.reset_done': 'Your conversation has been reset. Here is the Ujani Herbals Chatbot menu 🌿.',
+    'menu.faq': 'Frequently asked questions (FAQ)',
+    'faq.intro': 'Here are some common questions about Ujani Herbals products:',
+    'faq.list': [
+      '1) *When do I see results?* — Typically within 7–14 days when used correctly.',
+      '2) *Can I use these if I have blood pressure/diabetes?* — Please speak to your doctor first before starting.',
+      '3) *How do I know my order is confirmed?* — You will receive an order summary and payment instructions on WhatsApp.',
+      '4) *Do you deliver outside Dar?* — Yes, we ship upcountry; fees depend on distance and available transport.',
+    ].join('\n'),
+
+
   },
 };
 

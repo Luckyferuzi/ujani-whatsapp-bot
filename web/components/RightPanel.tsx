@@ -1,93 +1,80 @@
-// web/components/RightPanel.tsx
 "use client";
 
 import { useEffect, useState } from "react";
-import { api, API } from "@/lib/api";
-import { socket } from "@/lib/socket";
+import { api } from "@/lib/api";
+import { formatPhonePretty } from "@/lib/phone";
 
-type Summary = {
-  customer: { name?: string; phone: string; lang?: string } | null;
-  delivery: { mode: string; km: number; fee_tzs: number } | null;
-  payment: {
-    id?: string;
-    method?: string;
-    status: "awaiting" | "verifying" | "paid" | "failed";
-    recipient?: string;
-  } | null;
-};
-
-type Props = {
+export interface RightPanelProps {
   conversationId: string | null;
+}
+
+type CustomerSummary = {
+  name: string | null;
+  phone: string;
+  lang?: string | null;
 };
 
-function formatPhonePretty(raw?: string) {
-  if (!raw) return "—";
-  const digits = raw.replace(/[^\d+]/g, "");
-  if (digits.startsWith("+255") && digits.length >= 10) {
-    const body = digits.slice(4);
-    return `+255 ${body.slice(0, 3)} ${body.slice(3, 6)} ${body.slice(6)}`;
-  }
-  if (digits.startsWith("+") && digits.length > 7) {
-    return digits;
-  }
-  return raw;
+type DeliverySummary = {
+  mode: string | null;
+  km?: number | null;
+  fee_tzs?: number | null;
+};
+
+type PaymentSummary = {
+  id?: number;
+  method?: string | null;
+  recipient?: string | null;
+  status?: string | null;
+};
+
+type ConversationSummary = {
+  customer?: CustomerSummary | null;
+  delivery?: DeliverySummary | null;
+  payment?: PaymentSummary | null;
+};
+
+function formatTzs(value?: number | null): string {
+  if (value == null) return "—";
+  return `${value.toLocaleString("sw-TZ")} Tsh`;
 }
 
-function formatKm(km?: number | null) {
-  if (km == null) return "—";
-  return `${km.toFixed(1)} km`;
+function formatKm(value?: number | null): string {
+  if (value == null) return "—";
+  return `${value.toFixed(1)} km`;
 }
 
-function formatTzs(v?: number | null) {
-  if (v == null) return "—";
-  return `TZS ${v.toLocaleString("en-TZ")}`;
-}
-
-export default function RightPanel({ conversationId }: Props) {
-  const [summary, setSummary] = useState<Summary | null>(null);
+const RightPanel: React.FC<RightPanelProps> = ({ conversationId }) => {
+  const [summary, setSummary] = useState<ConversationSummary | null>(null);
   const [loading, setLoading] = useState(false);
 
-  async function load() {
-    if (!conversationId) {
-      setSummary(null);
-      return;
-    }
-    setLoading(true);
-    try {
-      const data = await api<Summary>(
-        `/api/conversations/${conversationId}/summary`
-      );
-      setSummary(data);
-    } finally {
-      setLoading(false);
-    }
-  }
-
   useEffect(() => {
-    load();
-  }, [conversationId]);
-
-  useEffect(() => {
-    const s = socket();
-    const handler = (payload: any) => {
-      const cid =
-        payload?.conversation_id ??
-        payload?.conversationId ??
-        payload?.conversation?.id;
-      if (String(cid) === String(conversationId)) {
-        load();
+    async function load() {
+      if (!conversationId) {
+        setSummary(null);
+        return;
       }
-    };
-    s.on("payment.updated", handler);
-    return () => {
-      s.off("payment.updated", handler);
-    };
+
+      setLoading(true);
+      try {
+        const data = await api<ConversationSummary>(
+          `/api/conversations/${conversationId}/summary`
+        );
+        setSummary(data);
+      } catch (err) {
+        console.error("Failed to load summary", err);
+        setSummary(null);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    void load();
   }, [conversationId]);
 
   if (!conversationId) {
     return (
       <div className="right-panel right-panel--empty">
-        No conversation selected
+        <div className="panel-empty">No conversation selected</div>
       </div>
     );
   }
@@ -100,18 +87,23 @@ export default function RightPanel({ conversationId }: Props) {
     <div className="right-panel">
       <div className="panel-header">
         <span className="panel-header-title">
-          Order • {customer?.name || "Ujani Kiboko"}
+          Order • {customer?.name || "Ujani Herbals"}
         </span>
       </div>
 
+      {/* CUSTOMER SECTION */}
       <div className="panel-section">
         <div className="panel-card">
           <div className="panel-card-title">Customer</div>
-          {customer ? (
+          {loading && !customer ? (
+            <div className="panel-card-body panel-card-body--muted">
+              Loading…
+            </div>
+          ) : customer ? (
             <div className="panel-card-body">
               <div className="panel-row">
                 <span className="panel-label">Name:</span>
-                <span className="panel-value">{customer.name}</span>
+                <span className="panel-value">{customer.name || "—"}</span>
               </div>
               <div className="panel-row">
                 <span className="panel-label">Phone:</span>
@@ -120,49 +112,42 @@ export default function RightPanel({ conversationId }: Props) {
                 </span>
               </div>
               <div className="panel-row">
-                <span className="panel-label">Lang:</span>
+                <span className="panel-label">Language:</span>
                 <span className="panel-value">
-                  {(customer.lang || "SW").toUpperCase()}
+                  {(customer.lang || "sw").toUpperCase()}
                 </span>
               </div>
             </div>
-          ) : loading ? (
-            <div className="panel-card-body panel-card-body--muted">
-              Loading…
-            </div>
           ) : (
             <div className="panel-card-body panel-card-body--muted">
-              Hakuna taarifa ya mteja bado.
+              Hakuna taarifa za mteja bado.
             </div>
           )}
         </div>
       </div>
 
+      {/* DELIVERY SECTION */}
       <div className="panel-section">
         <div className="panel-card">
           <div className="panel-card-title">Delivery</div>
-          {delivery ? (
+          {loading && !delivery ? (
+            <div className="panel-card-body panel-card-body--muted">
+              Loading…
+            </div>
+          ) : delivery ? (
             <div className="panel-card-body">
               <div className="panel-row">
                 <span className="panel-label">Mode:</span>
-                <span className="panel-value">
-                  {delivery.mode === "delivery"
-                    ? "Ndani ya Dar"
-                    : delivery.mode === "pickup"
-                    ? "Pickup"
-                    : delivery.mode}
-                </span>
+                <span className="panel-value">{delivery.mode || "—"}</span>
               </div>
               <div className="panel-row">
-                <span className="panel-label">GPS:</span>
-                <span className="panel-value">
-                  {formatKm(delivery.km)}
-                </span>
+                <span className="panel-label">Distance:</span>
+                <span className="panel-value">{formatKm(delivery.km)}</span>
               </div>
               <div className="panel-row">
                 <span className="panel-label">Fee:</span>
                 <span className="panel-value">
-                  {formatTzs(delivery.fee_tzs)} (680/km, rounded)
+                  {formatTzs(delivery.fee_tzs)}
                 </span>
               </div>
             </div>
@@ -174,58 +159,54 @@ export default function RightPanel({ conversationId }: Props) {
         </div>
       </div>
 
+      {/* PAYMENT SECTION */}
       <div className="panel-section">
         <div className="panel-card">
           <div className="panel-card-title">Payment</div>
-          {payment ? (
+          {loading && !payment ? (
+            <div className="panel-card-body panel-card-body--muted">
+              Loading…
+            </div>
+          ) : payment ? (
             <>
               <div className="panel-card-body">
                 {payment.method && (
                   <div className="panel-row">
-                    <span className="panel-label">Chosen:</span>
-                    <span className="panel-value">
-                      {payment.method}
-                    </span>
+                    <span className="panel-label">Method:</span>
+                    <span className="panel-value">{payment.method}</span>
                   </div>
                 )}
                 {payment.recipient && (
                   <div className="panel-row">
                     <span className="panel-label">Recipient:</span>
-                    <span className="panel-value">
-                      {payment.recipient}
-                    </span>
+                    <span className="panel-value">{payment.recipient}</span>
                   </div>
                 )}
                 <div className="panel-row">
                   <span className="panel-label">Status:</span>
-                  <span
-                    className={
-                      "panel-status panel-status--" + payment.status
-                    }
-                  >
-                    {payment.status === "awaiting"
-                      ? "Awaiting proof"
-                      : payment.status}
+                  <span className="panel-value">
+                    {payment.status || "—"}
                   </span>
                 </div>
               </div>
-
-              {payment.status !== "paid" && payment.id && (
-                <div className="panel-actions">
+              {payment.id && (
+                <div className="panel-card-footer">
                   <button
-                    className="btn btn-secondary"
+                    className="btn btn-muted"
                     onClick={async () => {
-                      await fetch(
-                        `${API}/api/payments/${payment.id}/status`,
-                        {
+                      try {
+                        await api(`/api/payments/${payment.id}/status`, {
                           method: "POST",
-                          headers: {
-                            "Content-Type": "application/json",
-                          },
+                          headers: { "Content-Type": "application/json" },
                           body: JSON.stringify({ status: "verifying" }),
-                        }
-                      );
-                      load();
+                        });
+                        const data = await api<ConversationSummary>(
+                          `/api/conversations/${conversationId}/summary`
+                        );
+                        setSummary(data);
+                      } catch (err) {
+                        console.error("Failed to update status", err);
+                      }
                     }}
                   >
                     Mark verifying
@@ -233,17 +214,19 @@ export default function RightPanel({ conversationId }: Props) {
                   <button
                     className="btn btn-success"
                     onClick={async () => {
-                      await fetch(
-                        `${API}/api/payments/${payment.id}/status`,
-                        {
+                      try {
+                        await api(`/api/payments/${payment.id}/status`, {
                           method: "POST",
-                          headers: {
-                            "Content-Type": "application/json",
-                          },
+                          headers: { "Content-Type": "application/json" },
                           body: JSON.stringify({ status: "paid" }),
-                        }
-                      );
-                      load();
+                        });
+                        const data = await api<ConversationSummary>(
+                          `/api/conversations/${conversationId}/summary`
+                        );
+                        setSummary(data);
+                      } catch (err) {
+                        console.error("Failed to update status", err);
+                      }
                     }}
                   >
                     Mark paid
@@ -260,4 +243,6 @@ export default function RightPanel({ conversationId }: Props) {
       </div>
     </div>
   );
-}
+};
+
+export default RightPanel;

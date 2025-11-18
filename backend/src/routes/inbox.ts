@@ -1,8 +1,11 @@
 // backend/src/routes/inbox.ts
-import { Router } from "express";
+import { Router, type Request, type Response } from "express";
 import db from "../db/knex.js";
 import { sendText } from "../whatsapp.js";
 import { emit } from "../sockets.js";
+import { getOrdersForCustomer } from "../db/queries.js";
+
+
 
 export const inboxRoutes = Router();
 
@@ -268,4 +271,26 @@ inboxRoutes.post("/payments/:id/status", async (req, res) => {
   }
 });
 
+inboxRoutes.get(
+  "/customers/:customerId/orders",
+  async (req: Request, res: Response) => {
 
+    try {
+      const customerId = Number(req.params.customerId);
+      if (!Number.isFinite(customerId)) {
+        return res.status(400).json({ error: "invalid customerId" });
+      }
+
+      const limit = req.query.limit
+        ? Math.min(100, Number(req.query.limit))
+        : 20;
+
+      const orders = await getOrdersForCustomer(customerId, limit);
+
+      return res.json({ orders });
+    } catch (err) {
+      console.error("[GET /api/customers/:customerId/orders] failed", err);
+      return res.status(500).json({ error: "internal_error" });
+    }
+  }
+);
