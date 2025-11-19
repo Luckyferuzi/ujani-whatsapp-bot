@@ -17,31 +17,77 @@ export const inboxRoutes = Router();
  * GET /api/conversations
  * Left pane list
  */
-inboxRoutes.get("/conversations", async (_req, res) => {
-  const items = await db("conversations as c")
-    .join("customers as u", "u.id", "c.customer_id")
-    .select(
-      "c.id",
-      "u.name",
-      "u.phone",
-      "u.lang",
-      "c.agent_allowed",
-      "c.last_user_message_at"
-    )
-    .orderBy("c.last_user_message_at", "desc")
-    .limit(100);
+// GET /api/conversations
+inboxRoutes.get("/conversations", async (req, res) => {
+  try {
+    // Base conversations + user info (match your existing query structure)
+    const convs = await db("conversations as c")
+      .join("wa_users as u", "c.user_id", "u.id")
+      .select(
+        "c.id",
+        "u.name",
+        "u.phone",
+        "u.lang",
+        "c.agent_allowed",
+        "c.last_user_message_at"
+      )
+      .orderBy("c.last_user_message_at", "desc");
 
-  // unread counts — avoid TS2488 by using .first() (not array destructuring)
-  for (const row of items) {
-    const unreadRow = await db("messages")
-      .where({ conversation_id: row.id, direction: "in", status: "delivered" })
-      .count<{ count: string }>("id as count")
-      .first();
+    if (convs.length === 0) {
+      return res.json({ items: [] });
+    }
 
-    (row as any).unread_count = Number(unreadRow?.count ?? 0);
+    const ids = convs.map((c: any) => c.id);
+
+    // All messages for these conversations so we can compute:
+    // - last message text
+    // - total message count
+    const messages = await db("messages")
+      .whereIn("conversation_id", ids)
+      .orderBy("created_at", "asc") // oldest first, we'll override last
+      .select("conversation_id", "body", "created_at");
+
+    const byConv: Record<
+      number,
+      { last_message_text: string | null; message_count: number }
+    > = {};
+
+    for (const m of messages) {
+      const cid = m.conversation_id as number;
+      if (!byConv[cid]) {
+        byConv[cid] = { last_message_text: null, message_count: 0 };
+      }
+      byConv[cid].message_count += 1;
+      if (m.body && m.body.trim().length > 0) {
+        byConv[cid].last_message_text = m.body;
+      }
+    }
+
+    const items = convs.map((c: any) => {
+      const meta = byConv[c.id] ?? {
+        last_message_text: null,
+        message_count: 0,
+      };
+      return {
+        id: String(c.id),
+        name: c.name,
+        phone: c.phone,
+        lang: c.lang,
+        agent_allowed: !!c.agent_allowed,
+        last_user_message_at: c.last_user_message_at,
+        unread_count: 0, // you can implement true "unread" later
+        last_message_text: meta.last_message_text,
+        message_count: meta.message_count,
+      };
+    });
+
+    res.json({ items });
+  } catch (err: any) {
+    console.error("GET /conversations failed", err);
+    res
+      .status(500)
+      .json({ error: err?.message ?? "Failed to list conversations" });
   }
-
-  res.json({ items });
 });
 
 
