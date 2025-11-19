@@ -157,6 +157,55 @@ inboxRoutes.get("/conversations/:id/summary", async (req, res) => {
   }
 });
 
+/**
+ * GET /api/conversations/:id/orders
+ * All orders for the customer behind this conversation
+ */
+inboxRoutes.get("/conversations/:id/orders", async (req, res) => {
+  const conversationId = Number(req.params.id);
+  if (!Number.isFinite(conversationId)) {
+    return res.status(400).json({ error: "Invalid conversation id" });
+  }
+
+  try {
+    // Find the conversation and its customer
+    const conv = await db("conversations")
+      .where({ id: conversationId })
+      .select("customer_id")
+      .first();
+
+    if (!conv || !conv.customer_id) {
+      return res.json({ items: [] });
+    }
+
+    const orders = await db("orders")
+      .where({ customer_id: conv.customer_id })
+      .select(
+        "id",
+        "status",
+        "delivery_mode",
+        "km",
+        "fee_tzs",
+        "total_tzs",
+        "phone",
+        "region",
+        "created_at"
+        // If later you add an order_code column:
+        // "order_code"
+      )
+      .orderBy("created_at", "desc")
+      .limit(50);
+
+    res.json({ items: orders });
+  } catch (err: any) {
+    console.error("orders history error:", err);
+    res
+      .status(500)
+      .json({ error: err?.message || "Failed to load order history" });
+  }
+});
+
+
 // DELETE /api/conversations/:id/messages
 // ?mediaOnly=1 → only delete media (image/document/audio/video)
 inboxRoutes.delete("/conversations/:id/messages", async (req, res) => {
