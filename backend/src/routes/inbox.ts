@@ -377,3 +377,43 @@ inboxRoutes.get(
     }
   }
 );
+
+// POST /api/orders/:id/status
+// Body: { status: "pending" | "preparing" | "out_for_delivery" | "delivered" | "cancelled" }
+inboxRoutes.post("/orders/:id/status", async (req, res) => {
+  const id = Number(req.params.id);
+  const { status } = req.body as { status?: string };
+
+  if (!Number.isFinite(id)) {
+    return res.status(400).json({ error: "Invalid order id" });
+  }
+
+  const allowed = [
+    "pending",
+    "preparing",
+    "out_for_delivery",
+    "delivered",
+    "cancelled",
+  ];
+  if (!status || !allowed.includes(status)) {
+    return res.status(400).json({ error: "Invalid status" });
+  }
+
+  try {
+    const [order] = await db("orders")
+      .where({ id })
+      .update({ status })
+      .returning("*");
+
+    if (!order) {
+      return res.status(404).json({ error: "Order not found" });
+    }
+
+    return res.json({ order });
+  } catch (err: any) {
+    console.error("POST /orders/:id/status failed", err);
+    return res
+      .status(500)
+      .json({ error: err?.message ?? "Failed to update order status" });
+  }
+});
