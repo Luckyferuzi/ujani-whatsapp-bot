@@ -3,6 +3,38 @@ import db from "./knex.js";
 import knex from "./knex.js";
 
 /* ---------------------------- Customers / convos --------------------------- */
+// Find order by internal numeric ID
+export async function findOrderById(orderId: number) {
+  const order = await db("orders").where({ id: orderId }).first();
+  if (!order) return null;
+
+  const payment = await db("payments")
+    .where({ order_id: order.id })
+    .orderBy("created_at", "desc")
+    .first();
+
+  return { order, payment };
+}
+
+// Find latest order by customer name (approx match)
+export async function findLatestOrderByCustomerName(name: string) {
+  const rows = await db("orders")
+    .join("customers", "orders.customer_id", "customers.id")
+    .whereILike("customers.name", `%${name}%`)
+    .orderBy("orders.created_at", "desc")
+    .select("orders.*");
+
+  if (!rows || rows.length === 0) return null;
+
+  const order = rows[0];
+  const payment = await db("payments")
+    .where({ order_id: order.id })
+    .orderBy("created_at", "desc")
+    .first();
+
+  return { order, payment };
+}
+
 
 export async function upsertCustomerByWa(
   waId: string,

@@ -96,7 +96,6 @@ const dict: Dict = {
     'payment.none': 'Namba za malipo hazijawekewa. Tafadhali wasiliana na mwakilishi.',
 
     'agent.reply': 'Tafadhali andika ujumbe wako; mwakilishi atakujibu haraka.',
-    'track.ask_name': 'Andika *jina* ulilotumia kufuatilia oda.',
     'track.none_found': 'Hakuna oda zilizopatikana kwa *{name}*.',
 
     /* ===== Cart / Summary ===== */
@@ -144,6 +143,15 @@ const dict: Dict = {
       '3) *Najulishwaje kuhusu order yangu?* — Utapata ujumbe wa muhtasari wa order na maelekezo ya malipo WhatsApp.',
       '4) *Mna-deliver nje ya Dar?* — Ndiyo, tunatuma mikoani. Ada hutegemea umbali na aina ya usafiri.',
     ].join('\n'),
+
+    'track.ask_name': 'Andika *jina ulilotumia* AU *namba ya oda (mf. UJ-1)* kufuatilia oda yako.',
+    'track.not_found': 'Hatukupata oda inayolingana na: *{{query}}*. Tafadhali hakikisha jina au namba ya oda na ujaribu tena.',
+    'track.header': '📦 Taarifa ya ufuatiliaji wa oda yako:',
+    'track.line_code': '• Namba ya oda: *{{code}}*',
+    'track.line_status_payment': '• Hali ya malipo: *{{paymentStatus}}*',
+    'track.line_status_order': '• Hali ya oda: *{{orderStatus}}*',
+    'track.line_agent_phone': '• Namba ya mpeleka mzigo: *{{agentPhone}}*',
+
 
 
   },
@@ -230,7 +238,6 @@ const dict: Dict = {
     'payment.none': 'Payment numbers are not configured. Please contact an agent.',
 
     'agent.reply': 'Please type your message; an agent will reply shortly.',
-    'track.ask_name': 'Type the *name* you used to track your order.',
     'track.none_found': 'No orders found for *{name}*.',
 
     'cart.added': '✅ *{title}* added to cart.',
@@ -277,6 +284,14 @@ const dict: Dict = {
       '4) *Do you deliver outside Dar?* — Yes, we ship upcountry; fees depend on distance and available transport.',
     ].join('\n'),
 
+    'track.ask_name': 'Type the *name you used* OR *order number (e.g., UJ-1)* to track your order.',
+    'track.not_found': 'No orders found matching: *{{query}}*. Please check the name or order number and try again.',
+    'track.header': '📦 Your order tracking info:',
+    'track.line_code': '• Order number: *{{code}}*',
+    'track.line_status_payment': '• Payment status: *{{paymentStatus}}*',
+    'track.line_status_order': '• Order status: *{{orderStatus}}*',
+    'track.line_agent_phone': '• Delivery agent phone: *{{agentPhone}}*',
+    
 
   },
 };

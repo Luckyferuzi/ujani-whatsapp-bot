@@ -20,6 +20,8 @@ import {
   insertOutboundMessage,          // 👈 add this
   updateConversationLastUserMessageAt,
   createOrderWithPayment,
+  findOrderById,
+  findLatestOrderByCustomerName
 } from "../db/queries.js";
 
 import { emit } from '../sockets.js';
@@ -1005,12 +1007,117 @@ async function onFlow(user: string, step: FlowStep, m: Incoming, lang: Lang) {
 
     /* ------------------------------- Tracking stub ------------------------------ */
     /* ------------------------------- Tracking stub ------------------------------ */
-case 'TRACK_ASK_NAME': {
-  if (!txt) return sendBotText(user, t(lang, 'track.ask_name'));
-  await sendBotText(user, t(lang, 'track.none_found', { name: txt }));
+/* ---------------------------- Tracking by name/code ---------------------------- */
+case "TRACK_ASK_NAME": {
+  if (!txt) {
+    await sendBotText(user, t(lang, "track.ask_name"));
+    return;
+  }
+
+  const query = txt.trim();
+  let result: { order: any; payment: any } | null = null;
+
+  // 1) If looks like "UJ-3" (or uj-3), treat as order id
+  const m = /^uj-(\d+)$/i.exec(query);
+  if (m) {
+    const id = Number(m[1]);
+    if (Number.isFinite(id)) {
+      result = await findOrderById(id);
+    }
+  }
+
+  // 2) If not found by code, or query didn't look like code, try by customer name
+  if (!result) {
+    result = await findLatestOrderByCustomerName(query);
+  }
+
+  if (!result) {
+    await sendBotText(user, t(lang, "track.not_found", { query }));
+    setFlow(user, null);
+    return;
+  }
+
+  const { order, payment } = result;
+
+  const orderCode = `UJ-${order.id}`;
+  const paymentStatusRaw = payment?.status ?? "none";
+  const orderStatusRaw = order.status ?? "pending";
+
+  // Map payment status to friendly text (Swahili for now)
+  let paymentStatusText = "";
+  switch (paymentStatusRaw) {
+    case "awaiting":
+    case "none":
+      paymentStatusText = "Tunasubiri malipo yako.";
+      break;
+    case "verifying":
+      paymentStatusText = "Malipo yako yanakaguliwa.";
+      break;
+    case "paid":
+      paymentStatusText = "✅ Malipo yamethibitishwa.";
+      break;
+    case "failed":
+      paymentStatusText = "Malipo yameshindikana / yamekataliwa.";
+      break;
+    default:
+      paymentStatusText = paymentStatusRaw;
+  }
+
+  // Map order fulfillment status to friendly text
+  let orderStatusText = "";
+  switch (orderStatusRaw) {
+    case "pending":
+      orderStatusText = "Oda yako imesajiliwa, inasubiri maandalizi.";
+      break;
+    case "preparing":
+      orderStatusText = "Bidhaa zinaandaliwa kwa ajili ya kusafirishwa.";
+      break;
+    case "out_for_delivery":
+      orderStatusText = "Bidhaa zimekabidhiwa mpeleka mzigo, ziko njiani.";
+      break;
+    case "delivered":
+      orderStatusText = "Bidhaa zimefikishwa kwa mlengwa.";
+      break;
+    case "cancelled":
+      orderStatusText = "Oda imeghairishwa.";
+      break;
+    default:
+      orderStatusText = orderStatusRaw;
+  }
+
+  const agentPhone = order.delivery_agent_phone || null;
+
+  const lines: string[] = [];
+  lines.push(t(lang, "track.header"));
+  lines.push(
+    t(lang, "track.line_code", {
+      code: orderCode,
+    })
+  );
+  lines.push(
+    t(lang, "track.line_status_payment", {
+      paymentStatus: paymentStatusText,
+    })
+  );
+  lines.push(
+    t(lang, "track.line_status_order", {
+      orderStatus: orderStatusText,
+    })
+  );
+  if (agentPhone) {
+    lines.push(
+      t(lang, "track.line_agent_phone", {
+        agentPhone,
+      })
+    );
+  }
+
+  await sendBotText(user, lines.join("\n"));
+
   setFlow(user, null);
   return;
 }
+
 
   }
 }
