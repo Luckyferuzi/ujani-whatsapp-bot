@@ -18,11 +18,15 @@ export const inboxRoutes = Router();
  * Left pane list
  */
 // GET /api/conversations
-inboxRoutes.get("/conversations", async (req, res) => {
+// ==============================
+// GET /api/conversations
+// Left pane list (like WhatsApp)
+// ==============================
+inboxRoutes.get("/conversations", async (_req, res) => {
   try {
-    // Base conversations + user info (match your existing query structure)
-    const convs = await db("conversations as c")
-      .join("wa_users as u", "c.user_id", "u.id")
+    // Base list: conversations + customer info
+    const items = await db("conversations as c")
+      .join("customers as u", "u.id", "c.customer_id")
       .select(
         "c.id",
         "u.name",
@@ -31,55 +35,60 @@ inboxRoutes.get("/conversations", async (req, res) => {
         "c.agent_allowed",
         "c.last_user_message_at"
       )
-      .orderBy("c.last_user_message_at", "desc");
+      .orderBy("c.last_user_message_at", "desc")
+      .limit(100);
 
-    if (convs.length === 0) {
+    if (items.length === 0) {
       return res.json({ items: [] });
     }
 
-    const ids = convs.map((c: any) => c.id);
+    const convoIds = items.map((row: any) => row.id as number);
 
-    // All messages for these conversations so we can compute:
-    // - last message text
-    // - total message count
-    const messages = await db("messages")
-      .whereIn("conversation_id", ids)
-      .orderBy("created_at", "asc") // oldest first, we'll override last
+    // Gather messages for meta info: last message text + total message count
+    const msgRows = await db("messages")
+      .whereIn("conversation_id", convoIds)
+      .orderBy("created_at", "asc")
       .select("conversation_id", "body", "created_at");
 
-    const byConv: Record<
+    const metaByConvo: Record<
       number,
       { last_message_text: string | null; message_count: number }
     > = {};
 
-    for (const m of messages) {
+    for (const m of msgRows) {
       const cid = m.conversation_id as number;
-      if (!byConv[cid]) {
-        byConv[cid] = { last_message_text: null, message_count: 0 };
+      if (!metaByConvo[cid]) {
+        metaByConvo[cid] = { last_message_text: null, message_count: 0 };
       }
-      byConv[cid].message_count += 1;
+      metaByConvo[cid].message_count += 1;
       if (m.body && m.body.trim().length > 0) {
-        byConv[cid].last_message_text = m.body;
+        // Because we iterate ascending by created_at,
+        // this will end up as the last non-empty message body.
+        metaByConvo[cid].last_message_text = m.body;
       }
     }
 
-    const items = convs.map((c: any) => {
-      const meta = byConv[c.id] ?? {
+    // Add unread_count + meta to each row
+    for (const row of items) {
+      // unread messages from customer (direction=in, status=delivered)
+      const unreadRow = await db("messages")
+        .where({
+          conversation_id: row.id,
+          direction: "in",
+          status: "delivered",
+        })
+        .count<{ count: string }>("id as count")
+        .first();
+
+      (row as any).unread_count = Number(unreadRow?.count ?? 0);
+
+      const meta = metaByConvo[row.id as number] ?? {
         last_message_text: null,
         message_count: 0,
       };
-      return {
-        id: String(c.id),
-        name: c.name,
-        phone: c.phone,
-        lang: c.lang,
-        agent_allowed: !!c.agent_allowed,
-        last_user_message_at: c.last_user_message_at,
-        unread_count: 0, // you can implement true "unread" later
-        last_message_text: meta.last_message_text,
-        message_count: meta.message_count,
-      };
-    });
+      (row as any).last_message_text = meta.last_message_text;
+      (row as any).message_count = meta.message_count;
+    }
 
     res.json({ items });
   } catch (err: any) {
