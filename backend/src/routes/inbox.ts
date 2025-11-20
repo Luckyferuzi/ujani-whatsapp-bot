@@ -13,18 +13,10 @@ export const inboxRoutes = Router();
  * GET /api/conversations
  * Left pane list (like WhatsApp)
  */
-/**
- * GET /api/conversations
- * Left pane list
- */
-// GET /api/conversations
-// ==============================
-// GET /api/conversations
-// Left pane list (like WhatsApp)
-// ==============================
+
 inboxRoutes.get("/conversations", async (_req, res) => {
   try {
-    // Base list: conversations + customer info
+    // Base: conversations + customer info
     const items = await db("conversations as c")
       .join("customers as u", "u.id", "c.customer_id")
       .select(
@@ -44,50 +36,42 @@ inboxRoutes.get("/conversations", async (_req, res) => {
 
     const convoIds = items.map((row: any) => row.id as number);
 
-    // Gather messages for meta info: last message text + total message count
+    // Last message text per conversation
     const msgRows = await db("messages")
       .whereIn("conversation_id", convoIds)
       .orderBy("created_at", "asc")
       .select("conversation_id", "body", "created_at");
 
-    const metaByConvo: Record<
-      number,
-      { last_message_text: string | null; message_count: number }
-    > = {};
+    const metaByConvo: Record<number, { last_message_text: string | null }> =
+      {};
 
     for (const m of msgRows) {
       const cid = m.conversation_id as number;
       if (!metaByConvo[cid]) {
-        metaByConvo[cid] = { last_message_text: null, message_count: 0 };
+        metaByConvo[cid] = { last_message_text: null };
       }
-      metaByConvo[cid].message_count += 1;
       if (m.body && m.body.trim().length > 0) {
-        // Because we iterate ascending by created_at,
-        // this will end up as the last non-empty message body.
+        // ascending order ⇒ this ends up as the latest non-empty
         metaByConvo[cid].last_message_text = m.body;
       }
     }
 
-    // Add unread_count + meta to each row
+    // unread_count = inbound messages that are not yet read
     for (const row of items) {
-      // unread messages from customer (direction=in, status=delivered)
       const unreadRow = await db("messages")
-        .where({
-          conversation_id: row.id,
-          direction: "in",
-          status: "delivered",
+        .where({ conversation_id: row.id, direction: "inbound" })
+        .where((qb) => {
+          qb.whereNull("status").orWhereNot("status", "read");
         })
         .count<{ count: string }>("id as count")
         .first();
 
-      (row as any).unread_count = Number(unreadRow?.count ?? 0);
-
       const meta = metaByConvo[row.id as number] ?? {
         last_message_text: null,
-        message_count: 0,
       };
+
+      (row as any).unread_count = Number(unreadRow?.count ?? 0);
       (row as any).last_message_text = meta.last_message_text;
-      (row as any).message_count = meta.message_count;
     }
 
     res.json({ items });
@@ -98,7 +82,6 @@ inboxRoutes.get("/conversations", async (_req, res) => {
       .json({ error: err?.message ?? "Failed to list conversations" });
   }
 });
-
 
 /**
  * GET /api/conversations/:id/messages
@@ -297,6 +280,35 @@ inboxRoutes.delete("/conversations/:id/messages", async (req, res) => {
 
 // Allow or disallow agent replies for a conversation
 // POST /api/conversations/:id/agent-allow
+
+// ==============================
+// POST /api/conversations/:id/read
+// Mark all inbound delivered messages as read
+// ==============================
+// ==============================
+// POST /api/conversations/:id/read
+// Mark all inbound messages as read
+// ==============================
+inboxRoutes.post("/conversations/:id/read", async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) {
+    return res.status(400).json({ error: "Invalid conversation id" });
+  }
+
+  try {
+    await db("messages")
+      .where({ conversation_id: id, direction: "inbound" })
+      .update({ status: "read" });
+
+    res.json({ ok: true });
+  } catch (err: any) {
+    console.error("POST /conversations/:id/read failed", err);
+    res
+      .status(500)
+      .json({ error: err?.message ?? "Failed to mark as read" });
+  }
+});
+
 inboxRoutes.post("/conversations/:id/agent-allow", async (req, res) => {
   try {
     const id = Number(req.params.id);

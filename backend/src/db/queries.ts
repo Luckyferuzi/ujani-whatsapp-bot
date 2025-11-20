@@ -84,6 +84,7 @@ export async function insertInboundMessage(
       direction: "inbound",
       type,
       body,
+      status: "delivered"
     })
     .returning([
       "id",
