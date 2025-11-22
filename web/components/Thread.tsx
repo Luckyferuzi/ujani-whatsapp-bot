@@ -9,9 +9,9 @@ import type { Convo } from "./ConversationList";
 type Msg = {
   id: string | number;
   conversation_id: string | number;
-  direction: "in" | "out";
-  type: "text" | "template" | string;
-  body: string;
+  direction: "in" | "inbound" | "out" | "outbound";
+  type: string;
+  body: string | null;
   status?: string | null;
   created_at: string;
 };
@@ -29,41 +29,40 @@ function formatTime(iso: string) {
   });
 }
 
-/**
- * Turn technical bodies like "[interactive:PRODUCT_KIBOKO]" into human text
- * for the inbox UI.
- */
-function formatMessageBody(body: string) {
-  if (!body) return "";
-
-  // 1) [interactive:XYZ] → nice Swahili description
-  const interactiveMatch = body.match(/^\[interactive:([A-Z0-9_]+)\]$/);
-  if (interactiveMatch) {
-    const id = interactiveMatch[1];
-
-    const labels: Record<string, string> = {
-      PRODUCT_KIBOKO: "Mteja amefungua bidhaa: Ujani Kiboko",
-      BUY_KIBOKO: "Mteja amechagua: Nunua Kiboko sasa",
-      DAR_INSIDE: "Mteja amechagua: Ndani ya Dar es Salaam",
-      DAR_OUTSIDE: "Mteja amechagua: Nje ya Dar es Salaam",
-      IN_DAR_DELIV: "Mteja amechagua: Delivery ndani ya Dar",
-      IN_DAR_PICKUP: "Mteja amechagua: Kuchukua mwenyewe (pickup)",
-      ACTION_VIEW_CART: "Mteja ameomba kuona kikapu",
-      ACTION_CHECKOUT: "Mteja amechagua kwenda malipo",
-      ACTION_TALK_TO_AGENT: "Mteja ameomba kuongea na agent",
-      // ongeza zingine kadri unavyoziona kwenye DB
-    };
-
-    return labels[id] ?? `Mteja amechagua: ${id}`;
-  }
-
-  // 2) LOCATION lat,lon → friendly text
+// LOCATION handling: "LOCATION lat,lng"
+function renderBody(msg: Msg) {
+  const body = msg.body ?? "";
   if (body.startsWith("LOCATION ")) {
-    return "Mteja ametuma lokesheni (GPS pin)";
+    const raw = body.substring("LOCATION ".length).trim();
+    const [latStr, lngStr] = raw.split(",").map((p) => p.trim());
+    const lat = Number(latStr);
+    const lng = Number(lngStr);
+
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      return <div className="thread-text">{body}</div>;
+    }
+
+    const url = `https://www.google.com/maps?q=${lat},${lng}`;
+
+    return (
+      <div className="thread-location">
+        <div className="thread-text">Mteja ametuma lokesheni</div>
+        <div className="thread-location-coords">
+          {lat.toFixed(5)}, {lng.toFixed(5)}
+        </div>
+        <a
+          href={url}
+          target="_blank"
+          rel="noreferrer"
+          className="thread-location-link"
+        >
+          Fungua kwenye ramani
+        </a>
+      </div>
+    );
   }
 
-  // 3) default plain text
-  return body;
+  return <div className="thread-text">{body}</div>;
 }
 
 export default function Thread({ convo }: ThreadProps) {
@@ -75,7 +74,45 @@ export default function Thread({ convo }: ThreadProps) {
   const [text, setText] = useState("");
   const [toggling, setToggling] = useState(false);
   const [sending, setSending] = useState(false);
+
+  // scrolling
+  const messagesRef = useRef<HTMLDivElement | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  const firstUnreadRef = useRef<HTMLDivElement | null>(null);
+  const [isAtBottom, setIsAtBottom] = useState(true);
+  const initialScrolledRef = useRef(false);
+
+  // figure out the index of the OLDEST unread inbound message
+  const oldestUnreadIndex = (() => {
+    if (!messages.length) return -1;
+    return messages.findIndex(
+      (m) =>
+        (m.direction === "in" || m.direction === "inbound") &&
+        m.status !== "read"
+    );
+  })();
+
+  const scrollToBottom = (behavior: ScrollBehavior = "auto") => {
+    if (bottomRef.current) {
+      bottomRef.current.scrollIntoView({ behavior, block: "end" });
+    }
+  };
+
+  const scrollToOldestUnread = () => {
+    if (oldestUnreadIndex < 0) return false;
+    if (!firstUnreadRef.current) return false;
+    firstUnreadRef.current.scrollIntoView({ behavior: "auto", block: "start" });
+    return true;
+  };
+
+  const handleScroll = () => {
+    const el = messagesRef.current;
+    if (!el) return;
+
+    const threshold = 50; // px from bottom to consider "at bottom"
+    const distFromBottom = el.scrollHeight - (el.scrollTop + el.clientHeight);
+    setIsAtBottom(distFromBottom <= threshold);
+  };
 
   async function loadMessages() {
     setLoading(true);
@@ -92,22 +129,33 @@ export default function Thread({ convo }: ThreadProps) {
     }
   }
 
-  function scrollToBottom(behavior: ScrollBehavior = "auto") {
-    if (bottomRef.current) {
-      bottomRef.current.scrollIntoView({ behavior, block: "end" });
-    }
-  }
-
-  // Initial load + when conversation changes
+  // Initial load when conversation changes
   useEffect(() => {
     setAgentAllowed(convo.agent_allowed);
-    loadMessages().then(() => scrollToBottom("auto"));
+    initialScrolledRef.current = false;
+    void loadMessages();
   }, [convo.id, convo.agent_allowed]);
 
-  // Smooth scroll when new messages arrive
+  // Handle scroll position when messages change
   useEffect(() => {
-    if (messages.length > 0) scrollToBottom("smooth");
-  }, [messages.length]);
+    if (!messages.length) return;
+
+    // FIRST time we loaded messages for this conversation
+    if (!initialScrolledRef.current) {
+      const didScrollToUnread = scrollToOldestUnread();
+      if (!didScrollToUnread) {
+        scrollToBottom("auto");
+      }
+      initialScrolledRef.current = true;
+      setIsAtBottom(true);
+      return;
+    }
+
+    // AFTER initial load: only auto-scroll if user is already at bottom
+    if (isAtBottom) {
+      scrollToBottom("smooth");
+    }
+  }, [messages, oldestUnreadIndex, isAtBottom]);
 
   // Live Socket.IO updates: append new messages
   useEffect(() => {
@@ -153,37 +201,39 @@ export default function Thread({ convo }: ThreadProps) {
     }
   }
 
-  async function handleSend(e: React.FormEvent) {
-    e.preventDefault();
-    const value = text.trim();
-    if (!value) return;
+async function handleSend(e: React.FormEvent) {
+  e.preventDefault();
+  const value = text.trim();
+  if (!value) return;
 
-    if (!agentAllowed) {
-      alert("Bot mode iko ON. Washa Agent Mode ili kujibu.");
-      return;
-    }
-
-    setSending(true);
-    try {
-      await api("/api/send", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          // 🔴 Backend expects `conversationId` exactly like this
-          conversationId: convo.id,
-          text: value,
-        }),
-      });
-
-      // new message will arrive via socket
-      setText("");
-    } catch (err) {
-      console.error("Failed to send message", err);
-      alert("Imeshindikana kutuma ujumbe, angalia server logs.");
-    } finally {
-      setSending(false);
-    }
+  if (!agentAllowed) {
+    alert("Bot mode iko ON. Washa Agent Mode ili kujibu.");
+    return;
   }
+
+  setSending(true);
+  try {
+    await api("/api/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        conversationId: convo.id,
+        text: value,
+      }),
+    });
+
+    setText("");
+
+    // 🔁 Ensure we see our own message even if socket doesn't fire
+    await loadMessages();
+  } catch (err) {
+    console.error("Failed to send message", err);
+    alert("Imeshindikana kutuma ujumbe, angalia server logs.");
+  } finally {
+    setSending(false);
+  }
+}
+
 
   const title = convo.name || formatPhonePretty(convo.phone);
 
@@ -234,32 +284,44 @@ export default function Thread({ convo }: ThreadProps) {
         ) : messages.length === 0 ? (
           <div className="thread-empty">Hakuna ujumbe bado.</div>
         ) : (
-          <div className="thread-messages">
-            {messages.map((m) => (
-              <div
-                key={m.id}
-                className={
-                  "thread-message " +
-                  (m.direction === "out"
-                    ? "thread-message--outgoing"
-                    : "thread-message--incoming")
-                }
-              >
-                <div className="thread-bubble">
-                  <div className="thread-text">
-                    {formatMessageBody(m.body)}
-                  </div>
-                  <div className="thread-meta">
-                    <span className="thread-time">
-                      {formatTime(m.created_at)}
-                    </span>
-                    {m.status && (
-                      <span className="thread-status"> · {m.status}</span>
-                    )}
+          <div
+            className="thread-messages"
+            ref={messagesRef}
+            onScroll={handleScroll}
+          >
+            {messages.map((m, idx) => {
+              const inbound =
+                m.direction === "in" || m.direction === "inbound";
+              const outbound = !inbound;
+              const isFirstUnread = idx === oldestUnreadIndex;
+
+              return (
+                <div
+                  key={m.id}
+                  ref={isFirstUnread ? firstUnreadRef : null}
+                  className={
+                    "thread-message " +
+                    (outbound
+                      ? "thread-message--outgoing"
+                      : "thread-message--incoming")
+                  }
+                >
+                  <div className="thread-bubble">
+                    {renderBody(m)}
+                    <div className="thread-meta">
+                      <span className="thread-time">
+                        {formatTime(m.created_at)}
+                      </span>
+                      {outbound && m.status === "read" && (
+                        <span className="thread-ticks" aria-label="read">
+                          ✓✓
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
             <div ref={bottomRef} />
           </div>
         )}

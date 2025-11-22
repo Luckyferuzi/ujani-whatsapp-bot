@@ -5,16 +5,31 @@ import { useState } from "react";
 import ConversationList, { Convo } from "@/components/ConversationList";
 import Thread from "@/components/Thread";
 import RightPanel from "@/components/RightPanel";
+import { api } from "@/lib/api";
 
 export default function InboxPage() {
   const [active, setActive] = useState<Convo | null>(null);
+
+  const handlePick = async (convo: Convo) => {
+    // update selected conversation in the UI
+    setActive(convo);
+
+    // mark this conversation as read in the backend
+    try {
+      await api(`/api/conversations/${convo.id}/read`, {
+        method: "POST",
+      });
+    } catch (err) {
+      console.error("Failed to mark conversation as read", err);
+    }
+  };
 
   return (
     <div className="inbox-root">
       {/* Header */}
       <div className="inbox-header">
         <div className="inbox-header-left">
-          <span className="inbox-header-title">Ujani Herbals Chatbot — Inbox</span>
+          <span className="inbox-header-title">Ujani Admin — Inbox</span>
         </div>
         <div className="inbox-header-right">
           <button className="header-button">Minimize</button>
@@ -30,7 +45,7 @@ export default function InboxPage() {
       <div className="inbox-main">
         <ConversationList
           activeId={active ? active.id : null}
-          onPick={setActive}
+          onPick={handlePick}
         />
 
         {active ? (
