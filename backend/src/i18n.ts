@@ -107,6 +107,9 @@ const dict: Dict = {
     'cart.choose_action': 'Endelea na hatua:',
     'payment.done_cta': 'Ukishalipa, bonyeza kitufe hapa chini kuthibitisha.',
     'payment.done_button': 'Nimemaliza kulipa',
+    'payment.confirm_with_remaining':
+      'Tumethibitisha umelipa {paid} TZS kwa oda {orderCode}.\n' +
+      'Mpaka sasa umeshalipa jumla ya {paidSoFar} TZS; salio ni {remaining} TZS (jumla ya oda ni {total} TZS).',
 
     'checkout.summary_header': '📦 Muhtasari wa Oda',
     'checkout.summary_name': 'Jina: {name}',
@@ -151,9 +154,12 @@ const dict: Dict = {
     'track.line_status_payment': '• Hali ya malipo: *{{paymentStatus}}*',
     'track.line_status_order': '• Hali ya oda: *{{orderStatus}}*',
     'track.line_agent_phone': '• Namba ya mpeleka mzigo: *{{agentPhone}}*',
-
-
-
+    'order.preparing_message':
+      'Oda yako {orderCode} ipo kwenye hatua ya maandalizi ya bidhaa. Tutakutaarifu ikishatoka kwa mpeleka mzigo.',
+    'order.out_for_delivery_message':
+      'Oda yako {orderCode} imekabidhiwa mpeleka mzigo na iko njiani kufika. Namba ya mpeleka mzigo ni {deliveryAgentPhone}. Tafadhali mpigie au mtumie WhatsApp kwa mawasiliano zaidi.',
+    'order.delivered_message':
+      'Oda yako {orderCode} imewasilishwa. Asante kwa kuamini Ujani Herbals 🌿.',
   },
 
   en: {
@@ -255,6 +261,9 @@ const dict: Dict = {
     'checkout.summary_region': 'Region: {region}',
     'payment.done_cta': 'After paying, click the button below to confirm.',
     'payment.done_button': 'I have completed payment',
+    'payment.confirm_with_remaining':
+      'We have confirmed your payment of {paid} TZS for order {orderCode}.\n' +
+      'So far you have paid a total of {paidSoFar} TZS; the remaining balance is {remaining} TZS (total order is {total} TZS).',
 
     'proof.ask': 'Send a *payment screenshot* or the *payer’s three names*.',
     'proof.ok_image': '✅ Screenshot received. We’re verifying your payment — please wait.',
@@ -291,7 +300,16 @@ const dict: Dict = {
     'track.line_status_payment': '• Payment status: *{{paymentStatus}}*',
     'track.line_status_order': '• Order status: *{{orderStatus}}*',
     'track.line_agent_phone': '• Delivery agent phone: *{{agentPhone}}*',
+    'track.line_payment_amounts':
+      '• Order total: *{total} TZS*; paid so far: *{paid} TZS*; remaining balance: *{remaining} TZS*.',
+    'order.preparing_message':
+      'Your order {orderCode} is now being prepared. We will notify you once it is handed over to the delivery rider.',
+    'order.out_for_delivery_message':
+      'Your order {orderCode} has been handed to the delivery rider and is on the way. Rider phone: {deliveryAgentPhone}. You can call or WhatsApp them for more info.',
+    'order.delivered_message':
+      'Your order {orderCode} has been delivered. Thank you for choosing Ujani Herbals 🌿.',
     
+
 
   },
 };

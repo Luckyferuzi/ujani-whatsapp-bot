@@ -1018,9 +1018,9 @@ case "TRACK_ASK_NAME": {
   let result: { order: any; payment: any } | null = null;
 
   // 1) If looks like "UJ-3" (or uj-3), treat as order id
-  const m = /^uj-(\d+)$/i.exec(query);
-  if (m) {
-    const id = Number(m[1]);
+  const match = /^uj-(\d+)$/i.exec(query);
+  if (match) {
+    const id = Number(match[1]);
     if (Number.isFinite(id)) {
       result = await findOrderById(id);
     }
@@ -1043,7 +1043,7 @@ case "TRACK_ASK_NAME": {
   const paymentStatusRaw = payment?.status ?? "none";
   const orderStatusRaw = order.status ?? "pending";
 
-  // Map payment status to friendly text (Swahili for now)
+  // Map payment status to friendly text (Swahili/English-friendly)
   let paymentStatusText = "";
   switch (paymentStatusRaw) {
     case "awaiting":
@@ -1061,6 +1061,7 @@ case "TRACK_ASK_NAME": {
       break;
     default:
       paymentStatusText = paymentStatusRaw;
+      break;
   }
 
   // Map order fulfillment status to friendly text
@@ -1083,9 +1084,21 @@ case "TRACK_ASK_NAME": {
       break;
     default:
       orderStatusText = orderStatusRaw;
+      break;
   }
 
-  const agentPhone = order.delivery_agent_phone || null;
+  const agentPhone: string | null =
+    (order.delivery_agent_phone as string | undefined) ?? null;
+
+  const totalTzs = Number(order.total_tzs ?? 0);
+  const paidTzs = Number(payment?.amount_tzs ?? 0);
+  const remainingTzs = Math.max(0, totalTzs - paidTzs);
+
+  const totalStr = totalTzs ? totalTzs.toLocaleString("sw-TZ") : "0";
+  const paidStr = paidTzs ? paidTzs.toLocaleString("sw-TZ") : "0";
+  const remainingStr = remainingTzs
+    ? remainingTzs.toLocaleString("sw-TZ")
+    : "0";
 
   const lines: string[] = [];
   lines.push(t(lang, "track.header"));
@@ -1104,6 +1117,13 @@ case "TRACK_ASK_NAME": {
       orderStatus: orderStatusText,
     })
   );
+  lines.push(
+    t(lang, "track.line_payment_amounts", {
+      total: totalStr,
+      paid: paidStr,
+      remaining: remainingStr,
+    })
+  );
   if (agentPhone) {
     lines.push(
       t(lang, "track.line_agent_phone", {
@@ -1117,8 +1137,6 @@ case "TRACK_ASK_NAME": {
   setFlow(user, null);
   return;
 }
-
-
   }
 }
 

@@ -4,10 +4,15 @@ import db from "../db/knex.js";
 import { sendText } from "../whatsapp.js";
 import { emit } from "../sockets.js";
 import { getOrdersForCustomer } from "../db/queries.js";
-
+import { t, Lang } from "../i18n.js";
 
 
 export const inboxRoutes = Router();
+
+function formatTzs(amount: number): string {
+  if (!Number.isFinite(amount)) return "0";
+  return Math.floor(amount).toLocaleString("sw-TZ");
+}
 
 /**
  * GET /api/conversations
@@ -107,6 +112,10 @@ inboxRoutes.get("/conversations/:id/messages", async (req, res) => {
 // GET /api/conversations/:id/summary
 // ==============================
 // backend/src/routes/inbox.ts
+// ==============================
+// GET /api/conversations/:id/summary
+// ==============================
+// backend/src/routes/inbox.ts
 
 inboxRoutes.get("/conversations/:id/summary", async (req, res) => {
   const conversationId = Number(req.params.id);
@@ -155,29 +164,35 @@ inboxRoutes.get("/conversations/:id/summary", async (req, res) => {
     let payment: any = null;
 
     if (order) {
+      const totalTzs = Number(order.total_tzs ?? 0);
+
       delivery = {
         // match actual DB columns
         mode: order.delivery_mode, // e.g. "delivery" | "pickup"
-        description: null, // you can later build a human string if you want
+        description: null, // optional human text later
         km: order.km,
         fee_tzs: order.fee_tzs,
       };
 
-      // 3) Latest payment for that order (if any)
+      // 3) Aggregated payment for that order (single row)
       const payRow = await db("payments")
         .where({ order_id: order.id })
         .orderBy("created_at", "desc")
         .first();
 
       if (payRow) {
+        const paidAmount = Number(payRow.amount_tzs ?? 0);
+        const remainingAmount = Math.max(0, totalTzs - paidAmount);
+
         payment = {
           id: payRow.id,
+          order_id: order.id,
           method: payRow.method,
-          status: payRow.status,
-          // these fields don't exist in your schema yet,
-          // so we just send null so the UI can handle it.
+          status: payRow.status ?? "awaiting",
           recipient: null,
-          amount_tzs: null,
+          amount_tzs: paidAmount || null,
+          total_tzs: totalTzs || null,
+          remaining_tzs: remainingAmount || null,
         };
       }
     }
@@ -195,9 +210,15 @@ inboxRoutes.get("/conversations/:id/summary", async (req, res) => {
   }
 });
 
+
 /**
  * GET /api/conversations/:id/orders
  * All orders for the customer behind this conversation
+ */
+/**
+ * GET /api/conversations/:id/orders
+ * All orders for the customer behind this conversation
+ * (each item also carries the customer_name for clarity)
  */
 inboxRoutes.get("/conversations/:id/orders", async (req, res) => {
   const conversationId = Number(req.params.id);
@@ -206,10 +227,11 @@ inboxRoutes.get("/conversations/:id/orders", async (req, res) => {
   }
 
   try {
-    // Find the conversation and its customer
-    const conv = await db("conversations")
-      .where({ id: conversationId })
-      .select("customer_id")
+    // Find the conversation, its customer id, and the customer name
+    const conv = await db("conversations as c")
+      .leftJoin("customers as u", "u.id", "c.customer_id")
+      .where("c.id", conversationId)
+      .select("c.customer_id", "u.name as customer_name")
       .first();
 
     if (!conv || !conv.customer_id) {
@@ -228,18 +250,22 @@ inboxRoutes.get("/conversations/:id/orders", async (req, res) => {
         "phone",
         "region",
         "created_at"
-        // If later you add an order_code column:
-        // "order_code"
+        // "order_code" // uncomment if you add this column to the select
       )
       .orderBy("created_at", "desc")
       .limit(50);
 
-    res.json({ items: orders });
+    const items = (orders as any[]).map((row) => ({
+      ...row,
+      customer_name: conv.customer_name ?? null,
+    }));
+
+    res.json({ items });
   } catch (err: any) {
     console.error("orders history error:", err);
     res
       .status(500)
-      .json({ error: err?.message || "Failed to load order history" });
+      .json({ error: err?.message || "Failed to load orders history" });
   }
 });
 
@@ -344,9 +370,18 @@ inboxRoutes.post("/conversations/:id/agent-allow", async (req, res) => {
  * - emits socket event payment.updated
  * - when status === "paid", sends WhatsApp confirmation to customer
  */
+/**
+ * POST /api/payments/:id/status
+ *
+ * Body:
+ *   {
+ *     status: "verifying" | "paid" | "failed",
+ *     amount_tzs?: number  // required when status === "paid" (this is the new payment chunk)
+ *   }
+ */
 inboxRoutes.post("/payments/:id/status", async (req, res) => {
   const id = Number(req.params.id);
-  const { status } = req.body ?? {};
+  const { status, amount_tzs } = req.body ?? {};
 
   if (!Number.isFinite(id)) {
     return res.status(400).json({ error: "Invalid id" });
@@ -356,7 +391,7 @@ inboxRoutes.post("/payments/:id/status", async (req, res) => {
   }
 
   try {
-    // Get payment + order + customer (no conversation_id / amount_tzs here)
+    // Get payment + order + customer
     const payment = await db("payments as p")
       .leftJoin("orders as o", "o.id", "p.order_id")
       .leftJoin("customers as u", "u.id", "o.customer_id")
@@ -364,7 +399,10 @@ inboxRoutes.post("/payments/:id/status", async (req, res) => {
       .select(
         "p.id",
         "p.status",
+        "p.amount_tzs",
         "p.order_id",
+        "o.total_tzs",
+        "o.order_code",
         "o.customer_id",
         "u.wa_id",
         "u.lang"
@@ -375,13 +413,62 @@ inboxRoutes.post("/payments/:id/status", async (req, res) => {
       return res.status(404).json({ error: "Payment not found" });
     }
 
-    await db("payments").where({ id }).update({ status });
+    let newAmountTotal = Number(payment.amount_tzs ?? 0);
+    let justAdded = 0;
+
+    // When marking as "paid", we treat amount_tzs as an *extra installment*.
+    if (status === "paid") {
+      const delta = Number(amount_tzs);
+      if (!Number.isFinite(delta) || delta <= 0) {
+        return res.status(400).json({
+          error:
+            "amount_tzs must be a positive number when marking payment as paid",
+        });
+      }
+      justAdded = Math.floor(delta);
+      newAmountTotal = Math.floor(Number(payment.amount_tzs ?? 0) + justAdded);
+    }
+
+    const update: any = { status };
+    if (status === "paid") {
+      update.amount_tzs = newAmountTotal;
+    }
+
+    await db("payments").where({ id }).update(update);
 
     // Emit to UI (for RightPanel refresh)
-    req.app.get("io")?.emit("payment.updated", { id, status });
+    req.app.get("io")?.emit("payment.updated", {
+      id,
+      status,
+      amount_tzs: status === "paid" ? newAmountTotal : payment.amount_tzs,
+    });
 
     // If paid: send confirmation message to customer + store outbound message
-    if (status === "paid" && payment.wa_id && payment.customer_id) {
+    if (
+      status === "paid" &&
+      payment.wa_id &&
+      payment.customer_id &&
+      payment.order_id
+    ) {
+      const totalOrderAmount = Math.floor(Number(payment.total_tzs ?? 0));
+      const paidSoFar = Math.floor(newAmountTotal);
+      const remainingAmount = Math.max(0, totalOrderAmount - paidSoFar);
+
+      const lang: Lang = (payment.lang === "en" || payment.lang === "sw"
+        ? payment.lang
+        : "sw") as Lang;
+
+      const orderCode =
+        payment.order_code || `UJ-${payment.order_id as number}`;
+
+      const msg = t(lang, "payment.confirm_with_remaining", {
+        orderCode,
+        paid: formatTzs(justAdded),
+        paidSoFar: formatTzs(paidSoFar),
+        remaining: formatTzs(remainingAmount),
+        total: formatTzs(totalOrderAmount),
+      });
+
       // Find the most recent conversation for this customer
       const convo = await db("conversations")
         .where({ customer_id: payment.customer_id })
@@ -390,9 +477,6 @@ inboxRoutes.post("/payments/:id/status", async (req, res) => {
 
       const conversationId = convo?.id as number | undefined;
 
-      const msg =
-        "Tumepokea malipo. Order yako inaandaliwa. Asante kwa kununua bidhaa zetu 🌿";
-
       try {
         await sendText(payment.wa_id, msg);
       } catch (e) {
@@ -400,16 +484,19 @@ inboxRoutes.post("/payments/:id/status", async (req, res) => {
       }
 
       if (conversationId) {
-        await db("messages").insert({
-          conversation_id: conversationId,
-          direction: "out",
-          type: "text",
-          body: msg,
-          status: "sent",
-        });
+        const [msgRow] = await db("messages")
+          .insert({
+            conversation_id: conversationId,
+            direction: "out",
+            type: "text",
+            body: msg,
+            status: "sent",
+          })
+          .returning("*");
 
         req.app.get("io")?.emit("message.created", {
           conversation_id: conversationId,
+          message: msgRow,
         });
       }
     }
@@ -420,6 +507,8 @@ inboxRoutes.post("/payments/:id/status", async (req, res) => {
     res.status(500).json({ error: e?.message ?? "failed" });
   }
 });
+
+
 
 inboxRoutes.get(
   "/customers/:customerId/orders",
@@ -447,9 +536,28 @@ inboxRoutes.get(
 
 // POST /api/orders/:id/status
 // Body: { status: "pending" | "preparing" | "out_for_delivery" | "delivered" | "cancelled" }
+// POST /api/orders/:id/status
+// Body:
+//   {
+//     status: "pending" | "preparing" | "out_for_delivery" | "delivered" | "cancelled",
+//     delivery_agent_phone?: string // required when status === "out_for_delivery"
+//   }
+// POST /api/orders/:id/status
+// Body:
+//   {
+//     status: "pending" | "preparing" | "out_for_delivery" | "delivered" | "cancelled",
+//     delivery_agent_phone?: string // required when status === "out_for_delivery"
+//   }
 inboxRoutes.post("/orders/:id/status", async (req, res) => {
   const id = Number(req.params.id);
-  const { status } = req.body as { status?: string };
+
+  const body = req.body as {
+    status?: string;
+    delivery_agent_phone?: string;
+  };
+
+  const status = body.status;
+  let deliveryAgentPhone: string | undefined = body.delivery_agent_phone;
 
   if (!Number.isFinite(id)) {
     return res.status(400).json({ error: "Invalid order id" });
@@ -466,14 +574,96 @@ inboxRoutes.post("/orders/:id/status", async (req, res) => {
     return res.status(400).json({ error: "Invalid status" });
   }
 
+  if (status === "out_for_delivery") {
+    if (
+      !deliveryAgentPhone ||
+      typeof deliveryAgentPhone !== "string" ||
+      deliveryAgentPhone.trim().length < 4
+    ) {
+      return res.status(400).json({
+        error:
+          "delivery_agent_phone is required when marking order as out_for_delivery",
+      });
+    }
+    // Clean it up once and store
+    deliveryAgentPhone = deliveryAgentPhone.trim();
+  }
+
   try {
+    const update: any = { status };
+    if (status === "out_for_delivery" && deliveryAgentPhone) {
+      update.delivery_agent_phone = deliveryAgentPhone;
+    }
+
     const [order] = await db("orders")
       .where({ id })
-      .update({ status })
+      .update(update)
       .returning("*");
 
     if (!order) {
       return res.status(404).json({ error: "Order not found" });
+    }
+
+    // Notify customer via WhatsApp when certain statuses are set
+    if (order.customer_id) {
+      const customer = await db("customers")
+        .where({ id: order.customer_id })
+        .first();
+
+      const waId = customer?.wa_id as string | undefined;
+      const lang: Lang = (customer?.lang === "en" || customer?.lang === "sw"
+        ? customer.lang
+        : "sw") as Lang;
+
+      const orderCode = order.order_code || `UJ-${order.id}`;
+      let msg: string | null = null;
+
+      if (status === "preparing") {
+        msg = t(lang, "order.preparing_message", { orderCode });
+      } else if (status === "out_for_delivery") {
+        const phoneForMsg =
+          deliveryAgentPhone ??
+          ((order.delivery_agent_phone as string | undefined) ?? "");
+        msg = t(lang, "order.out_for_delivery_message", {
+          orderCode,
+          deliveryAgentPhone: phoneForMsg,
+        });
+      } else if (status === "delivered") {
+        msg = t(lang, "order.delivered_message", { orderCode });
+      }
+
+      if (waId && msg) {
+        // Find latest conversation to log the outbound message
+        const convo = await db("conversations")
+          .where({ customer_id: order.customer_id })
+          .orderBy("created_at", "desc")
+          .first();
+
+        const conversationId = convo?.id as number | undefined;
+
+        try {
+          await sendText(waId, msg);
+        } catch (e) {
+          console.warn("Failed to send order status message:", e);
+        }
+
+        if (conversationId) {
+          const [msgRow] = await db("messages")
+            .insert({
+              conversation_id: conversationId,
+              direction: "out",
+              type: "text",
+              body: msg,
+              status: "sent",
+            })
+            .returning("*");
+
+          req.app.get("io")?.emit("message.created", {
+            conversation_id: conversationId,
+            message: msgRow,
+          });
+        }
+      }
     }
 
     return res.json({ order });
@@ -484,3 +674,4 @@ inboxRoutes.post("/orders/:id/status", async (req, res) => {
       .json({ error: err?.message ?? "Failed to update order status" });
   }
 });
+

@@ -266,24 +266,26 @@ export async function createOrderWithPayment(input: CreateOrderInput) {
       await trx("order_items").insert(rows);
     }
 
+    // Single, aggregated payment row per order.
+    // Each time you confirm a payment, we increment `amount_tzs` on this row.
     const [payment] = await trx("payments")
       .insert({
         order_id: orderId,
         method: null,
         reference: null,
         proof_url: null,
-        status: "verifying", // initial status until agent checks proof
+        status: "awaiting",
+        amount_tzs: 0,
       })
       .returning<{ id: number }[]>("id");
 
     return {
       orderId,
-      orderCode: order.order_code,
+      orderCode,
       paymentId: payment.id,
     };
   });
 }
-
 
 export interface OrderSummary {
   id: number;
@@ -303,14 +305,14 @@ export async function getOrdersForCustomer(
     .orderBy("created_at", "desc")
     .limit(limit);
 
-  return rows.map((row) => ({
+  return rows.map((row: any) => ({
     id: row.id,
     customer_id: row.customer_id,
     order_code: row.order_code ?? null,
     status: row.status,
-    total_amount: Number(row.total_amount ?? row.total ?? 0),
+    // orders table actually has `total_tzs`
+    total_amount: Number(row.total_tzs ?? 0),
     created_at: row.created_at,
   }));
 }
-
 
