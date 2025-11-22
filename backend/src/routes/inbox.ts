@@ -201,7 +201,7 @@ inboxRoutes.get("/conversations/:id/summary", async (req, res) => {
 /**
  * GET /api/conversations/:id/orders
  * All orders for the customer behind this conversation
- * We also attach customer_name for convenience.
+ * Includes aggregated payment info per order.
  */
 inboxRoutes.get("/conversations/:id/orders", async (req, res) => {
   const conversationId = Number(req.params.id);
@@ -220,22 +220,26 @@ inboxRoutes.get("/conversations/:id/orders", async (req, res) => {
       return res.json({ items: [] });
     }
 
-    const orders = await db("orders")
-      .where({ customer_id: conv.customer_id })
+    const orders = await db("orders as o")
+      .leftJoin("payments as p", "p.order_id", "o.id")
+      .where("o.customer_id", conv.customer_id)
       .select(
-        "id",
-        "status",
-        "delivery_mode",
-        "km",
-        "fee_tzs",
-        "total_tzs",
-        "phone",
-        "region",
-        "created_at",
-        "delivery_agent_phone",
-        "order_code"
+        "o.id",
+        "o.status",
+        "o.delivery_mode",
+        "o.km",
+        "o.fee_tzs",
+        "o.total_tzs",
+        "o.phone",
+        "o.region",
+        "o.created_at",
+        "o.delivery_agent_phone",
+        "o.order_code",
+        "p.id as payment_id",
+        "p.amount_tzs as paid_amount",
+        "p.status as payment_status"
       )
-      .orderBy("created_at", "desc")
+      .orderBy("o.created_at", "desc")
       .limit(50);
 
     const items = (orders as any[]).map((row) => ({
@@ -251,6 +255,7 @@ inboxRoutes.get("/conversations/:id/orders", async (req, res) => {
       .json({ error: err?.message || "Failed to load order history" });
   }
 });
+
 
 
 
@@ -443,7 +448,7 @@ const message = t(lang, "payment.confirm_with_remaining", {
   remaining: remaining.toLocaleString("sw-TZ"),
   total: totalOrderAmount.toLocaleString("sw-TZ"),
 });
-  
+
 
       const convo = await db("conversations")
         .where({ customer_id: row.customer_id })
