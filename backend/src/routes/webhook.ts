@@ -359,13 +359,50 @@ try {
   const conversationId = await getOrCreateConversation(customerId);
 
   // 2) Pick a body to store (text, interactive marker, or location coords)
+  // 2) Pick a body to store (text, interactive marker, or rich media/coords)
   let bodyForDb: string | null = text ?? null;
+
+  // Interactive replies: store a compact marker so the inbox can at least show something
   if (!bodyForDb && interactiveId) {
     bodyForDb = `[interactive:${interactiveId}]`;
   }
+
+  // Location pins: persist coordinates in a parseable format
   if (!bodyForDb && hasLocation && typeof lat === "number" && typeof lon === "number") {
     bodyForDb = `LOCATION ${lat},${lon}`;
   }
+
+  // Media messages: store a small, human-readable marker + any caption/filename
+  if (!bodyForDb) {
+    if (type === "image") {
+      const img: any = (msg as any).image || {};
+      const mediaId = img.id as string | undefined;
+      const caption = (img.caption as string | undefined)?.trim();
+      const base = mediaId ? `[image:${mediaId}]` : "[image]";
+      bodyForDb = caption ? `${base} ${caption}` : base;
+    } else if (type === "document") {
+      const doc: any = (msg as any).document || {};
+      const mediaId = doc.id as string | undefined;
+      const filename = (doc.filename as string | undefined)?.trim();
+      const base = mediaId ? `[document:${mediaId}]` : "[document]";
+      bodyForDb = filename ? `${base} ${filename}` : base;
+    } else if (type === "audio") {
+      const aud: any = (msg as any).audio || {};
+      const mediaId = aud.id as string | undefined;
+      bodyForDb = mediaId ? `[audio:${mediaId}]` : "[audio]";
+    } else if (type === "video") {
+      const vid: any = (msg as any).video || {};
+      const mediaId = vid.id as string | undefined;
+      const caption = (vid.caption as string | undefined)?.trim();
+      const base = mediaId ? `[video:${mediaId}]` : "[video]";
+      bodyForDb = caption ? `${base} ${caption}` : base;
+    } else if (type === "sticker") {
+      const st: any = (msg as any).sticker || {};
+      const mediaId = st.id as string | undefined;
+      bodyForDb = mediaId ? `[sticker:${mediaId}]` : "[sticker]";
+    }
+  }
+
 
   // 3) Insert inbound message row
   const inserted = await insertInboundMessage(
