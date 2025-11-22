@@ -170,7 +170,7 @@ inboxRoutes.get("/conversations/:id/summary", async (req, res) => {
         .first();
 
       const paidAmount = payRow ? Number(payRow.amount_tzs ?? 0) || 0 : 0;
-      const remainingAmount = Math.max(0, totalTzs - paidAmount);
+      const remainingAmount =totalTzs - paidAmount;
 
       payment = {
         id: payRow?.id,
@@ -434,14 +434,16 @@ inboxRoutes.post("/payments/:id/status", async (req, res) => {
       justAdded != null &&
       totalOrderAmount > 0
     ) {
-      const remaining = Math.max(0, totalOrderAmount - newAmountTotal!);
+      const remaining = totalOrderAmount - newAmountTotal!; // can be negative
 
-      const message = t(lang, "payment.confirm_with_remaining", {
-        amount: justAdded.toLocaleString("sw-TZ"),
-        total: totalOrderAmount.toLocaleString("sw-TZ"),
-        remaining: remaining.toLocaleString("sw-TZ"),
-        orderCode: row.order_code || `UJ-${row.order_id}`,
-      });
+const message = t(lang, "payment.confirm_with_remaining", {
+  orderCode: row.order_code || `UJ-${row.order_id}`,
+  paid: justAdded.toLocaleString("sw-TZ"),
+  paidSoFar: newAmountTotal!.toLocaleString("sw-TZ"),
+  remaining: remaining.toLocaleString("sw-TZ"),
+  total: totalOrderAmount.toLocaleString("sw-TZ"),
+});
+  
 
       const convo = await db("conversations")
         .where({ customer_id: row.customer_id })

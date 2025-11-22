@@ -1092,7 +1092,7 @@ case "TRACK_ASK_NAME": {
 
   const totalTzs = Number(order.total_tzs ?? 0);
   const paidTzs = Number(payment?.amount_tzs ?? 0);
-  const remainingTzs = Math.max(0, totalTzs - paidTzs);
+  const remainingTzs =totalTzs - paidTzs;
 
   const totalStr = totalTzs ? totalTzs.toLocaleString("sw-TZ") : "0";
   const paidStr = paidTzs ? paidTzs.toLocaleString("sw-TZ") : "0";
