@@ -19,10 +19,23 @@ function formatTzs(amount: number): string {
  * Left pane list (like WhatsApp)
  */
 
-inboxRoutes.get("/conversations", async (_req, res) => {
+inboxRoutes.get("/conversations", async (req, res) => {
   try {
+    // Optional search term: ?q=some text
+    const rawSearch =
+      typeof req.query.q === "string" ? req.query.q.trim() : "";
+    const search = rawSearch.length > 0 ? rawSearch : undefined;
+
+    // Optional unread-only filter: ?unread=1 / true / yes
+    let unreadOnly = false;
+    const unreadParam = req.query.unread;
+    if (typeof unreadParam === "string") {
+      const v = unreadParam.toLowerCase();
+      unreadOnly = v === "1" || v === "true" || v === "yes";
+    }
+
     // Base: conversations + customer info
-    const items = await db("conversations as c")
+    const baseQuery = db("conversations as c")
       .join("customers as u", "u.id", "c.customer_id")
       .select(
         "c.id",
@@ -34,6 +47,29 @@ inboxRoutes.get("/conversations", async (_req, res) => {
       )
       .orderBy("c.last_user_message_at", "desc")
       .limit(100);
+
+    // Server-side search on name + phone
+    if (search) {
+      const term = `%${search}%`;
+      baseQuery.where((qb) => {
+        qb.whereILike("u.name", term).orWhereILike("u.phone", term);
+      });
+    }
+
+    // Server-side filter: only conversations with unread inbound messages
+    if (unreadOnly) {
+      baseQuery.whereExists(function () {
+        this.select(1)
+          .from("messages as m")
+          .whereRaw("m.conversation_id = c.id")
+          .where("m.direction", "inbound")
+          .where(function () {
+            this.whereNull("m.status").orWhereNot("m.status", "read");
+          });
+      });
+    }
+
+    const items = await baseQuery;
 
     if (items.length === 0) {
       return res.json({ items: [] });
@@ -87,6 +123,7 @@ inboxRoutes.get("/conversations", async (_req, res) => {
       .json({ error: err?.message ?? "Failed to list conversations" });
   }
 });
+
 
 /**
  * GET /api/conversations/:id/messages

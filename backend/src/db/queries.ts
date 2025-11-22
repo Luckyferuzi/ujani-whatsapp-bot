@@ -168,19 +168,41 @@ export async function findConversationRecipientWa(
 
 /* ----------------------------- Inbox list / view --------------------------- */
 
-export async function listConversations(limit = 200) {
-  return db("conversations as c")
-    .leftJoin("customers as cu", "cu.id", "c.customer_id")
+export async function listConversations(opts: {
+  limit: number;
+  offset: number;
+  search?: string;
+}) {
+  const { limit, offset, search } = opts;
+
+  const q = db("conversations as c")
+    .join("customers as cu", "c.customer_id", "cu.id")
+    .leftJoin("messages as m", "m.id", "c.last_message_id")
     .select(
       "c.id",
-      "c.last_user_message_at",
-      "c.created_at",
       "cu.name",
-      "cu.phone"
+      "cu.phone",
+      "cu.lang",
+      "c.agent_allowed",
+      "c.last_user_message_at",
+      "c.unread_count",
+      "m.body as last_message_text",
+      "m.created_at as last_message_at"
     )
-    // Order by "last_user_message_at" when present, otherwise by created_at
-    .orderByRaw("COALESCE(c.last_user_message_at, c.created_at) DESC")
-    .limit(limit);
+    .orderBy("c.last_user_message_at", "desc")
+    .limit(limit)
+    .offset(offset);
+
+  if (search && search.trim().length > 0) {
+    const term = `%${search.trim()}%`;
+    q.where(function () {
+      this.where("cu.name", "ilike", term)
+        .orWhere("cu.phone", "ilike", term)
+        .orWhere("m.body", "ilike", term);
+    });
+  }
+
+  return q;
 }
 
 
