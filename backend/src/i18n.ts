@@ -109,7 +109,7 @@ const dict: Dict = {
     'payment.done_button': 'Nimemaliza kulipa',
     'payment.confirm_with_remaining':
       'Tumethibitisha umelipa {paid} TZS kwa oda {orderCode}.\n' +
-      'Mpaka sasa umeshalipa jumla ya {paidSoFar} TZS; salio ni {remaining} TZS (jumla ya oda ni {total} TZS).',
+      'Mpaka sasa umeshalipa jumla ya {paidSoFar} TZS; deni ni {remaining} TZS (jumla ya oda ni {total} TZS).',
 
     'checkout.summary_header': '📦 Muhtasari wa Oda',
     'checkout.summary_name': 'Jina: {name}',
@@ -263,7 +263,7 @@ const dict: Dict = {
     'payment.done_button': 'I have completed payment',
     'payment.confirm_with_remaining':
       'We have confirmed your payment of {paid} TZS for order {orderCode}.\n' +
-      'So far you have paid a total of {paidSoFar} TZS; the remaining balance is {remaining} TZS (total order is {total} TZS).',
+      'So far you have paid a total of {paidSoFar} TZS; the remaining payment is {remaining} TZS (total order is {total} TZS).',
 
     'proof.ask': 'Send a *payment screenshot* or the *payer’s three names*.',
     'proof.ok_image': '✅ Screenshot received. We’re verifying your payment — please wait.',
