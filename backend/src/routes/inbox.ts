@@ -106,17 +106,11 @@ inboxRoutes.get("/conversations/:id/messages", async (req, res) => {
 
 /**
  * GET /api/conversations/:id/summary
- * Customer + delivery + payment summary for right panel
+ * Returns: { customer, delivery, payment } for the RIGHT panel
+ * - customer: from `customers`
+ * - latest order: newest order for that customer
+ * - payment: aggregated amounts for that latest order
  */
-// ==============================
-// GET /api/conversations/:id/summary
-// ==============================
-// backend/src/routes/inbox.ts
-// ==============================
-// GET /api/conversations/:id/summary
-// ==============================
-// backend/src/routes/inbox.ts
-
 inboxRoutes.get("/conversations/:id/summary", async (req, res) => {
   const conversationId = Number(req.params.id);
   if (!Number.isFinite(conversationId)) {
@@ -124,20 +118,19 @@ inboxRoutes.get("/conversations/:id/summary", async (req, res) => {
   }
 
   try {
-    // 1) Conversation + customer
+    // Conversation + customer
     const conv = await db("conversations as c")
       .leftJoin("customers as u", "u.id", "c.customer_id")
       .where("c.id", conversationId)
       .select(
-        "c.customer_id as c_customer_id",
+        "c.customer_id as customer_id",
         "u.name as customer_name",
         "u.phone as customer_phone",
         "u.lang as customer_lang"
       )
       .first();
 
-    if (!conv) {
-      // No such conversation – nothing to show
+    if (!conv || !conv.customer_id) {
       return res.json({
         customer: null,
         delivery: null,
@@ -145,18 +138,15 @@ inboxRoutes.get("/conversations/:id/summary", async (req, res) => {
       });
     }
 
-    const customer =
-      conv.customer_phone || conv.customer_name
-        ? {
-            name: conv.customer_name,
-            phone: conv.customer_phone,
-            lang: conv.customer_lang,
-          }
-        : null;
+    const customer = {
+      name: conv.customer_name ?? null,
+      phone: conv.customer_phone ?? "",
+      lang: conv.customer_lang ?? "sw",
+    };
 
-    // 2) Latest order for that customer (if any)
+    // Latest order for this customer
     const order = await db("orders")
-      .where({ customer_id: conv.c_customer_id })
+      .where({ customer_id: conv.customer_id })
       .orderBy("created_at", "desc")
       .first();
 
@@ -164,49 +154,46 @@ inboxRoutes.get("/conversations/:id/summary", async (req, res) => {
     let payment: any = null;
 
     if (order) {
-      const totalTzs = Number(order.total_tzs ?? 0);
+      const totalTzs = Number(order.total_tzs ?? 0) || 0;
 
       delivery = {
-        // match actual DB columns
-        mode: order.delivery_mode, // e.g. "delivery" | "pickup"
-        description: null, // optional human text later
+        mode: order.delivery_mode,
+        description: null,
         km: order.km,
         fee_tzs: order.fee_tzs,
       };
 
-      // 3) Aggregated payment for that order (single row)
+      // Latest payment row for that order (we use its amount_tzs as "paid so far")
       const payRow = await db("payments")
         .where({ order_id: order.id })
         .orderBy("created_at", "desc")
         .first();
 
-      if (payRow) {
-        const paidAmount = Number(payRow.amount_tzs ?? 0);
-        const remainingAmount = Math.max(0, totalTzs - paidAmount);
+      const paidAmount = payRow ? Number(payRow.amount_tzs ?? 0) || 0 : 0;
+      const remainingAmount = Math.max(0, totalTzs - paidAmount);
 
-        payment = {
-          id: payRow.id,
-          order_id: order.id,
-          method: payRow.method,
-          status: payRow.status ?? "awaiting",
-          recipient: null,
-          amount_tzs: paidAmount || null,
-          total_tzs: totalTzs || null,
-          remaining_tzs: remainingAmount || null,
-        };
-      }
+      payment = {
+        id: payRow?.id,
+        order_id: order.id,
+        method: payRow?.method ?? null,
+        recipient: null,
+        status: payRow?.status ?? "awaiting",
+        amount_tzs: paidAmount,     // total paid so far
+        total_tzs: totalTzs,        // order total
+        remaining_tzs: remainingAmount, // remaining balance
+      };
     }
 
-    res.json({
+    return res.json({
       customer,
       delivery,
       payment,
     });
   } catch (err: any) {
-    console.error("summary error:", err);
-    res
+    console.error("GET /conversations/:id/summary failed", err);
+    return res
       .status(500)
-      .json({ error: err?.message || "Failed to load conversation summary" });
+      .json({ error: err?.message ?? "Failed to load summary" });
   }
 });
 
@@ -214,11 +201,7 @@ inboxRoutes.get("/conversations/:id/summary", async (req, res) => {
 /**
  * GET /api/conversations/:id/orders
  * All orders for the customer behind this conversation
- */
-/**
- * GET /api/conversations/:id/orders
- * All orders for the customer behind this conversation
- * (each item also carries the customer_name for clarity)
+ * We also attach customer_name for convenience.
  */
 inboxRoutes.get("/conversations/:id/orders", async (req, res) => {
   const conversationId = Number(req.params.id);
@@ -227,7 +210,6 @@ inboxRoutes.get("/conversations/:id/orders", async (req, res) => {
   }
 
   try {
-    // Find the conversation, its customer id, and the customer name
     const conv = await db("conversations as c")
       .leftJoin("customers as u", "u.id", "c.customer_id")
       .where("c.id", conversationId)
@@ -249,8 +231,9 @@ inboxRoutes.get("/conversations/:id/orders", async (req, res) => {
         "total_tzs",
         "phone",
         "region",
-        "created_at"
-        // "order_code" // uncomment if you add this column to the select
+        "created_at",
+        "delivery_agent_phone",
+        "order_code"
       )
       .orderBy("created_at", "desc")
       .limit(50);
@@ -265,9 +248,10 @@ inboxRoutes.get("/conversations/:id/orders", async (req, res) => {
     console.error("orders history error:", err);
     res
       .status(500)
-      .json({ error: err?.message || "Failed to load orders history" });
+      .json({ error: err?.message || "Failed to load order history" });
   }
 });
+
 
 
 // DELETE /api/conversations/:id/messages
@@ -364,41 +348,36 @@ inboxRoutes.post("/conversations/:id/agent-allow", async (req, res) => {
 
 /**
  * POST /api/payments/:id/status
- * { status: "verifying" | "paid" | "failed" }
- *
- * - updates DB
- * - emits socket event payment.updated
- * - when status === "paid", sends WhatsApp confirmation to customer
- */
-/**
- * POST /api/payments/:id/status
- *
  * Body:
  *   {
  *     status: "verifying" | "paid" | "failed",
- *     amount_tzs?: number  // required when status === "paid" (this is the new payment chunk)
+ *     amount_tzs?: number   // required when status === "paid"
  *   }
+ *
+ * When status === "paid", we treat amount_tzs as an *additional* installment
+ * and keep a running total in payments.amount_tzs.
  */
 inboxRoutes.post("/payments/:id/status", async (req, res) => {
   const id = Number(req.params.id);
-  const { status, amount_tzs } = req.body ?? {};
+  const body = req.body as { status?: string; amount_tzs?: number };
 
   if (!Number.isFinite(id)) {
     return res.status(400).json({ error: "Invalid id" });
   }
-  if (!["verifying", "paid", "failed"].includes(status)) {
+
+  const status = body.status;
+  if (!status || !["verifying", "paid", "failed"].includes(status)) {
     return res.status(400).json({ error: "Invalid status" });
   }
 
   try {
-    // Get payment + order + customer
-    const payment = await db("payments as p")
+    const row = await db("payments as p")
       .leftJoin("orders as o", "o.id", "p.order_id")
       .leftJoin("customers as u", "u.id", "o.customer_id")
       .where("p.id", id)
       .select(
         "p.id",
-        "p.status",
+        "p.status as payment_status",
         "p.amount_tzs",
         "p.order_id",
         "o.total_tzs",
@@ -409,76 +388,70 @@ inboxRoutes.post("/payments/:id/status", async (req, res) => {
       )
       .first();
 
-    if (!payment) {
+    if (!row) {
       return res.status(404).json({ error: "Payment not found" });
     }
 
-    let newAmountTotal = Number(payment.amount_tzs ?? 0);
-    let justAdded = 0;
+    const lang: Lang =
+      row.lang === "en" || row.lang === "sw" ? (row.lang as Lang) : "sw";
 
-    // When marking as "paid", we treat amount_tzs as an *extra installment*.
+    let newAmountTotal: number | null = row.amount_tzs ?? null;
+    let justAdded: number | null = null;
+    const totalOrderAmount: number = Number(row.total_tzs ?? 0) || 0;
+
     if (status === "paid") {
-      const delta = Number(amount_tzs);
-      if (!Number.isFinite(delta) || delta <= 0) {
-        return res.status(400).json({
-          error:
-            "amount_tzs must be a positive number when marking payment as paid",
-        });
+      const amountFromBody = Number(body.amount_tzs ?? 0);
+      if (!Number.isFinite(amountFromBody) || amountFromBody <= 0) {
+        return res
+          .status(400)
+          .json({ error: "amount_tzs is required and must be > 0" });
       }
-      justAdded = Math.floor(delta);
-      newAmountTotal = Math.floor(Number(payment.amount_tzs ?? 0) + justAdded);
+
+      const currentTotal = Number(row.amount_tzs ?? 0) || 0;
+      newAmountTotal = currentTotal + amountFromBody;
+      justAdded = amountFromBody;
     }
 
     const update: any = { status };
-    if (status === "paid") {
+    if (status === "paid" && newAmountTotal != null) {
       update.amount_tzs = newAmountTotal;
     }
 
     await db("payments").where({ id }).update(update);
 
-    // Emit to UI (for RightPanel refresh)
+    // Let frontend know
     req.app.get("io")?.emit("payment.updated", {
       id,
       status,
-      amount_tzs: status === "paid" ? newAmountTotal : payment.amount_tzs,
+      amount_tzs: newAmountTotal,
     });
 
-    // If paid: send confirmation message to customer + store outbound message
+    // If paid, send message with remaining balance
     if (
       status === "paid" &&
-      payment.wa_id &&
-      payment.customer_id &&
-      payment.order_id
+      row.wa_id &&
+      row.customer_id &&
+      justAdded != null &&
+      totalOrderAmount > 0
     ) {
-      const totalOrderAmount = Math.floor(Number(payment.total_tzs ?? 0));
-      const paidSoFar = Math.floor(newAmountTotal);
-      const remainingAmount = Math.max(0, totalOrderAmount - paidSoFar);
+      const remaining = Math.max(0, totalOrderAmount - newAmountTotal!);
 
-      const lang: Lang = (payment.lang === "en" || payment.lang === "sw"
-        ? payment.lang
-        : "sw") as Lang;
-
-      const orderCode =
-        payment.order_code || `UJ-${payment.order_id as number}`;
-
-      const msg = t(lang, "payment.confirm_with_remaining", {
-        orderCode,
-        paid: formatTzs(justAdded),
-        paidSoFar: formatTzs(paidSoFar),
-        remaining: formatTzs(remainingAmount),
-        total: formatTzs(totalOrderAmount),
+      const message = t(lang, "payment.confirm_with_remaining", {
+        amount: justAdded.toLocaleString("sw-TZ"),
+        total: totalOrderAmount.toLocaleString("sw-TZ"),
+        remaining: remaining.toLocaleString("sw-TZ"),
+        orderCode: row.order_code || `UJ-${row.order_id}`,
       });
 
-      // Find the most recent conversation for this customer
       const convo = await db("conversations")
-        .where({ customer_id: payment.customer_id })
+        .where({ customer_id: row.customer_id })
         .orderBy("created_at", "desc")
         .first();
 
       const conversationId = convo?.id as number | undefined;
 
       try {
-        await sendText(payment.wa_id, msg);
+        await sendText(row.wa_id, message);
       } catch (e) {
         console.warn("Failed to send payment confirmation:", e);
       }
@@ -489,7 +462,7 @@ inboxRoutes.post("/payments/:id/status", async (req, res) => {
             conversation_id: conversationId,
             direction: "out",
             type: "text",
-            body: msg,
+            body: message,
             status: "sent",
           })
           .returning("*");
@@ -501,12 +474,16 @@ inboxRoutes.post("/payments/:id/status", async (req, res) => {
       }
     }
 
-    res.json({ ok: true });
+    return res.json({
+      ok: true,
+      amount_tzs: newAmountTotal,
+    });
   } catch (e: any) {
     console.error("POST /payments/:id/status failed", e);
     res.status(500).json({ error: e?.message ?? "failed" });
   }
 });
+
 
 
 
@@ -534,14 +511,6 @@ inboxRoutes.get(
   }
 );
 
-// POST /api/orders/:id/status
-// Body: { status: "pending" | "preparing" | "out_for_delivery" | "delivered" | "cancelled" }
-// POST /api/orders/:id/status
-// Body:
-//   {
-//     status: "pending" | "preparing" | "out_for_delivery" | "delivered" | "cancelled",
-//     delivery_agent_phone?: string // required when status === "out_for_delivery"
-//   }
 // POST /api/orders/:id/status
 // Body:
 //   {
@@ -585,7 +554,6 @@ inboxRoutes.post("/orders/:id/status", async (req, res) => {
           "delivery_agent_phone is required when marking order as out_for_delivery",
       });
     }
-    // Clean it up once and store
     deliveryAgentPhone = deliveryAgentPhone.trim();
   }
 
@@ -604,7 +572,7 @@ inboxRoutes.post("/orders/:id/status", async (req, res) => {
       return res.status(404).json({ error: "Order not found" });
     }
 
-    // Notify customer via WhatsApp when certain statuses are set
+    // Notify customer via WhatsApp
     if (order.customer_id) {
       const customer = await db("customers")
         .where({ id: order.customer_id })
@@ -633,7 +601,6 @@ inboxRoutes.post("/orders/:id/status", async (req, res) => {
       }
 
       if (waId && msg) {
-        // Find latest conversation to log the outbound message
         const convo = await db("conversations")
           .where({ customer_id: order.customer_id })
           .orderBy("created_at", "desc")

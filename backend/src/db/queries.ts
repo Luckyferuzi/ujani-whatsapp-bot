@@ -42,14 +42,36 @@ export async function upsertCustomerByWa(
   phone?: string | null
 ) {
   const existing = await db("customers").where({ wa_id: waId }).first();
-  if (existing) return existing.id as number;
+
+  if (existing) {
+    const update: any = {};
+
+    if (name && name.trim().length > 0 && name !== existing.name) {
+      update.name = name.trim();
+    }
+
+    if (phone && phone.trim().length > 0 && phone !== existing.phone) {
+      update.phone = phone.trim();
+    }
+
+    if (Object.keys(update).length > 0) {
+      await db("customers").where({ id: existing.id }).update(update);
+    }
+
+    return existing.id as number;
+  }
 
   const [inserted] = await db("customers")
-    .insert({ wa_id: waId, name, phone })
+    .insert({
+      wa_id: waId,
+      name: name?.trim() ?? null,
+      phone: phone?.trim() ?? null,
+    })
     .returning<{ id: number }[]>("id");
 
   return inserted.id;
 }
+
 
 export async function getOrCreateConversation(customerId: number) {
   const existing = await db("conversations")
@@ -310,9 +332,9 @@ export async function getOrdersForCustomer(
     customer_id: row.customer_id,
     order_code: row.order_code ?? null,
     status: row.status,
-    // orders table actually has `total_tzs`
     total_amount: Number(row.total_tzs ?? 0),
     created_at: row.created_at,
   }));
 }
+
 
