@@ -528,13 +528,9 @@ const message = t(lang, "payment.confirm_with_remaining", {
   }
 });
 
-
-
-
 inboxRoutes.get(
   "/customers/:customerId/orders",
   async (req: Request, res: Response) => {
-
     try {
       const customerId = Number(req.params.customerId);
       if (!Number.isFinite(customerId)) {
@@ -554,6 +550,153 @@ inboxRoutes.get(
     }
   }
 );
+
+// GET /api/orders
+// Query params (all optional):
+//   q          → search by customer name, phone, or order_code
+//   phone      → filter by customer phone (used when coming from a chat)
+//   status     → filter by order status
+//   product    → filter by product name or SKU
+//   min_total  → minimum total_tzs
+//   max_total  → maximum total_tzs
+//   limit      → max rows (default 100, max 200)
+inboxRoutes.get("/orders", async (req: Request, res: Response) => {
+  try {
+    const limitRaw = req.query.limit;
+    const limit =
+      typeof limitRaw === "string" && !Number.isNaN(Number(limitRaw))
+        ? Math.min(200, Number(limitRaw))
+        : 100;
+
+    const search =
+      typeof req.query.q === "string" && req.query.q.trim().length > 0
+        ? req.query.q.trim()
+        : undefined;
+
+    const status =
+      typeof req.query.status === "string" && req.query.status.trim().length > 0
+        ? req.query.status.trim()
+        : undefined;
+
+    const product =
+      typeof req.query.product === "string" &&
+      req.query.product.trim().length > 0
+        ? req.query.product.trim()
+        : undefined;
+
+    const phoneFilter =
+      typeof req.query.phone === "string" && req.query.phone.trim().length > 0
+        ? req.query.phone.trim()
+        : undefined;
+
+    const minTotalRaw =
+      typeof req.query.min_total === "string" ? req.query.min_total : undefined;
+    const maxTotalRaw =
+      typeof req.query.max_total === "string" ? req.query.max_total : undefined;
+
+    const qb = db("orders as o")
+      .leftJoin("customers as u", "u.id", "o.customer_id")
+      .leftJoin("payments as p", "p.order_id", "o.id")
+      .select(
+        "o.id",
+        "o.status",
+        "o.delivery_mode",
+        "o.km",
+        "o.fee_tzs",
+        "o.total_tzs",
+        "o.phone as order_phone",
+        "o.region",
+        "o.created_at",
+        "o.delivery_agent_phone",
+        "o.order_code",
+        "u.name as customer_name",
+        "u.phone as customer_phone",
+        "p.id as payment_id",
+        "p.amount_tzs as paid_amount",
+        "p.status as payment_status"
+      )
+      .orderBy("o.created_at", "desc")
+      .limit(limit);
+
+    if (search) {
+      const term = `%${search}%`;
+      qb.where(function () {
+        this.where("u.name", "ilike", term)
+          .orWhere("u.phone", "ilike", term)
+          .orWhere("o.order_code", "ilike", term);
+      });
+    }
+
+    if (phoneFilter) {
+      const term = `%${phoneFilter}%`;
+      qb.where(function () {
+        this.where("u.phone", "ilike", term).orWhere("o.phone", "ilike", term);
+      });
+    }
+
+    if (status) {
+      qb.where("o.status", status);
+    }
+
+    if (typeof minTotalRaw === "string") {
+      const n = Number(minTotalRaw);
+      if (Number.isFinite(n)) {
+        qb.where("o.total_tzs", ">=", n);
+      }
+    }
+
+    if (typeof maxTotalRaw === "string") {
+      const n = Number(maxTotalRaw);
+      if (Number.isFinite(n)) {
+        qb.where("o.total_tzs", "<=", n);
+      }
+    }
+
+    if (product) {
+      const term = `%${product}%`;
+      qb.whereExists(function () {
+        this.select(1)
+          .from("order_items as oi")
+          .whereRaw("oi.order_id = o.id")
+          .where(function () {
+            this.where("oi.name", "ilike", term).orWhere(
+              "oi.sku",
+              "ilike",
+              term
+            );
+          });
+      });
+    }
+
+    const rows = await qb;
+
+    const items = (rows as any[]).map((row) => ({
+      id: row.id,
+      status: row.status,
+      delivery_mode: row.delivery_mode,
+      km: row.km,
+      fee_tzs: row.fee_tzs,
+      total_tzs: row.total_tzs,
+      phone: row.order_phone ?? row.customer_phone ?? null,
+      region: row.region,
+      created_at: row.created_at,
+      delivery_agent_phone: row.delivery_agent_phone,
+      order_code: row.order_code,
+      customer_name: row.customer_name ?? null,
+      payment_id: row.payment_id ?? null,
+      paid_amount: row.paid_amount ?? null,
+      payment_status: row.payment_status ?? null,
+    }));
+
+    return res.json({ items });
+  } catch (err: any) {
+    console.error("[GET /api/orders] failed", err);
+    return res
+      .status(500)
+      .json({ error: err?.message ?? "Failed to load orders" });
+  }
+});
+
 
 // POST /api/orders/:id/status
 // Body:
