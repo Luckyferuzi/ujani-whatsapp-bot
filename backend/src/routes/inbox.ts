@@ -972,10 +972,18 @@ inboxRoutes.post("/products", async (req, res) => {
       is_active,
     } = req.body ?? {};
 
-    if (!sku || !name || !price_tzs || !short_description) {
+    const priceNumeric = Number(price_tzs);
+
+    if (
+      !sku ||
+      !name ||
+      !short_description ||
+      !Number.isFinite(priceNumeric) ||
+      priceNumeric <= 0
+    ) {
       return res.status(400).json({
         error:
-          "Missing required fields: sku, name, price_tzs, short_description",
+          "Please provide SKU, product name, short description (Swahili) and a positive price.",
       });
     }
 
@@ -983,8 +991,8 @@ inboxRoutes.post("/products", async (req, res) => {
       .insert({
         sku: String(sku).trim(),
         name: String(name).trim(),
-        price_tzs: Number(price_tzs),
-        short_description: String(short_description).trim(), // SW
+        price_tzs: priceNumeric,
+        short_description: String(short_description).trim(), // SW (required)
         short_description_en: short_description_en
           ? String(short_description_en).trim()
           : null,
@@ -992,7 +1000,6 @@ inboxRoutes.post("/products", async (req, res) => {
         description_en: description_en
           ? String(description_en).trim()
           : null,
-        // these two are NOT used in UI anymore but DB expects values; safe defaults
         usage_instructions: "",
         warnings: "",
         is_installment: !!is_installment,
@@ -1004,12 +1011,12 @@ inboxRoutes.post("/products", async (req, res) => {
   } catch (err: any) {
     console.error("POST /products failed", err);
     if (err?.code === "23505") {
-      // unique violation (e.g. sku)
       return res.status(400).json({ error: "SKU already exists" });
     }
     return res.status(500).json({ error: "Failed to create product" });
   }
 });
+
 
 // PUT /api/products/:id  -> update existing product
 inboxRoutes.put("/products/:id", async (req, res) => {
