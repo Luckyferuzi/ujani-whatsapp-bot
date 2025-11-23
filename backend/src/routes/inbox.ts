@@ -908,7 +908,12 @@ inboxRoutes.get(
 // ---------------------------------------------------------------------------
 
 // GET /api/products  -> list all products for admin
-inboxRoutes.get("/products", async (req: Request, res: Response) => {
+// ---------------------------------------------------------------------------
+// Products CRUD for admin UI (bilingual descriptions)
+// ---------------------------------------------------------------------------
+
+// GET /api/products  -> list all products for admin
+inboxRoutes.get("/products", async (req, res) => {
   try {
     const rows = await db("products")
       .orderBy("created_at", "desc")
@@ -918,9 +923,9 @@ inboxRoutes.get("/products", async (req: Request, res: Response) => {
         "name",
         "price_tzs",
         "short_description",
+        "short_description_en",
         "description",
-        "usage_instructions",
-        "warnings",
+        "description_en",
         "is_installment",
         "is_active",
         "created_at"
@@ -934,7 +939,7 @@ inboxRoutes.get("/products", async (req: Request, res: Response) => {
 });
 
 // GET /api/products/:id  -> single product (for editing)
-inboxRoutes.get("/products/:id", async (req: Request, res: Response) => {
+inboxRoutes.get("/products/:id", async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) {
     return res.status(400).json({ error: "Invalid product id" });
@@ -953,16 +958,16 @@ inboxRoutes.get("/products/:id", async (req: Request, res: Response) => {
 });
 
 // POST /api/products  -> create new product
-inboxRoutes.post("/products", async (req: Request, res: Response) => {
+inboxRoutes.post("/products", async (req, res) => {
   try {
     const {
       sku,
       name,
       price_tzs,
       short_description,
+      short_description_en,
       description,
-      usage_instructions,
-      warnings,
+      description_en,
       is_installment,
       is_active,
     } = req.body ?? {};
@@ -979,10 +984,17 @@ inboxRoutes.post("/products", async (req: Request, res: Response) => {
         sku: String(sku).trim(),
         name: String(name).trim(),
         price_tzs: Number(price_tzs),
-        short_description: String(short_description).trim(),
-        description: String(description ?? "").trim(),
-        usage_instructions: String(usage_instructions ?? "").trim(),
-        warnings: String(warnings ?? "").trim(),
+        short_description: String(short_description).trim(), // SW
+        short_description_en: short_description_en
+          ? String(short_description_en).trim()
+          : null,
+        description: description ? String(description).trim() : "",
+        description_en: description_en
+          ? String(description_en).trim()
+          : null,
+        // these two are NOT used in UI anymore but DB expects values; safe defaults
+        usage_instructions: "",
+        warnings: "",
         is_installment: !!is_installment,
         is_active: is_active === false ? false : true,
       })
@@ -1000,7 +1012,7 @@ inboxRoutes.post("/products", async (req: Request, res: Response) => {
 });
 
 // PUT /api/products/:id  -> update existing product
-inboxRoutes.put("/products/:id", async (req: Request, res: Response) => {
+inboxRoutes.put("/products/:id", async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) {
     return res.status(400).json({ error: "Invalid product id" });
@@ -1012,9 +1024,9 @@ inboxRoutes.put("/products/:id", async (req: Request, res: Response) => {
       name,
       price_tzs,
       short_description,
+      short_description_en,
       description,
-      usage_instructions,
-      warnings,
+      description_en,
       is_installment,
       is_active,
     } = req.body ?? {};
@@ -1025,10 +1037,16 @@ inboxRoutes.put("/products/:id", async (req: Request, res: Response) => {
     if (price_tzs !== undefined) patch.price_tzs = Number(price_tzs);
     if (short_description !== undefined)
       patch.short_description = String(short_description).trim();
-    if (description !== undefined) patch.description = String(description).trim();
-    if (usage_instructions !== undefined)
-      patch.usage_instructions = String(usage_instructions).trim();
-    if (warnings !== undefined) patch.warnings = String(warnings).trim();
+    if (short_description_en !== undefined)
+      patch.short_description_en = short_description_en
+        ? String(short_description_en).trim()
+        : null;
+    if (description !== undefined)
+      patch.description = description ? String(description).trim() : "";
+    if (description_en !== undefined)
+      patch.description_en = description_en
+        ? String(description_en).trim()
+        : null;
     if (is_installment !== undefined)
       patch.is_installment = !!is_installment;
     if (is_active !== undefined) patch.is_active = !!is_active;
@@ -1059,7 +1077,7 @@ inboxRoutes.put("/products/:id", async (req: Request, res: Response) => {
 });
 
 // DELETE /api/products/:id  -> soft delete (mark inactive)
-inboxRoutes.delete("/products/:id", async (req: Request, res: Response) => {
+inboxRoutes.delete("/products/:id", async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) {
     return res.status(400).json({ error: "Invalid product id" });
@@ -1081,3 +1099,4 @@ inboxRoutes.delete("/products/:id", async (req: Request, res: Response) => {
     return res.status(500).json({ error: "Failed to delete product" });
   }
 });
+
