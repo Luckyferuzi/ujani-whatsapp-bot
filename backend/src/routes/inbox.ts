@@ -902,3 +902,182 @@ inboxRoutes.get(
     return res.json({ items });
   }
 );
+
+// ---------------------------------------------------------------------------
+// Products CRUD for admin UI
+// ---------------------------------------------------------------------------
+
+// GET /api/products  -> list all products for admin
+inboxRoutes.get("/products", async (req: Request, res: Response) => {
+  try {
+    const rows = await db("products")
+      .orderBy("created_at", "desc")
+      .select(
+        "id",
+        "sku",
+        "name",
+        "price_tzs",
+        "short_description",
+        "description",
+        "usage_instructions",
+        "warnings",
+        "is_installment",
+        "is_active",
+        "created_at"
+      );
+
+    return res.json({ items: rows });
+  } catch (err: any) {
+    console.error("GET /products failed", err);
+    return res.status(500).json({ error: "Failed to load products" });
+  }
+});
+
+// GET /api/products/:id  -> single product (for editing)
+inboxRoutes.get("/products/:id", async (req: Request, res: Response) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) {
+    return res.status(400).json({ error: "Invalid product id" });
+  }
+
+  try {
+    const product = await db("products").where({ id }).first();
+    if (!product) {
+      return res.status(404).json({ error: "Product not found" });
+    }
+    return res.json({ product });
+  } catch (err: any) {
+    console.error("GET /products/:id failed", err);
+    return res.status(500).json({ error: "Failed to load product" });
+  }
+});
+
+// POST /api/products  -> create new product
+inboxRoutes.post("/products", async (req: Request, res: Response) => {
+  try {
+    const {
+      sku,
+      name,
+      price_tzs,
+      short_description,
+      description,
+      usage_instructions,
+      warnings,
+      is_installment,
+      is_active,
+    } = req.body ?? {};
+
+    if (!sku || !name || !price_tzs || !short_description) {
+      return res.status(400).json({
+        error:
+          "Missing required fields: sku, name, price_tzs, short_description",
+      });
+    }
+
+    const [inserted] = await db("products")
+      .insert({
+        sku: String(sku).trim(),
+        name: String(name).trim(),
+        price_tzs: Number(price_tzs),
+        short_description: String(short_description).trim(),
+        description: String(description ?? "").trim(),
+        usage_instructions: String(usage_instructions ?? "").trim(),
+        warnings: String(warnings ?? "").trim(),
+        is_installment: !!is_installment,
+        is_active: is_active === false ? false : true,
+      })
+      .returning("*");
+
+    return res.json({ product: inserted });
+  } catch (err: any) {
+    console.error("POST /products failed", err);
+    if (err?.code === "23505") {
+      // unique violation (e.g. sku)
+      return res.status(400).json({ error: "SKU already exists" });
+    }
+    return res.status(500).json({ error: "Failed to create product" });
+  }
+});
+
+// PUT /api/products/:id  -> update existing product
+inboxRoutes.put("/products/:id", async (req: Request, res: Response) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) {
+    return res.status(400).json({ error: "Invalid product id" });
+  }
+
+  try {
+    const {
+      sku,
+      name,
+      price_tzs,
+      short_description,
+      description,
+      usage_instructions,
+      warnings,
+      is_installment,
+      is_active,
+    } = req.body ?? {};
+
+    const patch: Record<string, any> = {};
+    if (sku !== undefined) patch.sku = String(sku).trim();
+    if (name !== undefined) patch.name = String(name).trim();
+    if (price_tzs !== undefined) patch.price_tzs = Number(price_tzs);
+    if (short_description !== undefined)
+      patch.short_description = String(short_description).trim();
+    if (description !== undefined) patch.description = String(description).trim();
+    if (usage_instructions !== undefined)
+      patch.usage_instructions = String(usage_instructions).trim();
+    if (warnings !== undefined) patch.warnings = String(warnings).trim();
+    if (is_installment !== undefined)
+      patch.is_installment = !!is_installment;
+    if (is_active !== undefined) patch.is_active = !!is_active;
+
+    if (Object.keys(patch).length === 0) {
+      return res.status(400).json({ error: "No fields to update" });
+    }
+
+    patch.updated_at = new Date();
+
+    const [updated] = await db("products")
+      .where({ id })
+      .update(patch)
+      .returning("*");
+
+    if (!updated) {
+      return res.status(404).json({ error: "Product not found" });
+    }
+
+    return res.json({ product: updated });
+  } catch (err: any) {
+    console.error("PUT /products/:id failed", err);
+    if (err?.code === "23505") {
+      return res.status(400).json({ error: "SKU already exists" });
+    }
+    return res.status(500).json({ error: "Failed to update product" });
+  }
+});
+
+// DELETE /api/products/:id  -> soft delete (mark inactive)
+inboxRoutes.delete("/products/:id", async (req: Request, res: Response) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) {
+    return res.status(400).json({ error: "Invalid product id" });
+  }
+
+  try {
+    const [updated] = await db("products")
+      .where({ id })
+      .update({ is_active: false, updated_at: new Date() })
+      .returning("*");
+
+    if (!updated) {
+      return res.status(404).json({ error: "Product not found" });
+    }
+
+    return res.json({ ok: true });
+  } catch (err: any) {
+    console.error("DELETE /products/:id failed", err);
+    return res.status(500).json({ error: "Failed to delete product" });
+  }
+});
