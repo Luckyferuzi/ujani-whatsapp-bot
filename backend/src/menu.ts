@@ -1,6 +1,8 @@
 // src/menu.ts
 // Product catalog + menu builders (aligned to original flow & i18n keys)
 
+import { listActiveProducts, findProductBySku } from "./db/queries.js";
+
 function formatTZS(amount: number): string {
   return `${Math.round(amount).toLocaleString('sw-TZ')} TZS`;
 }
@@ -88,17 +90,55 @@ export function getProductBySku(sku: string): Product | undefined {
   return undefined;
 }
 
-export function getTopLevelProducts(): Product[] {
-  return PRODUCTS;
+/**
+ * DB-backed product catalog.
+ * - If DB has active products, use those.
+ * - If DB is empty (fresh install), fall back to the hard-coded PRODUCTS array.
+ */
+export async function loadTopLevelProducts(): Promise<Product[]> {
+  const rows = await listActiveProducts();
+  if (!rows || rows.length === 0) {
+    // fallback to static catalog so bot still works
+    return PRODUCTS;
+  }
+
+  return rows.map((row) => ({
+    sku: row.sku,
+    name: row.name,
+    price: row.price_tzs,
+    short: row.short_description,
+    // if you had variants (PROMAX_A/B/C) they can still be in PRODUCTS for now
+  }));
+}
+
+/**
+ * Find a product by SKU using DB first, then static fallback.
+ */
+export async function getProductBySkuAsync(
+  sku: string
+): Promise<Product | undefined> {
+  const row = await findProductBySku(sku);
+  if (row) {
+    return {
+      sku: row.sku,
+      name: row.name,
+      price: row.price_tzs,
+      short: row.short_description,
+    };
+  }
+  // fallback to static
+  return PRODUCTS.find((p) => p.sku === sku);
 }
 
 /**
  * For flows where a variant tap should still display/price using the parent
  * product (e.g., summary lines), map PROMAX_* back to PROMAX.
  */
-export function resolveProductForSku(sku: string): Product | undefined {
-  if (sku?.startsWith('PROMAX_')) return getProductBySku('PROMAX');
-  return getProductBySku(sku);
+export async function resolveProductForSkuAsync(
+  sku: string
+): Promise<Product | undefined> {
+  if (sku?.startsWith("PROMAX_")) return getProductBySkuAsync("PROMAX");
+  return getProductBySkuAsync(sku);
 }
 
 // -------- Menu model used by webhook.ts → sendListMessage --------
@@ -128,28 +168,37 @@ export type MenuModel = {
  *  - menu.change_language
  *  - menu.back_to_menu  (used elsewhere)
  */
-export function buildMainMenu(t: (key: string) => string): MenuModel {
+export async function buildMainMenu(
+  t: (key: string) => string
+): Promise<MenuModel> {
+  const products = await loadTopLevelProducts();
+
   return {
-    header: t('menu.header'),
-    footer: t('menu.footer'),
+    header: t("menu.header"),
+    footer: t("menu.footer"),
     sections: [
       {
-        title: t('menu.products_section'),
-        rows: getTopLevelProducts().map(p => ({
+        title: t("menu.products_section"),
+        rows: products.map((p) => ({
           id: `PRODUCT_${p.sku}`,
           title: `${p.name} — ${formatTZS(p.price)}`,
           subtitle: p.short || undefined,
         })),
       },
       {
-        title: t('menu.actions_section'),
+        title: t("menu.actions_section"),
         rows: [
-          { id: 'ACTION_VIEW_CART',      title: t('menu.view_cart') },
-          { id: 'ACTION_CHECKOUT',       title: t('menu.checkout') },
-          { id: 'ACTION_TRACK_BY_NAME',  title: t('menu.track_by_name') },
-          { id: 'ACTION_FAQ',            title: t('menu.faq') },
-          { id: 'ACTION_TALK_TO_AGENT',  title: t('menu.talk_to_agent') },
-          { id: 'ACTION_CHANGE_LANGUAGE',title: t('menu.change_language') },
+          { id: "ACTION_VIEW_CART", title: t("menu.view_cart") },
+          { id: "ACTION_CHECKOUT", title: t("menu.checkout") },
+          { id: "ACTION_TRACK_BY_NAME", title: t("menu.track_by_name") },
+          { id: "ACTION_TALK_TO_AGENT", title: t("menu.talk_to_agent") },
+        ],
+      },
+      {
+        title: t("menu.settings_section"),
+        rows: [
+          { id: "ACTION_FAQ", title: t("menu.faq") },
+          { id: "ACTION_CHANGE_LANGUAGE", title: t("menu.change_language") },
         ],
       },
     ],

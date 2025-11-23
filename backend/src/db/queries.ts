@@ -2,6 +2,46 @@
 import db from "./knex.js";
 import knex from "./knex.js";
 
+/* ------------------------------ Products ---------------------------------- */
+
+export interface ProductRow {
+  id: number;
+  sku: string;
+  name: string;
+  price_tzs: number;
+  short_description: string;
+  description: string;
+  usage_instructions: string;
+  warnings: string;
+  is_installment: boolean;
+  is_active: boolean;
+}
+
+export async function listActiveProducts(): Promise<ProductRow[]> {
+  const rows = await db<ProductRow>("products")
+    .where({ is_active: true })
+    .orderBy("name", "asc");
+  return rows;
+}
+
+export async function findProductBySku(
+  sku: string
+): Promise<ProductRow | null> {
+  if (!sku) return null;
+  const row = await db<ProductRow>("products")
+    .whereRaw("LOWER(sku) = LOWER(?)", [sku])
+    .first();
+  return row ?? null;
+}
+
+export async function findProductById(
+  id: number
+): Promise<ProductRow | null> {
+  const row = await db<ProductRow>("products").where({ id }).first();
+  return row ?? null;
+}
+
+
 /* ---------------------------- Customers / convos --------------------------- */
 // Find order by internal numeric ID
 export async function findOrderById(orderId: number) {
@@ -359,4 +399,49 @@ export async function getOrdersForCustomer(
   }));
 }
 
+/* ---------------------- Outstanding order balances ------------------------ */
+
+export interface OutstandingOrderRow {
+  id: number;
+  customer_id: number;
+  status: string | null;
+  total_tzs: number;
+  created_at: Date;
+  order_code: string | null;
+  paid_amount: number;
+  remaining: number;
+}
+
+export async function listOutstandingOrdersForCustomer(
+  customerId: number
+): Promise<OutstandingOrderRow[]> {
+  const rows = await db("orders as o")
+    .leftJoin("payments as p", "p.order_id", "o.id")
+    .where("o.customer_id", customerId)
+    .whereNull("o.deleted_at")
+    .groupBy("o.id")
+    .select(
+      "o.id",
+      "o.customer_id",
+      "o.status",
+      "o.total_tzs",
+      "o.created_at",
+      "o.order_code",
+      db.raw(
+        "COALESCE(SUM(CASE WHEN p.status = 'completed' THEN p.amount_tzs ELSE 0 END), 0) as paid_amount"
+      )
+    );
+
+  return rows
+    .map((row: any) => {
+      const total = Number(row.total_tzs) || 0;
+      const paid = Number(row.paid_amount) || 0;
+      const remaining = total - paid;
+      return { ...row, paid_amount: paid, remaining };
+    })
+    .filter((r) => r.remaining > 0)
+    .sort((a, b) => {
+      return (b.created_at as any) - (a.created_at as any);
+    });
+}
 

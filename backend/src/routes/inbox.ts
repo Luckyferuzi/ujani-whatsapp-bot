@@ -3,7 +3,7 @@ import { Router, type Request, type Response } from "express";
 import db from "../db/knex.js";
 import { sendText } from "../whatsapp.js";
 import { emit } from "../sockets.js";
-import { getOrdersForCustomer } from "../db/queries.js";
+import { getOrdersForCustomer, listOutstandingOrdersForCustomer } from "../db/queries.js";
 import { t, Lang } from "../i18n.js";
 
 
@@ -829,3 +829,76 @@ inboxRoutes.post("/orders/:id/status", async (req, res) => {
   }
 });
 
+// PATCH /api/orders/:id  -> edit basic order fields
+inboxRoutes.patch("/orders/:id", async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) {
+    return res.status(400).json({ error: "invalid_id" });
+  }
+
+  const allowed = [
+    "delivery_mode",
+    "region",
+    "phone",
+    "km",
+    "fee_tzs",
+    "total_tzs",
+  ];
+  const patch: Record<string, any> = {};
+  for (const key of allowed) {
+    if (key in req.body) patch[key] = req.body[key];
+  }
+
+  if (Object.keys(patch).length === 0) {
+    return res.status(400).json({ error: "no_updates" });
+  }
+
+  patch["updated_at"] = new Date();
+
+  await db("orders").where({ id }).update(patch);
+  return res.json({ ok: true });
+});
+
+// POST /api/orders/:id/cancel  -> explicit cancel
+inboxRoutes.post("/orders/:id/cancel", async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) {
+    return res.status(400).json({ error: "invalid_id" });
+  }
+
+  await db("orders").where({ id }).update({
+    status: "cancelled",
+    updated_at: new Date(),
+  });
+
+  return res.json({ ok: true });
+});
+
+// DELETE /api/orders/:id  -> soft delete (set deleted_at)
+inboxRoutes.delete("/orders/:id", async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) {
+    return res.status(400).json({ error: "invalid_id" });
+  }
+
+  await db("orders").where({ id }).update({
+    deleted_at: new Date(),
+  });
+
+  return res.json({ ok: true });
+});
+
+
+// GET /api/customers/:customerId/outstanding-orders
+inboxRoutes.get(
+  "/customers/:customerId/outstanding-orders",
+  async (req, res) => {
+    const customerId = Number(req.params.customerId);
+    if (!Number.isFinite(customerId)) {
+      return res.status(400).json({ error: "invalid_customer" });
+    }
+
+    const items = await listOutstandingOrdersForCustomer(customerId);
+    return res.json({ items });
+  }
+);

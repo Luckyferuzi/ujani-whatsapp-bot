@@ -10,7 +10,12 @@ import {
   verifySignature,
 } from '../whatsapp.js';
 import { feeForDarDistance } from '../delivery.js';
-import { buildMainMenu, getProductBySku, resolveProductForSku } from '../menu.js';
+import {
+  buildMainMenu,
+  getProductBySkuAsync,
+  resolveProductForSkuAsync,
+} from '../menu.js';
+
 import { getSession, saveSession, resetSession } from '../session.js';
 // backend/src/routes/webhook.ts
 import {
@@ -490,14 +495,15 @@ if ((!s || s.state === "IDLE") && !activeFlow) {
 /* -------------------------------------------------------------------------- */
 
 async function showMainMenu(user: string, lang: Lang) {
-  const model = buildMainMenu((key: string) => t(lang, key));
+  // buildMainMenu is now async and uses DB-backed products (with fallback)
+  const model = await buildMainMenu((key: string) => t(lang, key));
 
   // Show OTHER language label on the toggle row
   const sections = model.sections.map((sec) => ({
     title: sec.title,
     rows: sec.rows.map((r) =>
-      r.id === 'ACTION_CHANGE_LANGUAGE'
-        ? { ...r, title: t(otherLang(lang), 'menu.change_language') }
+      r.id === "ACTION_CHANGE_LANGUAGE"
+        ? { ...r, title: t(otherLang(lang), "menu.change_language") }
         : r
     ),
   }));
@@ -505,13 +511,10 @@ async function showMainMenu(user: string, lang: Lang) {
   await sendListMessageSafe({
     to: user,
     header: model.header,
-    body: t(lang, 'menu.header'),
+    body: t(lang, "menu.header"),
     footer: model.footer,
-    buttonText: t(lang, 'generic.open'),
-    sections: sections.map((sec) => ({
-      title: sec.title,
-      rows: sec.rows.map((r) => ({ id: r.id, title: r.title, description: r.subtitle })),
-    })),
+    buttonText: t(lang, "generic.open"),
+    sections,
   });
 }
 
@@ -542,43 +545,48 @@ async function showCart(user: string, lang: Lang) {
 }
 
 async function showProductActions(user: string, sku: string, lang: Lang) {
-  const prod = getProductBySku(sku) || resolveProductForSku(sku);
+  // Resolve via DB-backed products first, then fallback to static
+  const prod = await resolveProductForSkuAsync(sku);
   if (!prod) return;
 
   await sendText(user, `*${prod.name}* — ${fmtTZS(prod.price)} TZS`);
   const hasVariants = !!(prod.children && prod.children.length);
 
   const buttons: Button[] = [
-    ...(hasVariants ? [{ id: `VARIANTS_${prod.sku}`, title: t(lang, 'menu.choose_variant') }] : []),
-    { id: `ADD_${prod.sku}`,     title: t(lang, 'menu.add_to_cart') },
-    { id: `BUY_${prod.sku}`,     title: t(lang, 'menu.buy_now') },
-    { id: `DETAILS_${prod.sku}`, title: t(lang, 'menu.more_details') },
+    ...(hasVariants
+      ? [{ id: `VARIANTS_${prod.sku}`, title: t(lang, "menu.choose_variant") }]
+      : []),
+    { id: `ADD_${prod.sku}`, title: t(lang, "menu.add_to_cart") },
+    { id: `BUY_${prod.sku}`, title: t(lang, "menu.buy_now") },
+    { id: `DETAILS_${prod.sku}`, title: t(lang, "menu.more_details") },
   ];
-  await sendButtonsMessageSafe(user, t(lang, 'menu.actions_section'), buttons);
+  await sendButtonsMessageSafe(user, t(lang, "menu.actions_section"), buttons);
 }
 
 async function showVariants(user: string, parentSku: string, lang: Lang) {
-  const parent = getProductBySku(parentSku);
+  const parent = await getProductBySkuAsync(parentSku);
   if (!parent?.children?.length) return;
 
   await sendListMessageSafe({
     to: user,
     header: parent.name,
-    body: t(lang, 'menu.choose_variant'),
-    footer: '',
-    buttonText: t(lang, 'generic.choose'),
+    body: t(lang, "menu.choose_variant"),
+    footer: "",
+    buttonText: t(lang, "generic.choose"),
     sections: [
       {
-        title: t(lang, 'menu.choose_variant'),
-        rows: parent.children.map((v) => ({
+        title: t(lang, "menu.choose_variant"),
+        rows: parent.children!.map((v) => ({
           id: `PRODUCT_${v.sku}`,
           title: `${v.name} — ${fmtTZS(v.price)} TZS`,
-          description: lang === 'sw' ? 'Gusa kuona vitendo' : 'Tap to view actions',
+          description:
+            lang === "sw" ? "Gusa kuona vitendo" : "Tap to view actions",
         })),
       },
     ],
   });
 }
+
 
 /* -------------------------------------------------------------------------- */
 /*                            Interactive handling                            */
@@ -750,51 +758,118 @@ if (id === 'ACTION_TALK_TO_AGENT') {
 
 
   /* ------------------------------ Product flows ------------------------------ */
-  if (id.startsWith('PRODUCT_')) {
-    const sku = id.replace('PRODUCT_', '');
-    if (sku === 'PROMAX') return showVariants(user, 'PROMAX', lang);
+/* ------------------------------ Product flows ------------------------------ */
+  if (id.startsWith("PRODUCT_")) {
+    const sku = id.replace("PRODUCT_", "");
+    if (sku === "PROMAX") return showVariants(user, "PROMAX", lang);
     return showProductActions(user, sku, lang);
   }
-  if (id.startsWith('VARIANTS_')) {
-    const parentSku = id.replace('VARIANTS_', '');
+
+  if (id.startsWith("VARIANTS_")) {
+    const parentSku = id.replace("VARIANTS_", "");
     return showVariants(user, parentSku, lang);
   }
 
-  // Add / Buy / Details
-  if (id.startsWith('ADD_') || id.startsWith('BUY_') || id.startsWith('DETAILS_')) {
-    const mode = id.split('_')[0]; // ADD | BUY | DETAILS
-    const sku = id.substring(mode.length + 1);
-    const prod = getProductBySku(sku) || resolveProductForSku(sku);
+  // Second-level product details (ABOUT / USAGE / WARN)
+  if (id.startsWith("DETAILS2_")) {
+    // ID pattern: DETAILS2_<SKU>_<SECTION>
+    const parts = id.split("_"); // ["DETAILS2", "<SKU>", "<SECTION>"]
+    const sku = parts[1];
+    const section = parts[2] as "ABOUT" | "USAGE" | "WARN";
+
+    if (!sku || !section) return;
+
+    // Use async resolver (DB-backed + fallback) – no getProductBySku here
+    const prod = await resolveProductForSkuAsync(sku);
     if (!prod) return;
 
-    if (mode === 'DETAILS') {
-      const txt = detailsForSku(lang, sku);
-      await sendText(user, `ℹ️ *${prod.name}*\n${txt}`);
-      return showProductActions(user, sku, lang);
+    const label =
+      section === "ABOUT"
+        ? lang === "sw"
+          ? "Kuhusu bidhaa"
+          : "About product"
+        : section === "USAGE"
+        ? lang === "sw"
+          ? "Jinsi ya kutumia"
+          : "How to use"
+        : lang === "sw"
+        ? "Tahadhari muhimu"
+        : "Important warnings";
+
+    const txt = detailsSectionForSku(lang, sku, section);
+    await sendText(user, `ℹ️ *${prod.name}* — ${label}\n\n${txt}`);
+
+    // After showing the chosen details, show normal product actions again
+    return showProductActions(user, sku, lang);
+  }
+
+  // Add / Buy / Details (first click on "Maelezo zaidi")
+  if (
+    id.startsWith("ADD_") ||
+    id.startsWith("BUY_") ||
+    id.startsWith("DETAILS_")
+  ) {
+    const mode = id.split("_")[0]; // ADD | BUY | DETAILS
+    const sku = id.substring(mode.length + 1);
+
+    // Async product resolve (DB-backed + static fallback)
+    const prod = await resolveProductForSkuAsync(sku);
+    if (!prod) return;
+
+    // First-level "Maelezo zaidi" -> show 3 options
+    if (mode === "DETAILS") {
+      const baseLabel =
+        lang === "sw"
+          ? "Chagua maelezo unayotaka:"
+          : "Choose which information you want:";
+
+      await sendButtonsMessageSafe(user, `${baseLabel} *${prod.name}*`, [
+        {
+          id: `DETAILS2_${sku}_ABOUT`,
+          title: lang === "sw" ? "Kuhusu bidhaa" : "About product",
+        },
+        {
+          id: `DETAILS2_${sku}_USAGE`,
+          title: lang === "sw" ? "Jinsi ya kutumia" : "How to use",
+        },
+        {
+          id: `DETAILS2_${sku}_WARN`,
+          title: lang === "sw" ? "Tahadhari muhimu" : "Important warnings",
+        },
+      ]);
+      return;
     }
 
-    const item: CartItem = { sku: prod.sku, name: prod.name, qty: 1, unitPrice: prod.price };
-    if (mode === 'ADD') {
+    // Normal ADD / BUY logic (unchanged)
+    const item: CartItem = {
+      sku: prod.sku,
+      name: prod.name,
+      qty: 1,
+      unitPrice: prod.price,
+    };
+
+    if (mode === "ADD") {
       addToCart(user, item);
-      await sendText(user, t(lang, 'cart.added', { title: item.name }));
-      return sendButtonsMessageSafe(user, t(lang, 'cart.choose_action'), [
-        { id: 'ACTION_CHECKOUT', title: t(lang, 'menu.checkout') },
-        { id: 'ACTION_VIEW_CART', title: t(lang, 'menu.view_cart') },
-        { id: 'ACTION_BACK', title: t(lang, 'menu.back_to_menu') },
+      await sendText(user, t(lang, "cart.added", { title: item.name }));
+      return sendButtonsMessageSafe(user, t(lang, "cart.choose_action"), [
+        { id: "ACTION_CHECKOUT", title: t(lang, "menu.checkout") },
+        { id: "ACTION_VIEW_CART", title: t(lang, "menu.view_cart") },
+        { id: "ACTION_BACK", title: t(lang, "menu.back_to_menu") },
       ]);
     }
-    if (mode === 'BUY') {
+
+    if (mode === "BUY") {
       setPending(user, item);
-      setFlow(user, 'ASK_IF_DAR'); // << start with inside/outside Dar (no name yet)
+      setFlow(user, "ASK_IF_DAR"); // start with inside/outside Dar
       CONTACT.set(user, {});
-      await sendButtonsMessageSafe(user, t(lang, 'flow.choose_dar'), [
-        { id: 'DAR_INSIDE',  title: t(lang, 'flow.option_inside_dar') },
-        { id: 'DAR_OUTSIDE', title: t(lang, 'flow.option_outside_dar') },
+      await sendButtonsMessageSafe(user, t(lang, "flow.choose_dar"), [
+        { id: "DAR_INSIDE", title: t(lang, "flow.option_inside_dar") },
+        { id: "DAR_OUTSIDE", title: t(lang, "flow.option_outside_dar") },
       ]);
       return;
     }
   }
-  
+
   if (id === 'ACTION_PAYMENT_DONE') {
   const s = getSession(user);
   s.state = 'WAIT_PROOF';
@@ -804,6 +879,41 @@ if (id === 'ACTION_TALK_TO_AGENT') {
 }
 
 }
+
+async function sendProductDetailsOptions(
+  toWaId: string,
+  productSku: string,
+  lang: Lang
+) {
+  const product = await getProductBySkuAsync(productSku);
+  if (!product) {
+    await sendText(toWaId, t(lang, "errors.product_not_found"));
+    return;
+  }
+
+  // Static labels; content comes from DB
+  const buttons = [
+    {
+      id: `PRODUCT_INFO_${productSku}_ABOUT`,
+      title: "Kuhusu bidhaa",
+    },
+    {
+      id: `PRODUCT_INFO_${productSku}_USAGE`,
+      title: "Jinsi ya kutumia",
+    },
+    {
+      id: `PRODUCT_INFO_${productSku}_WARN`,
+      title: "Tahadhari muhimu",
+    },
+  ];
+
+  await sendButtonsMessageSafe(
+    toWaId,
+    `Umechagua *${product.name}*.\n\nChagua maelezo unayotaka:`,
+    buttons
+  );
+}
+
 
 async function isAgentAllowed(waId: string): Promise<boolean> {
   // Reuse your existing helpers
@@ -1240,3 +1350,46 @@ function detailsForSku(lang: Lang, sku: string): string {
   return `${body}\n\n${disclaimer}`;
 }
 
+function detailsSectionForSku(
+  lang: Lang,
+  sku: string,
+  section: "ABOUT" | "USAGE" | "WARN"
+): string {
+  // ABOUT = re-use the old detailsForSku (includes disclaimer)
+  if (section === "ABOUT") {
+    return detailsForSku(lang, sku);
+  }
+
+  if (section === "USAGE") {
+    if (sku === "KIBOKO") {
+      return lang === "sw"
+        ? "Tumia Ujani Kiboko kama ilivyoelekezwa kwenye maelekezo ya dawa. Mara nyingi hupakwa mara 2 kwa siku (asubuhi na jioni), isipokuwa kama umeelekezwa vingine na mtaalamu."
+        : "Use Ujani Kiboko exactly as directed on the package. Typically applied twice a day (morning and evening) unless your consultant advises otherwise.";
+    }
+
+    if (sku.startsWith("PROMAX")) {
+      return lang === "sw"
+        ? "Kwa Ujani Pro Max, fuata maelekezo ya kila dawa (za kunywa na za kupaka) kama yalivyoandikwa kwenye vifurushi. Usizidishe dozi bila ushauri wa mtaalamu."
+        : "For Ujani Pro Max, follow the usage instructions for each oral and topical medicine as written on the packages. Do not increase the dose without professional advice.";
+    }
+
+    return lang === "sw"
+      ? "Tumia bidhaa hii kama ilivyoelekezwa kwenye kifurushi au na mtaalamu wa Ujani. Usibadilishe mpangilio wa matumizi bila kushauriana."
+      : "Use this product as directed on the packaging or by your Ujani consultant. Do not change the schedule without consulting them.";
+  }
+
+  if (section === "WARN") {
+    if (sku.startsWith("PROMAX")) {
+      return lang === "sw"
+        ? "Tahadhari: Usitumie Ujani Pro Max iwapo una mzio kwa viambato vyake. Usizidishe dozi. Kama una presha, matatizo ya moyo au maradhi sugu, wasiliana kwanza na daktari au mtaalamu kabla ya matumizi."
+        : "Warning: Do not use Ujani Pro Max if you are allergic to any of its ingredients. Do not exceed the recommended dose. If you have hypertension, heart disease or other chronic conditions, consult your doctor or consultant before use.";
+    }
+
+    return lang === "sw"
+      ? "Tahadhari: Usizidishe dozi iliyopendekezwa. Usitumie kama una mzio wa viambato vya dawa. Ukiona dalili zisizo za kawaida, acha kutumia mara moja na wasiliana na mtaalamu au daktari."
+      : "Warning: Do not exceed the recommended dose. Do not use if you are allergic to any of the ingredients. If you notice unusual symptoms, stop using immediately and contact your consultant or doctor.";
+  }
+
+  // Fallback: if something weird happens, just send the combined details
+  return detailsForSku(lang, sku);
+}
