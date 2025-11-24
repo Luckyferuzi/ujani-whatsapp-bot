@@ -29,6 +29,53 @@ inboxRoutes.get("/media/:mediaId", async (req, res) => {
   }
 });
 
+// DELETE /api/messages/:id
+// Only allow deleting media-type messages from the admin UI
+inboxRoutes.delete("/messages/:id", async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) {
+    return res.status(400).json({ error: "Invalid message id" });
+  }
+
+  try {
+    const msg = await db("messages")
+      .where({ id })
+      .select("id", "conversation_id", "type")
+      .first();
+
+    if (!msg) {
+      return res.status(404).json({ error: "Message not found" });
+    }
+
+    // Only allow media messages to be deleted for now
+    if (
+      msg.type !== "image" &&
+      msg.type !== "video" &&
+      msg.type !== "audio" &&
+      msg.type !== "document"
+    ) {
+      return res
+        .status(400)
+        .json({ error: "Only media messages can be deleted" });
+    }
+
+    await db("messages").where({ id }).del();
+
+    // Let connected clients know this message is gone (optional)
+    req.app.get("io")?.emit("message.deleted", {
+      id: msg.id,
+      conversation_id: msg.conversation_id,
+    });
+
+    res.json({ ok: true });
+  } catch (err: any) {
+    console.error("DELETE /api/messages/:id failed", err);
+    res
+      .status(500)
+      .json({ error: err?.message ?? "Failed to delete message" });
+  }
+});
+
 
 function formatTzs(amount: number): string {
   if (!Number.isFinite(amount)) return "0";

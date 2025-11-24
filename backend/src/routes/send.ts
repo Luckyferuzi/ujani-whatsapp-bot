@@ -136,17 +136,31 @@ sendRoutes.post(
       const mime = file.mimetype || "application/octet-stream";
       const filename = file.originalname || "file";
 
-      // Infer type if not provided
+          // Infer type if not provided.
+      // NOTE: WhatsApp does NOT accept SVG as an "image" message,
+      // so we send SVG as a generic document instead.
       let type: "image" | "video" | "audio" | "document" = "document";
-      if (kind === "image" || kind === "video" || kind === "audio" || kind === "document") {
+
+      if (
+        kind === "image" ||
+        kind === "video" ||
+        kind === "audio" ||
+        kind === "document"
+      ) {
         type = kind;
       } else if (mime.startsWith("image/")) {
-        type = "image";
+        if (mime === "image/svg+xml") {
+          // SVG -> send as document
+          type = "document";
+        } else {
+          type = "image";
+        }
       } else if (mime.startsWith("video/")) {
         type = "video";
       } else if (mime.startsWith("audio/")) {
         type = "audio";
       }
+
 
       // 1) Upload media to WhatsApp → get mediaId
       const mediaId = await uploadMedia(file.buffer, filename, mime);
