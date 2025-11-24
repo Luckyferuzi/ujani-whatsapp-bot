@@ -11,14 +11,32 @@ export type Convo = {
   lang?: string | null;
   agent_allowed: boolean;
   last_user_message_at: string;
+  last_message_at?: string | null;       // <- NEW
   unread_count?: number;
   last_message_text?: string | null;
 };
+
 
 type Props = {
   activeId: string | null;
   onPick: (c: Convo) => void;
 };
+
+function describeLastMessage(text: string | null | undefined): string | null {
+  if (!text) return null;
+  const s = text.trim();
+  if (!s) return null;
+
+  if (s.startsWith("LOCATION")) return "Mteja ametuma lokesheni";
+  if (s.startsWith("[image")) return "Picha imetumwa";
+  if (s.startsWith("[document")) return "Hati imetumwa";
+  if (s.startsWith("[audio")) return "Sauti imetumwa";
+  if (s.startsWith("[video")) return "Video imetumwa";
+  if (s.startsWith("[sticker")) return "Stika imetumwa";
+
+  return s;
+}
+
 
 function formatTime(value: string): string {
   const d = new Date(value);
@@ -33,6 +51,7 @@ const ConversationList: React.FC<Props> = ({ activeId, onPick }) => {
   const [items, setItems] = useState<Convo[]>([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
+  const [showOnlyUnread, setShowOnlyUnread] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -55,26 +74,58 @@ const ConversationList: React.FC<Props> = ({ activeId, onPick }) => {
     return () => clearInterval(t);
   }, []);
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return items;
-    return items.filter((c) => {
-      const name = (c.name ?? "").toLowerCase();
-      const phone = c.phone.toLowerCase();
-      return name.includes(q) || phone.includes(q);
-    });
-  }, [items, search]);
+ const filtered = useMemo(() => {
+  const q = search.trim().toLowerCase();
+
+  return items.filter((c) => {
+    // 1) Filter by "needs reply" if toggle is on
+    if (showOnlyUnread && (c.unread_count ?? 0) === 0) {
+      return false;
+    }
+
+    // 2) If no search term, conversation passes
+    if (!q) return true;
+
+    // 3) Search by name, phone, or last message text
+    const name = (c.name ?? "").toLowerCase();
+    const phone = c.phone.toLowerCase();
+    const last = (c.last_message_text ?? "").toLowerCase();
+
+    return (
+      name.includes(q) ||
+      phone.includes(q) ||
+      last.includes(q)
+    );
+  });
+}, [items, search, showOnlyUnread]);
+
 
   return (
     <div className="conversation-list">
-      <div className="conversation-search">
-        <input
-          type="text"
-          placeholder="Search chats..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-      </div>
+   <div className="conversation-search">
+  <div className="conversation-search-row">
+    <input
+      type="text"
+      placeholder="Tafuta jina, namba au ujumbe..."
+      value={search}
+      onChange={(e) => setSearch(e.target.value)}
+      className="conversation-search-input"
+    />
+    <button
+      type="button"
+      className={
+        "conversation-filter-button" +
+        (showOnlyUnread ? " conversation-filter-button--active" : "")
+      }
+      onClick={() => setShowOnlyUnread((prev) => !prev)}
+    >
+      Zisizojibiwa
+    </button>
+  </div>
+</div>
+
+
+
 
       {loading && items.length === 0 ? (
         <div className="conversation-empty">Loading chats…</div>
@@ -92,21 +143,24 @@ const ConversationList: React.FC<Props> = ({ activeId, onPick }) => {
                 ? c.name
                 : formatPhonePretty(c.phone);
 
+             const prettyLast = describeLastMessage(c.last_message_text);
+
             const rawSubtitle =
-              c.last_message_text && c.last_message_text.trim().length > 0
-                ? c.last_message_text
+              prettyLast && prettyLast.length > 0
+                ? prettyLast
                 : c.agent_allowed
                 ? "Agent mode kwa mazungumzo"
                 : "Bot anaendeleza mazungumzo";
+
 
             const subtitle =
               rawSubtitle.length > 45
                 ? rawSubtitle.slice(0, 42) + "..."
                 : rawSubtitle;
 
-            const timeText = c.last_user_message_at
-              ? formatTime(c.last_user_message_at)
-              : "";
+           const timeSource = c.last_message_at ?? c.last_user_message_at;
+           const timeText = timeSource ? formatTime(timeSource) : "";
+
 
             const unread = c.unread_count ?? 0;
 

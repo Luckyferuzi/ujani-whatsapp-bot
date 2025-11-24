@@ -1,9 +1,12 @@
 // backend/src/routes/send.ts
 import { Router } from "express";
 import db from "../db/knex.js";
-import { sendText } from "../whatsapp.js";
+import multer from "multer";
+import { sendText, sendMediaById, uploadMedia } from "../whatsapp.js";
+
 
 export const sendRoutes = Router();
+const upload = multer(); // memory storage
 
 /**
  * POST /api/send
@@ -81,3 +84,107 @@ sendRoutes.post("/send", async (req, res) => {
     res.status(500).json({ error: e?.message ?? "send failed" });
   }
 });
+
+/**
+ * POST /api/upload-media
+ * multipart/form-data:
+ *  - file: binary
+ *  - conversationId: number
+ *  - kind?: "image" | "video" | "audio" | "document"
+ */
+sendRoutes.post(
+  "/upload-media",
+  upload.single("file"),
+  async (req, res) => {
+    try {
+      const { conversationId, kind } = req.body ?? {};
+      const id = Number(conversationId);
+      const file = req.file;
+
+      if (!file) {
+        return res.status(400).json({ error: "Missing file" });
+      }
+
+      if (!Number.isFinite(id)) {
+        return res.status(400).json({ error: "Invalid conversationId" });
+      }
+
+      // Find conversation + customer wa_id + agent_allowed (same as /send)
+      const convo = await db("conversations")
+        .where({ "conversations.id": id })
+        .join("customers as cu", "cu.id", "conversations.customer_id")
+        .select("conversations.agent_allowed", "cu.wa_id")
+        .first();
+
+      if (!convo) {
+        return res.status(404).json({ error: "Conversation not found" });
+      }
+
+      if (!convo.agent_allowed) {
+        return res
+          .status(403)
+          .json({ error: "Agent is not allowed for this conversation" });
+      }
+
+      const waId = (convo as any).wa_id as string | null;
+      if (!waId) {
+        return res
+          .status(400)
+          .json({ error: "Customer wa_id missing; cannot send media" });
+      }
+
+      const mime = file.mimetype || "application/octet-stream";
+      const filename = file.originalname || "file";
+
+      // Infer type if not provided
+      let type: "image" | "video" | "audio" | "document" = "document";
+      if (kind === "image" || kind === "video" || kind === "audio" || kind === "document") {
+        type = kind;
+      } else if (mime.startsWith("image/")) {
+        type = "image";
+      } else if (mime.startsWith("video/")) {
+        type = "video";
+      } else if (mime.startsWith("audio/")) {
+        type = "audio";
+      }
+
+      // 1) Upload media to WhatsApp → get mediaId
+      const mediaId = await uploadMedia(file.buffer, filename, mime);
+
+      // 2) Send media message
+      await sendMediaById(waId, type, mediaId);
+
+      // 3) Store outbound message in DB with MEDIA marker
+      const [msg] = await db("messages")
+        .insert({
+          conversation_id: id,
+          direction: "outbound",
+          type,
+          body: `MEDIA:${type}:${mediaId}`,
+          status: "sent",
+        })
+        .returning([
+          "id",
+          "conversation_id",
+          "direction",
+          "type",
+          "body",
+          "status",
+          "created_at",
+        ]);
+
+      // 4) Emit socket event so UI updates in real-time
+      req.app.get("io")?.emit("message.created", {
+        conversation_id: id,
+        message: msg,
+      });
+
+      res.json({ ok: true, message: msg });
+    } catch (e: any) {
+      console.error("POST /api/upload-media failed", e);
+      res
+        .status(500)
+        .json({ error: e?.message ?? "Failed to upload / send media" });
+    }
+  }
+);

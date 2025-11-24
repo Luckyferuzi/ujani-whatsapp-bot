@@ -5,11 +5,10 @@
 export const API = (process.env.NEXT_PUBLIC_API_BASE ?? "").replace(/\/+$/, "");
 const INBOX_KEY = process.env.NEXT_PUBLIC_INBOX_ACCESS_KEY ?? "";
 
-
 // Small helper type so consumers can see HTTP status if needed
 export type ApiError = Error & { status?: number };
 
-export async function api<T>(path: string, init?: RequestInit): Promise<T> {
+export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (!API) {
     throw new Error(
       'NEXT_PUBLIC_API_BASE is missing. ' +
@@ -19,8 +18,8 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
 
   const url = `${API}${path}`;
 
-  // 👇 Build headers as a plain object so we can safely add our custom header
-  const originalHeaders = init?.headers ?? {};
+  // Build headers as a plain object so we can safely add our custom header
+  const originalHeaders = init.headers ?? {};
   const headersObj: Record<string, string> =
     originalHeaders instanceof Headers
       ? Object.fromEntries(originalHeaders.entries())
@@ -28,6 +27,7 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
       ? Object.fromEntries(originalHeaders)
       : { ...originalHeaders };
 
+  // Attach inbox key for admin UI auth, if configured
   if (INBOX_KEY) {
     headersObj["x-inbox-key"] = INBOX_KEY;
   }
@@ -41,7 +41,8 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
     });
   } catch (err: any) {
     console.error("[api] request failed", err);
-    throw new Error("Failed to reach API");
+    const e: ApiError = new Error("Failed to reach API");
+    throw e;
   }
 
   if (!res.ok) {
@@ -49,15 +50,18 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
     try {
       body = await res.json();
     } catch {
-      // ignore
+      // ignore non-JSON error bodies
     }
     console.error("[api] non-OK response", res.status, body);
-    throw new Error(body?.error ?? `API error (${res.status})`);
+    const e: ApiError = new Error(
+      body?.error ?? `API error (${res.status})`
+    );
+    e.status = res.status;
+    throw e;
   }
 
   return (await res.json()) as T;
 }
-
 
 // Optional helpers – safe even if not used elsewhere
 export function get<T>(path: string, init?: RequestInit) {

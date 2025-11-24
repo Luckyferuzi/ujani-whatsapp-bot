@@ -1,13 +1,34 @@
 // backend/src/routes/inbox.ts
 import { Router, type Request, type Response } from "express";
 import db from "../db/knex.js";
-import { sendText } from "../whatsapp.js";
+import { sendText, downloadMedia } from "../whatsapp.js";
 import { emit } from "../sockets.js";
 import { getOrdersForCustomer, listOutstandingOrdersForCustomer } from "../db/queries.js";
 import { t, Lang } from "../i18n.js";
 
 
 export const inboxRoutes = Router();
+
+// Serve WhatsApp media to the admin UI
+inboxRoutes.get("/media/:mediaId", async (req, res) => {
+  const mediaId = req.params.mediaId;
+  if (!mediaId) {
+    return res.status(400).json({ error: "Missing mediaId" });
+  }
+
+  try {
+    const { buffer, contentType } = await downloadMedia(mediaId);
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Cache-Control", "private, max-age=300");
+    return res.send(buffer);
+  } catch (err: any) {
+    console.error("GET /media/:mediaId failed", err);
+    return res
+      .status(500)
+      .json({ error: err?.message ?? "Failed to download media" });
+  }
+});
+
 
 function formatTzs(amount: number): string {
   if (!Number.isFinite(amount)) return "0";

@@ -32,6 +32,27 @@ const GRAPH_VER = (env as any).GRAPH_API_VERSION || 'v19.0';
 /*                                HTTP client                                 */
 /* -------------------------------------------------------------------------- */
 
+
+async function apiGet(path: string) {
+  const token = getToken();
+  const url = `${GRAPH_BASE}/${GRAPH_VER}/${path}`;
+  const res = await fetch(url, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    console.error("[whatsapp] GET error", res.status, text);
+    throw new Error(`WhatsApp GET error (${res.status})`);
+  }
+
+  return res.json() as Promise<any>;
+}
+
+
 async function apiFetch(path: string, body: unknown) {
   const token = getToken();
   const url = `${GRAPH_BASE}/${GRAPH_VER}/${path}`;
@@ -77,6 +98,8 @@ export async function sendText(to: string, body: string) {
 
 type ListRow = { id: string; title: string; description?: string };
 type ListSection = { title: string; rows: ListRow[] };
+
+
 export async function sendListMessage(args: {
   to: string;
   header?: string;
@@ -123,6 +146,8 @@ export async function sendListMessage(args: {
 }
 
 type Button = { id: string; title: string };
+
+
 export async function sendButtonsMessage(
   to: string,
   body: string,
@@ -274,4 +299,109 @@ export function verifySignature(arg1: any, arg2?: string): boolean {
     console.warn('[verify] error:', e);
     return false;
   }
+}
+
+export async function downloadMedia(
+  mediaId: string
+): Promise<{ buffer: Buffer; contentType: string }> {
+  if (!mediaId) throw new Error("Missing mediaId");
+
+  // 1) Metadata: url + mime_type
+  const meta = await apiGet(mediaId);
+  const url = meta.url as string | undefined;
+  const mimeType =
+    (meta.mime_type as string | undefined) ?? "application/octet-stream";
+
+  if (!url) {
+    throw new Error("Media URL missing from WhatsApp response");
+  }
+
+  // 2) Download file
+  const token = getToken();
+  const res = await fetch(url, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    console.error("[whatsapp] media download error", res.status, text);
+    throw new Error(`Failed to download media (${res.status})`);
+  }
+
+  const arrayBuf = await res.arrayBuffer();
+  const buffer = Buffer.from(arrayBuf);
+
+  return { buffer, contentType: mimeType };
+}
+
+export async function uploadMedia(
+  buffer: Buffer,
+  filename: string,
+  contentType: string
+): Promise<string> {
+  const phoneId = getPhoneNumberId();
+  if (!phoneId) {
+    throw new Error("PHONE_NUMBER_ID missing; cannot upload media");
+  }
+
+  const token = getToken();
+
+  const form = new FormData();
+  // Node 20 has Blob & FormData globally
+  const blob = new Blob([buffer], { type: contentType });
+  form.append("file", blob, filename);
+  form.append("messaging_product", "whatsapp");
+  form.append("type", contentType);
+
+  const url = `${GRAPH_BASE}/${GRAPH_VER}/${phoneId}/media`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    body: form as any,
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    console.error("[whatsapp] upload media error", res.status, text);
+    throw new Error(`Failed to upload media (${res.status})`);
+  }
+
+  const body = (await res.json()) as { id: string };
+  if (!body.id) {
+    throw new Error("WhatsApp did not return media id");
+  }
+  return body.id;
+}
+
+export async function sendMediaById(
+  to: string,
+  kind: "image" | "video" | "audio" | "document",
+  mediaId: string,
+  caption?: string
+) {
+  const phoneId = getPhoneNumberId();
+  if (!phoneId) {
+    console.warn("[whatsapp] PHONE_NUMBER_ID missing; cannot sendMediaById");
+    return;
+  }
+
+  const payload: any = {
+    messaging_product: "whatsapp",
+    to,
+    type: kind,
+    [kind]: {
+      id: mediaId,
+    },
+  };
+
+  if (caption && (kind === "image" || kind === "video" || kind === "document")) {
+    payload[kind].caption = caption;
+  }
+
+  await apiFetch(`${phoneId}/messages`, payload);
 }

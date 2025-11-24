@@ -1,20 +1,18 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type KeyboardEvent,
+  type FormEvent
+} from "react";
 import { api } from "@/lib/api";
 import { formatPhonePretty } from "@/lib/phone";
 import { socket } from "@/lib/socket";
 import type { Convo } from "./ConversationList";
-
-type Msg = {
-  id: string | number;
-  conversation_id: string | number;
-  direction: "in" | "inbound" | "out" | "outbound";
-  type: string;
-  body: string | null;
-  status?: string | null;
-  created_at: string;
-};
+import Image from "next/image";
 
 type ThreadProps = {
   convo: Convo;
@@ -29,9 +27,110 @@ function formatTime(iso: string) {
   });
 }
 
+type Msg = {
+  id: string | number;
+  conversation_id: string | number;
+  direction: "in" | "inbound" | "out" | "outbound";
+  type: string;
+  body: string | null;
+  status?: string | null;
+  created_at: string;
+};
+
+type ProductSummary = {
+  id: number;
+  sku: string;
+  name: string;
+};
+
+type ProductsResponse = {
+  items: ProductSummary[];
+};
+
+function formatInteractiveDisplay(
+  id: string,
+  products: Record<string, string>
+): string {
+  if (!id) return "";
+
+  const nameForSku = (sku: string) => products[sku] ?? sku;
+
+  // Customer selected a product from the list
+  if (id.startsWith("PRODUCT_")) {
+    const sku = id.slice("PRODUCT_".length);
+    const name = nameForSku(sku);
+    return `✅ Mteja amechagua bidhaa: ${name}`;
+  }
+
+  // First-level "Maelezo zaidi" (DETAILS_<SKU>)
+  if (id.startsWith("DETAILS_") && !id.startsWith("DETAILS2_")) {
+    const sku = id.slice("DETAILS_".length);
+    const name = nameForSku(sku);
+    return `ℹ️ Mteja ameomba maelezo zaidi kuhusu ${name}`;
+  }
+
+  // Second-level details: DETAILS2_<SKU>_<SECTION>
+  if (id.startsWith("DETAILS2_")) {
+    const rest = id.slice("DETAILS2_".length); // "<SKU>_<SECTION>"
+    const [sku, section] = rest.split("_");
+    const name = nameForSku(sku);
+    if (section === "ABOUT") {
+      return `ℹ️ Mteja ameomba maelezo kuhusu ${name}`;
+    }
+    if (section === "USAGE") {
+      return `🧴 Mteja ameomba jinsi ya kutumia ${name}`;
+    }
+    if (section === "WARN") {
+      return `⚠️ Mteja ameomba tahadhari muhimu za ${name}`;
+    }
+  }
+
+  // Add to cart
+  if (id.startsWith("ADD_")) {
+    const sku = id.slice("ADD_".length);
+    const name = nameForSku(sku);
+    return `🛒 Mteja ameongeza kwenye mzigo: ${name}`;
+  }
+
+  // Buy now
+  if (id.startsWith("BUY_")) {
+    const sku = id.slice("BUY_".length);
+    const name = nameForSku(sku);
+    return `💳 Mteja amebonyeza *Nunua sasa* — ${name}`;
+  }
+
+  // Other actions from main menu
+  if (id === "ACTION_VIEW_CART") return "🛒 Mteja ameangalia mzigo (cart)";
+  if (id === "ACTION_CHECKOUT") return "✅ Mteja ameanza kukamilisha oda (checkout)";
+  if (id === "ACTION_TRACK_BY_NAME")
+    return "🔍 Mteja anafuata oda kwa jina";
+  if (id === "ACTION_TALK_TO_AGENT")
+    return "☎️ Mteja ameomba kuongea na agent";
+  if (id === "ACTION_FAQ") return "❓ Mteja ameangalia maswali (FAQ)";
+  if (id === "ACTION_BACK") return "↩️ Mteja amerudi kwenye menyu kuu";
+
+  // Unknown / fallback – keep it but make it clearer
+  return `⛓️ Interactive: ${id}`;
+}
+
+
 // LOCATION handling: "LOCATION lat,lng"
-function renderBody(msg: Msg) {
+function renderBody(
+  msg: Msg,
+  products: Record<string, string>,
+  onResendMedia?: (kind: string, mediaId: string) => void
+) {
   const body = msg.body ?? "";
+
+  // 0) Interactive markers: [interactive:ID]
+  const interactiveMatch = body.match(/^\[interactive:(.+)\]$/);
+  if (interactiveMatch) {
+    const id = interactiveMatch[1];
+    const pretty = formatInteractiveDisplay(id, products);
+    return <div className="thread-text">{pretty}</div>;
+  }
+
+  // 1) LOCATION "LOCATION lat,lng"
   if (body.startsWith("LOCATION ")) {
     const raw = body.substring("LOCATION ".length).trim();
     const [latStr, lngStr] = raw.split(",").map((p) => p.trim());
@@ -62,6 +161,75 @@ function renderBody(msg: Msg) {
     );
   }
 
+  // 2) MEDIA marker: MEDIA:<kind>:<mediaId>
+  const mediaMatch = body.match(/^MEDIA:(image|video|audio|document):(.+)$/);
+  if (mediaMatch) {
+    const kind = mediaMatch[1] as "image" | "video" | "audio" | "document";
+    const mediaId = mediaMatch[2];
+    const src = `/api/media/${encodeURIComponent(mediaId)}`;
+
+    const canResend =
+      typeof onResendMedia === "function" &&
+      (msg.direction === "out" ||
+        msg.direction === "outbound" ||
+        msg.direction === "inbound");
+
+    const resendButton = canResend ? (
+      <button
+        type="button"
+        className="thread-media-resend"
+        onClick={() => onResendMedia(kind, mediaId)}
+      >
+        Tuma tena media
+      </button>
+    ) : null;
+
+if (kind === "image") {
+  return (
+    <div className="thread-media">
+      <Image
+        src={src} // still dynamic: /api/media/<mediaId>
+        alt="Picha kutoka WhatsApp"
+        width={400}   // pick a size that fits your UI
+        height={400}
+        className="thread-image"
+      />
+      {resendButton}
+    </div>
+  );
+}
+
+    if (kind === "video") {
+      return (
+        <div className="thread-media">
+          <video src={src} controls className="thread-video" />
+          {resendButton}
+        </div>
+      );
+    }
+
+    if (kind === "audio") {
+      return (
+        <div className="thread-media">
+          <audio src={src} controls className="thread-audio" />
+          {resendButton}
+        </div>
+      );
+    }
+
+    // document
+    return (
+      <div className="thread-media">
+        <div className="thread-text">📄 Faili kutoka mteja</div>
+        <a href={src} target="_blank" rel="noreferrer">
+          Fungua faili
+        </a>
+        {resendButton}
+      </div>
+    );
+  }
+
+  // 3) Default: plain text
   return <div className="thread-text">{body}</div>;
 }
 
@@ -74,6 +242,7 @@ export default function Thread({ convo }: ThreadProps) {
   const [text, setText] = useState("");
   const [toggling, setToggling] = useState(false);
   const [sending, setSending] = useState(false);
+  const [productNames, setProductNames] = useState<Record<string, string>>({});
 
   // scrolling
   const messagesRef = useRef<HTMLDivElement | null>(null);
@@ -81,6 +250,100 @@ export default function Thread({ convo }: ThreadProps) {
   const firstUnreadRef = useRef<HTMLDivElement | null>(null);
   const [isAtBottom, setIsAtBottom] = useState(true);
   const initialScrolledRef = useRef(false);
+
+  // 👇 NEW: file input ref
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+
+  function handleInputKeyDown(e: KeyboardEvent<HTMLInputElement>) {
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    // fake form event to reuse handleSend
+    handleSend(e as any);
+  }
+}
+
+async function handleResendMedia(kind: string, mediaId: string) {
+  try {
+    const data = await api<{ ok: boolean; message: Msg }>("/api/send-media", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        conversationId: convo.id,
+        kind,
+        mediaId,
+      }),
+    });
+
+    if (data?.message) {
+      setMessages((prev) => [...prev, data.message]);
+      scrollToBottom("smooth");
+    }
+  } catch (err: any) {
+    console.error("Failed to resend media", err);
+    alert(
+      err?.message ??
+        "Imeshindikana kutuma media tena. Tafadhali jaribu tena baadae."
+    );
+  }
+}
+
+async function handleFileChange(e: ChangeEvent<HTMLInputElement>) {
+  const file = e.target.files?.[0];
+  if (!file) return;
+
+  try {
+    const form = new FormData();
+    form.append("conversationId", String(convo.id));
+    form.append("file", file);
+
+    const data = await api<{ ok: boolean; message: Msg }>(
+      "/api/upload-media",
+      {
+        method: "POST",
+        body: form,
+      }
+    );
+
+    if (data?.message) {
+      setMessages((prev) => [...prev, data.message]);
+      scrollToBottom("smooth");
+    }
+  } catch (err: any) {
+    console.error("Failed to send media", err);
+    alert(
+      err?.message ??
+        "Imeshindikana kutuma media. Tafadhali jaribu tena baadae."
+    );
+  } finally {
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  }
+}
+
+  function handleAttachClick() {
+    fileInputRef.current?.click();
+  }
+
+
+  useEffect(() => {
+  async function loadProducts() {
+    try {
+      const data = await api<ProductsResponse>("/api/products");
+      const map: Record<string, string> = {};
+      for (const p of data.items ?? []) {
+        map[p.sku] = p.name;
+      }
+      setProductNames(map);
+    } catch (err) {
+      console.error("Failed to load products for thread display", err);
+    }
+  }
+
+  void loadProducts();
+}, []);
+
 
   // figure out the index of the OLDEST unread inbound message
   const oldestUnreadIndex = (() => {
@@ -201,7 +464,7 @@ export default function Thread({ convo }: ThreadProps) {
     }
   }
 
-async function handleSend(e: React.FormEvent) {
+async function handleSend(e: FormEvent) {
   e.preventDefault();
   const value = text.trim();
   if (!value) return;
@@ -289,65 +552,90 @@ async function handleSend(e: React.FormEvent) {
             ref={messagesRef}
             onScroll={handleScroll}
           >
-            {messages.map((m, idx) => {
-              const inbound =
-                m.direction === "in" || m.direction === "inbound";
-              const outbound = !inbound;
-              const isFirstUnread = idx === oldestUnreadIndex;
+{messages.map((m, idx) => {
+  const inbound =
+    m.direction === "in" || m.direction === "inbound";
+  const outbound = !inbound;
+  const isFirstUnread = idx === oldestUnreadIndex;
 
-              return (
-                <div
-                  key={m.id}
-                  ref={isFirstUnread ? firstUnreadRef : null}
-                  className={
-                    "thread-message " +
-                    (outbound
-                      ? "thread-message--outgoing"
-                      : "thread-message--incoming")
-                  }
-                >
-                  <div className="thread-bubble">
-                    {renderBody(m)}
-                    <div className="thread-meta">
-                      <span className="thread-time">
-                        {formatTime(m.created_at)}
-                      </span>
-                      {outbound && m.status === "read" && (
-                        <span className="thread-ticks" aria-label="read">
-                          ✓✓
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
+  return (
+    <div
+      key={m.id}
+      ref={isFirstUnread ? firstUnreadRef : null}
+      className={
+        "thread-message " +
+        (outbound
+          ? "thread-message--outbound"
+          : "thread-message--inbound")
+      }
+    >
+      <div className="thread-bubble">
+        {renderBody(m, productNames, handleResendMedia)}
+        <div className="thread-meta">
+          <span className="thread-time">
+            {formatTime(m.created_at)}
+          </span>
+          {outbound && m.status === "read" && (
+            <span className="thread-ticks" aria-label="read">
+              ✓✓
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+})}
+
+
             <div ref={bottomRef} />
           </div>
         )}
       </div>
 
       {/* COMPOSER */}
-      <form className="thread-composer" onSubmit={handleSend}>
-        <textarea
-          className="thread-input"
-          placeholder={
-            agentAllowed
-              ? "Andika jibu kwa mteja…"
-              : "Bot mode iko ON, agent hawezi kujibu."
-          }
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          disabled={!agentAllowed || sending}
-        />
-        <button
-          type="submit"
-          className="thread-send"
-          disabled={!agentAllowed || sending || !text.trim()}
-        >
-          Tuma
-        </button>
-      </form>
+      {/* FOOTER: text + file upload */}
+      <div className="thread-footer">
+        <div className="thread-input-row">
+          {/* ATTACH BUTTON + HIDDEN FILE INPUT */}
+          <button
+            type="button"
+            className="thread-attach-button"
+            onClick={handleAttachClick}
+            title="Tuma picha / faili"
+          >
+            📎
+          </button>
+
+          <input
+            type="file"
+            ref={fileInputRef}
+            style={{ display: "none" }}
+            // allow common WhatsApp media types
+            accept="image/*,video/*,audio/*,application/pdf,.doc,.docx,.xls,.xlsx"
+            onChange={handleFileChange}
+          />
+
+          {/* EXISTING TEXT INPUT */}
+          <input
+            className="thread-input"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder="Andika ujumbe..."
+            onKeyDown={handleInputKeyDown}
+          />
+
+          {/* EXISTING SEND BUTTON */}
+          <button
+            type="button"
+            className="thread-send-button"
+            onClick={handleSend}
+            disabled={sending}
+          >
+            {sending ? "Inatuma..." : "Tuma"}
+          </button>
+        </div>
+      </div>
+
     </div>
   );
 }

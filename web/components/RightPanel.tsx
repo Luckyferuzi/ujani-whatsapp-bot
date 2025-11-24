@@ -1,8 +1,9 @@
 "use client";
-
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { formatPhonePretty } from "@/lib/phone";
+
 
 export interface RightPanelProps {
   conversationId: string | null;
@@ -78,13 +79,13 @@ function formatDateTime(value: string): string {
 }
 
 function RightPanel({ conversationId }: RightPanelProps) {
+    const router = useRouter();
   const [summary, setSummary] = useState<ConversationSummary | null>(null);
   const [orders, setOrders] = useState<OrderRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [activeView, setActiveView] = useState<"orders" | "settings">(
     "orders"
   );
-  const [showHistory, setShowHistory] = useState(false);
 const [showLatest, setShowLatest] = useState(false);
 const [updatingStatus, setUpdatingStatus] = useState(false);
 const [updatingPayment, setUpdatingPayment] = useState(false);
@@ -94,8 +95,18 @@ const [riderPhoneInput, setRiderPhoneInput] = useState("");
 const [statusError, setStatusError] = useState<string | null>(null);
 const [showPaymentForm, setShowPaymentForm] = useState(false);
 const [showRiderForm, setShowRiderForm] = useState(false);
-const [expandedHistoryOrderId, setExpandedHistoryOrderId] =
-  useState<number | null>(null);
+
+  const handleOpenOrdersPage = () => {
+    const phone =
+      customer?.phone || latestOrder?.phone || undefined;
+
+    if (phone) {
+      const params = new URLSearchParams({ phone });
+      router.push(`/orders?${params.toString()}`);
+    } else {
+      router.push("/orders");
+    }
+  };
 
 
   const loadAll = async () => {
@@ -130,7 +141,6 @@ const [expandedHistoryOrderId, setExpandedHistoryOrderId] =
    useEffect(() => {
   void loadAll();
   setActiveView("orders");
-  setShowHistory(false);
   setShowLatest(false);
   setPaymentAmountInput("");
   setPaymentError(null);
@@ -263,9 +273,6 @@ const handleUpdateOrderStatus = async (
   }
 };
 
-
-
-
   return (
     <div className="right-panel">
       {/* Top bar: Orders + Settings + Refresh */}
@@ -316,16 +323,25 @@ const handleUpdateOrderStatus = async (
       {/* ORDERS VIEW */}
       {activeView === "orders" && (
         <div className="panel-section">
-          {/* Customer heading */}
-          <div className="panel-card">
-            <div className="panel-card-title">
-              Orders for: <span className="font-semibold">{displayName}</span>
-            </div>
-            <div className="panel-card-body panel-card-body--muted text-xs">
-              Latest order summary and tools to control payment & order status.
-              Order history is hidden by default to keep this area clean.
-            </div>
-          </div>
+{/* Customer heading */}
+<div className="panel-card">
+  <div className="panel-card-title">
+    Orders for: <span className="font-semibold">{displayName}</span>
+  </div>
+  <div className="panel-card-body panel-card-body--muted text-xs space-y-2">
+    <p>
+      Latest order summary and tools to control payment &amp; order status.
+    </p>
+    <button
+      type="button"
+      className="btn btn-xs btn-secondary"
+      onClick={handleOpenOrdersPage}
+    >
+      View full order history
+    </button>
+  </div>
+</div>
+
 
           {/* Latest order summary */}
                     {/* Latest order summary */}
@@ -645,132 +661,6 @@ const handleUpdateOrderStatus = async (
               </div>
             )}
           </div>
-
-
-                  {/* Order history */}
-          <div className="panel-card mt-3">
-            <div className="panel-card-header flex items-center justify-between">
-              <div className="panel-card-title">Order history</div>
-              <button
-                type="button"
-                className="btn btn-xs btn-secondary"
-                onClick={() => setShowHistory((prev) => !prev)}
-              >
-                {showHistory ? "Hide history" : "Show history"}
-              </button>
-            </div>
-
-            {!showHistory ? (
-              <div className="panel-card-body panel-card-body--muted text-xs">
-                History is hidden. Click &quot;Show history&quot; to see all
-                past orders for this customer.
-              </div>
-            ) : orders.length === 0 ? (
-              <div className="panel-card-body panel-card-body--muted text-xs">
-                No orders found for this customer yet.
-              </div>
-            ) : (
-              <div className="panel-card-body text-xs space-y-2">
-                {orders.map((order) => {
-                  const paid = Number(order.paid_amount ?? 0);
-                  const total = Number(order.total_tzs ?? 0);
-                  const remaining = total - paid; // can be negative
-                  const isComplete = remaining <= 0;
-                  const isExpanded =
-                    expandedHistoryOrderId === order.id;
-
-                  return (
-                    <div
-                      key={order.id}
-                      className="border border-slate-200 rounded-md overflow-hidden"
-                    >
-                      {/* clickable header */}
-                      <button
-                        type="button"
-                        className="w-full text-left px-2 py-1 flex items-center justify-between hover:bg-slate-50"
-                        onClick={() =>
-                          setExpandedHistoryOrderId(
-                            isExpanded ? null : order.id
-                          )
-                        }
-                      >
-                        <span>
-                          #{order.order_code || order.id} ·{" "}
-                          {formatDateTime(order.created_at)}
-                        </span>
-                        <span className="flex items-center gap-1">
-                          <span>{mapOrderStatusLabel(order.status)}</span>
-                          <span
-                            className={
-                              "inline-flex rounded-full px-2 py-0.5 text-[11px] " +
-                              (isComplete
-                                ? "bg-green-100 text-green-700"
-                                : "bg-amber-100 text-amber-700")
-                            }
-                          >
-                            {isComplete
-                              ? "Paid"
-                              : "Payment incomplete"}
-                          </span>
-                        </span>
-                      </button>
-
-                      {/* expanded details */}
-                      {isExpanded && (
-                        <div className="px-2 pb-2 pt-0.5 space-y-1">
-                          <div>
-                            <span className="font-semibold">
-                              Delivery:
-                            </span>{" "}
-                            {order.delivery_mode || "—"}
-                            {order.km != null &&
-                              ` · ${formatKm(order.km)}`}
-                          </div>
-                          <div>
-                            <span className="font-semibold">Fee:</span>{" "}
-                            {formatTzs(order.fee_tzs ?? null)}
-                          </div>
-                          <div>
-                            <span className="font-semibold">
-                              Order total:
-                            </span>{" "}
-                            {formatTzs(total)}
-                          </div>
-                          <div>
-                            <span className="font-semibold">
-                              Paid so far:
-                            </span>{" "}
-                            {formatTzs(paid)}
-                          </div>
-                          <div>
-                            <span className="font-semibold">
-                              Remaining:
-                            </span>{" "}
-                            {formatTzs(remaining)}{" "}
-                            {!isComplete &&
-                              "(still outstanding)"}
-                          </div>
-                          {order.delivery_agent_phone && (
-                            <div>
-                              <span className="font-semibold">
-                                Rider phone:
-                              </span>{" "}
-                              {formatPhonePretty(
-                                order.delivery_agent_phone
-                              )}
-                            </div>
-                          )}
-                          {/* NOTE: no mark-paid / mark-delivery buttons here.
-                              History is read-only, as requested. */}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
         </div>
       )}
 
