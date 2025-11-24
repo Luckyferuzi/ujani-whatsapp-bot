@@ -19,23 +19,10 @@ function formatTzs(amount: number): string {
  * Left pane list (like WhatsApp)
  */
 
-inboxRoutes.get("/conversations", async (req, res) => {
+inboxRoutes.get("/conversations", async (_req, res) => {
   try {
-    // Optional search term: ?q=some text
-    const rawSearch =
-      typeof req.query.q === "string" ? req.query.q.trim() : "";
-    const search = rawSearch.length > 0 ? rawSearch : undefined;
-
-    // Optional unread-only filter: ?unread=1 / true / yes
-    let unreadOnly = false;
-    const unreadParam = req.query.unread;
-    if (typeof unreadParam === "string") {
-      const v = unreadParam.toLowerCase();
-      unreadOnly = v === "1" || v === "true" || v === "yes";
-    }
-
     // Base: conversations + customer info
-    const baseQuery = db("conversations as c")
+    const items = await db("conversations as c")
       .join("customers as u", "u.id", "c.customer_id")
       .select(
         "c.id",
@@ -45,31 +32,9 @@ inboxRoutes.get("/conversations", async (req, res) => {
         "c.agent_allowed",
         "c.last_user_message_at"
       )
+      // initial sort (we'll do final sort in-memory)
       .orderBy("c.last_user_message_at", "desc")
       .limit(100);
-
-    // Server-side search on name + phone
-    if (search) {
-      const term = `%${search}%`;
-      baseQuery.where((qb) => {
-        qb.whereILike("u.name", term).orWhereILike("u.phone", term);
-      });
-    }
-
-    // Server-side filter: only conversations with unread inbound messages
-    if (unreadOnly) {
-      baseQuery.whereExists(function () {
-        this.select(1)
-          .from("messages as m")
-          .whereRaw("m.conversation_id = c.id")
-          .where("m.direction", "inbound")
-          .where(function () {
-            this.whereNull("m.status").orWhereNot("m.status", "read");
-          });
-      });
-    }
-
-    const items = await baseQuery;
 
     if (items.length === 0) {
       return res.json({ items: [] });
@@ -77,28 +42,32 @@ inboxRoutes.get("/conversations", async (req, res) => {
 
     const convoIds = items.map((row: any) => row.id as number);
 
-    // Last message text per conversation
+    // Last messages (both inbound + outbound)
     const msgRows = await db("messages")
       .whereIn("conversation_id", convoIds)
       .orderBy("created_at", "asc")
       .select("conversation_id", "body", "created_at");
 
-    const metaByConvo: Record<number, { last_message_text: string | null }> =
-      {};
+    const metaByConvo: Record<
+      number,
+      { last_message_text: string | null; last_message_at: string | null }
+    > = {};
 
     for (const m of msgRows) {
       const cid = m.conversation_id as number;
       if (!metaByConvo[cid]) {
-        metaByConvo[cid] = { last_message_text: null };
+        metaByConvo[cid] = { last_message_text: null, last_message_at: null };
       }
       if (m.body && m.body.trim().length > 0) {
         // ascending order ⇒ this ends up as the latest non-empty
         metaByConvo[cid].last_message_text = m.body;
       }
+      // always update last_message_at to the latest created_at
+      metaByConvo[cid].last_message_at = m.created_at as string;
     }
 
     // unread_count = inbound messages that are not yet read
-    for (const row of items) {
+    for (const row of items as any[]) {
       const unreadRow = await db("messages")
         .where({ conversation_id: row.id, direction: "inbound" })
         .where((qb) => {
@@ -109,11 +78,25 @@ inboxRoutes.get("/conversations", async (req, res) => {
 
       const meta = metaByConvo[row.id as number] ?? {
         last_message_text: null,
+        last_message_at: null,
       };
 
-      (row as any).unread_count = Number(unreadRow?.count ?? 0);
-      (row as any).last_message_text = meta.last_message_text;
+      row.unread_count = Number(unreadRow?.count ?? 0);
+      row.last_message_text = meta.last_message_text;
+      row.last_message_at =
+        meta.last_message_at ?? row.last_user_message_at ?? null;
     }
+
+    // Final sort by last activity (incoming OR outgoing)
+    (items as any[]).sort((a, b) => {
+      const aTime = new Date(
+        a.last_message_at ?? a.last_user_message_at ?? 0
+      ).getTime();
+      const bTime = new Date(
+        b.last_message_at ?? b.last_user_message_at ?? 0
+      ).getTime();
+      return bTime - aTime;
+    });
 
     res.json({ items });
   } catch (err: any) {
@@ -123,7 +106,6 @@ inboxRoutes.get("/conversations", async (req, res) => {
       .json({ error: err?.message ?? "Failed to list conversations" });
   }
 });
-
 
 /**
  * GET /api/conversations/:id/messages
