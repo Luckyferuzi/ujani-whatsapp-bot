@@ -1001,17 +1001,23 @@ inboxRoutes.post("/orders/:id/cancel", async (req, res) => {
 });
 
 // DELETE /api/orders/:id  -> soft delete (set deleted_at)
+// DELETE /api/orders/:id  -> soft delete (set deleted_at)
 inboxRoutes.delete("/orders/:id", async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) {
     return res.status(400).json({ error: "invalid_id" });
   }
 
-  await db("orders").where({ id }).update({
-    deleted_at: new Date(),
-  });
+  try {
+    await db("orders").where({ id }).update({
+      deleted_at: new Date(),
+    });
 
-  return res.json({ ok: true });
+    return res.json({ ok: true });
+  } catch (err: any) {
+    console.error("DELETE /api/orders/:id failed", err);
+    return res.status(500).json({ error: "internal_error" });
+  }
 });
 
 
