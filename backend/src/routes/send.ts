@@ -202,3 +202,91 @@ sendRoutes.post(
     }
   }
 );
+
+// POST /api/send-media
+// body: { conversationId: number, kind: "image" | "video" | "audio" | "document", mediaId: string }
+sendRoutes.post("/send-media", async (req, res) => {
+  try {
+    const { conversationId, kind, mediaId } = req.body ?? {};
+    const id = Number(conversationId);
+
+    if (!Number.isFinite(id)) {
+      return res.status(400).json({ error: "Invalid conversationId" });
+    }
+
+    if (!mediaId || typeof mediaId !== "string") {
+      return res.status(400).json({ error: "Missing mediaId" });
+    }
+
+    // Load conversation + customer
+    const convo = await db("conversations as c")
+      .leftJoin("customers as u", "u.id", "c.customer_id")
+      .where("c.id", id)
+      .select("c.id", "c.agent_allowed", "u.wa_id")
+      .first();
+
+    if (!convo) {
+      return res.status(404).json({ error: "Conversation not found" });
+    }
+
+    if (!convo.agent_allowed) {
+      return res.status(403).json({
+        error:
+          "Agent is not allowed for this conversation (customer has not chosen Ongea na mhudumu).",
+      });
+    }
+
+    const waId = (convo as any).wa_id as string | null;
+    if (!waId) {
+      return res
+        .status(400)
+        .json({ error: "Customer wa_id missing; cannot send media" });
+    }
+
+    // Normalise media type
+    let type: "image" | "video" | "audio" | "document" = "document";
+    if (
+      kind === "image" ||
+      kind === "video" ||
+      kind === "audio" ||
+      kind === "document"
+    ) {
+      type = kind;
+    }
+
+    // 1) Re-send media via WhatsApp
+    await sendMediaById(waId, type, mediaId);
+
+    // 2) Log outgoing message
+    const [msg] = await db("messages")
+      .insert({
+        conversation_id: id,
+        direction: "out",
+        type,
+        body: `MEDIA:${type}:${mediaId}`,
+        status: "sent",
+      })
+      .returning([
+        "id",
+        "conversation_id",
+        "direction",
+        "type",
+        "body",
+        "status",
+        "created_at",
+      ]);
+
+    // 3) Notify UI
+    req.app.get("io")?.emit("message.created", {
+      conversation_id: id,
+      message: msg,
+    });
+
+    return res.json({ ok: true, message: msg });
+  } catch (e: any) {
+    console.error("POST /api/send-media failed", e);
+    return res
+      .status(500)
+      .json({ error: e?.message ?? "Failed to resend media" });
+  }
+});
