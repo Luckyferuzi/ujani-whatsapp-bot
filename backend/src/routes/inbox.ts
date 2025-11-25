@@ -3,7 +3,7 @@ import { Router, type Request, type Response } from "express";
 import db from "../db/knex.js";
 import { sendText, downloadMedia } from "../whatsapp.js";
 import { emit } from "../sockets.js";
-import { getOrdersForCustomer, listOutstandingOrdersForCustomer, createOrderWithPayment } from "../db/queries.js";
+import { getOrdersForCustomer, listOutstandingOrdersForCustomer, createOrderWithPayment, createManualOrderFromSkus } from "../db/queries.js";
 import { t, Lang } from "../i18n.js";
 
 
@@ -796,20 +796,45 @@ inboxRoutes.get("/orders", async (req: Request, res: Response) => {
 });
 
 
-// POST /api/orders/manual
+// POST /api/orders/manual  -> create manual order with product + qty
 inboxRoutes.post("/orders/manual", async (req, res) => {
-  const { customer_name, phone, delivery_mode, total_tzs, km, fee_tzs } =
-    req.body as {
-      customer_name?: string;
-      phone?: string;
-      delivery_mode?: "pickup" | "delivery";
-      total_tzs?: number;
-      km?: number;
-      fee_tzs?: number;
-    };
+  const {
+    customer_name,
+    phone,
+    location_type,
+    region,
+    delivery_mode,
+    items,
+  } = req.body as {
+    customer_name?: string;
+    phone?: string;
+    location_type?: "within" | "outside";
+    region?: string;
+    delivery_mode?: "pickup" | "delivery";
+    items?: { sku: string; qty: number }[];
+  };
 
-  if (!customer_name || !phone || !delivery_mode || !total_tzs) {
-    return res.status(400).json({ error: "missing_fields" });
+  if (!customer_name || !phone) {
+    return res.status(400).json({ error: "missing_customer_fields" });
+  }
+
+  if (!location_type || !["within", "outside"].includes(location_type)) {
+    return res.status(400).json({ error: "missing_or_invalid_location_type" });
+  }
+
+  if (!items || !Array.isArray(items) || items.length === 0) {
+    return res.status(400).json({ error: "no_items" });
+  }
+
+  // If within region, allow pickup/delivery; if outside -> delivery only
+  let finalDeliveryMode: "pickup" | "delivery" = "delivery";
+  if (location_type === "within") {
+    finalDeliveryMode =
+      delivery_mode && ["pickup", "delivery"].includes(delivery_mode)
+        ? delivery_mode
+        : "pickup";
+  } else {
+    finalDeliveryMode = "delivery";
   }
 
   try {
@@ -822,27 +847,24 @@ inboxRoutes.post("/orders/manual", async (req, res) => {
       customer = row;
     }
 
-    const { orderId, orderCode } = await createOrderWithPayment({
+    const { orderId, orderCode, totalTzs } = await createManualOrderFromSkus({
       customerId: customer.id,
-      status: "pending",
-      deliveryMode: delivery_mode,
-      km: km ?? null,
-      feeTzs: fee_tzs ?? 0,
-      totalTzs: total_tzs,
       phone,
-      region: null,
-      lat: null,
-      lon: null,
-      items: [], // you can extend later to add items
+      deliveryMode: finalDeliveryMode,
+      region: region?.trim() || null,
+      locationType: location_type,
+      items: items.map((i) => ({
+        sku: i.sku,
+        qty: Number(i.qty) || 1,
+      })),
     });
 
-    res.json({ order_id: orderId, order_code: orderCode });
+    res.json({ order_id: orderId, order_code: orderCode, total_tzs: totalTzs });
   } catch (err: any) {
     console.error("POST /orders/manual failed", err);
     res.status(500).json({ error: "failed_to_create_manual_order" });
   }
 });
-
 
 // POST /api/orders/:id/status
 // Body:

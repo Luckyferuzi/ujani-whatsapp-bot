@@ -371,6 +371,63 @@ export async function createOrderWithPayment(input: CreateOrderInput) {
   });
 }
 
+export async function createManualOrderFromSkus(input: {
+  customerId: number;
+  phone: string;
+  deliveryMode: "pickup" | "delivery";
+  region: string | null;
+  locationType: "within" | "outside";
+  items: { sku: string; qty: number }[];
+}) {
+  if (!input.items || input.items.length === 0) {
+    throw new Error("No items provided");
+  }
+
+  // Fetch products for all SKUs
+  const skus = input.items.map((i) => i.sku);
+  const products = await db("products").whereIn("sku", skus);
+
+  // Build order items with prices from DB
+  const orderItems = input.items.map((i) => {
+    const product = products.find((p: any) => p.sku === i.sku);
+    if (!product) {
+      throw new Error(`Unknown product SKU: ${i.sku}`);
+    }
+    const qty = Number(i.qty) || 1;
+    return {
+      sku: product.sku,
+      name: product.name,
+      qty,
+      unitPrice: Number(product.price_tzs),
+    };
+  });
+
+  const totalTzs = orderItems.reduce(
+    (sum, item) => sum + item.qty * item.unitPrice,
+    0
+  );
+
+  // You can later put delivery fees based on locationType.
+  const feeTzs = 0; // for now, no extra fee
+
+  const { orderId, orderCode } = await createOrderWithPayment({
+    customerId: input.customerId,
+    status: "pending",
+    deliveryMode: input.deliveryMode,
+    km: null, // we don't use km for manual orders
+    feeTzs,
+    totalTzs,
+    phone: input.phone,
+    region: input.region,
+    lat: null,
+    lon: null,
+    items: orderItems,
+  });
+
+  return { orderId, orderCode, totalTzs };
+}
+
+
 export interface OrderSummary {
   id: number;
   customer_id: number;

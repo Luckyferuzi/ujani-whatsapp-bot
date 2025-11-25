@@ -15,11 +15,10 @@ export type Convo = {
   unread_count?: number;
   last_message_text?: string | null;
 };
-
-
 type Props = {
   activeId: string | null;
   onPick: (c: Convo) => void;
+  phoneFilter?: string | null;
 };
 
 function describeLastMessage(text: string | null | undefined): string | null {
@@ -47,7 +46,7 @@ function formatTime(value: string): string {
   });
 }
 
-const ConversationList: React.FC<Props> = ({ activeId, onPick }) => {
+const ConversationList: React.FC<Props> = ({ activeId, onPick, phoneFilter }) => {
   const [items, setItems] = useState<Convo[]>([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
@@ -73,6 +72,19 @@ const ConversationList: React.FC<Props> = ({ activeId, onPick }) => {
     }, 3_000); // feels live but not crazy
     return () => clearInterval(t);
   }, []);
+
+  useEffect(() => {
+  if (!phoneFilter) return;
+  if (!items || items.length === 0) return;
+
+  const match = items.find((c) => c.phone === phoneFilter);
+  if (!match) return;
+
+  if (activeId && activeId === match.id) return;
+
+  onPick(match);
+}, [phoneFilter, items, activeId, onPick]);
+
 
  const filtered = useMemo(() => {
   const q = search.trim().toLowerCase();

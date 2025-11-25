@@ -24,13 +24,13 @@ type OrderListRow = {
   payment_status?: string | null;
 };
 
-type OrdersResponse = {
-  items?: OrderListRow[];
-  total?: number;
-  page?: number;
-  pageSize?: number;
-  totalPages?: number;
+type ProductOption = {
+  id: number;
+  sku: string;
+  name: string;
+  price_tzs: number;
 };
+
 
 
 function formatTzs(value?: number | null): string {
@@ -118,7 +118,7 @@ export default function OrdersPage() {
   // NEW:
 const [page, setPage] = useState(1);
 const [pageSize] = useState(50); // or 20
-const [total, setTotal] = useState(0);
+const [total] = useState(0);
 const [editingOrder, setEditingOrder] = useState<OrderListRow | null>(null);
 const [editForm, setEditForm] = useState({
   customer_name: "",
@@ -129,29 +129,21 @@ const [editForm, setEditForm] = useState({
   delivery_agent_phone: "",
 });
 
+const [products, setProducts] = useState<ProductOption[]>([]);
+
+const [showManualForm, setShowManualForm] = useState(false);
+
 const [manual, setManual] = useState({
   customer_name: "",
   phone: "",
-  delivery_mode: "pickup",
-  total_tzs: "",
-  km: "",
-  fee_tzs: "",
+  location_type: "within" as "within" | "outside",
+  region: "",
+  delivery_mode: "pickup" as "pickup" | "delivery",
+  product_sku: "",
+  qty: "1",
 });
 
 
-
-  const hasActiveFilters = useMemo(
-    () =>
-      !!(
-        q.trim() ||
-        status ||
-        product.trim() ||
-        minTotal.trim() ||
-        maxTotal.trim() ||
-        phoneFilter.trim()
-      ),
-    [q, status, product, minTotal, maxTotal, phoneFilter]
-  );
 const loadOrders = async () => {
   setLoading(true);
   setError(null);
@@ -184,6 +176,26 @@ const loadOrders = async () => {
   useEffect(() => {
     void loadOrders();
   }, [page]);
+
+  useEffect(() => {
+  void (async () => {
+    try {
+      const data = await api<{ items: ProductOption[] }>("/api/products");
+      setProducts(data.items ?? []);
+    } catch (err) {
+      console.error("Failed to load products", err);
+    }
+  })();
+}, []);
+
+
+const selectedProduct = products.find((p) => p.sku === manual.product_sku);
+const manualQty = Number(manual.qty) || 1;
+const manualTotal =
+  selectedProduct && manualQty > 0
+    ? selectedProduct.price_tzs * manualQty
+    : 0;
+
 
 const handleSubmitFilters = (e: React.FormEvent) => {
   e.preventDefault();
@@ -321,103 +333,16 @@ const handleExportCsv = async () => {
   >
     Export to Excel
   </button>
+
+   <button
+    type="button"
+    className="btn btn-xs btn-success"
+    onClick={() => setShowManualForm((v) => !v)}
+  >
+    {showManualForm ? "Close manual order" : "Add order"}
+  </button>
 </div>
 
-<div className="panel-card mb-4">
-  <div className="panel-card-header">Add manual order</div>
-  <div className="panel-card-body grid md:grid-cols-3 gap-3">
-    <input
-      className="history-edit-input"
-      placeholder="Customer name"
-      value={manual.customer_name}
-      onChange={(e) =>
-        setManual((m) => ({ ...m, customer_name: e.target.value }))
-      }
-    />
-    <input
-      className="history-edit-input"
-      placeholder="Phone"
-      value={manual.phone}
-      onChange={(e) => setManual((m) => ({ ...m, phone: e.target.value }))}
-    />
-    <select
-      className="history-edit-input"
-      value={manual.delivery_mode}
-      onChange={(e) =>
-        setManual((m) => ({ ...m, delivery_mode: e.target.value }))
-      }
-    >
-      <option value="pickup">Pickup</option>
-      <option value="delivery">Delivery</option>
-    </select>
-    <input
-      type="number"
-      className="history-edit-input"
-      placeholder="Total TZS"
-      value={manual.total_tzs}
-      onChange={(e) =>
-        setManual((m) => ({ ...m, total_tzs: e.target.value }))
-      }
-    />
-    <input
-      type="number"
-      className="history-edit-input"
-      placeholder="KM (optional)"
-      value={manual.km}
-      onChange={(e) => setManual((m) => ({ ...m, km: e.target.value }))}
-    />
-    <input
-      type="number"
-      className="history-edit-input"
-      placeholder="Delivery fee TZS (optional)"
-      value={manual.fee_tzs}
-      onChange={(e) =>
-        setManual((m) => ({ ...m, fee_tzs: e.target.value }))
-      }
-    />
-  </div>
-  <div className="panel-card-footer flex justify-end">
-    <button
-      type="button"
-      className="btn btn-sm"
-      onClick={async () => {
-        try {
-          await api("/api/orders/manual", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              customer_name: manual.customer_name,
-              phone: manual.phone,
-              delivery_mode: manual.delivery_mode,
-              total_tzs: Number(manual.total_tzs || 0),
-              km: Number(manual.km || 0) || undefined,
-              fee_tzs: Number(manual.fee_tzs || 0) || undefined,
-            }),
-          });
-          toast.success("Manual order created");
-          setManual({
-            customer_name: "",
-            phone: "",
-            delivery_mode: "pickup",
-            total_tzs: "",
-            km: "",
-            fee_tzs: "",
-          });
-          void loadOrders();
-        } catch (err) {
-          console.error("Failed to create manual order", err);
-          toast.error("Failed to create manual order");
-        }
-      }}
-    >
-      Save manual order
-    </button>
-  </div>
-</div>
-
-
-
-        
 
         {/* Filter form (collapsible) */}
         {showFilters && (
@@ -506,6 +431,204 @@ const handleExportCsv = async () => {
             </div>
           </form>
         )}
+
+        {showManualForm && (
+  <div className="panel-card mb-4">
+    <div className="panel-card-title">Manual order</div>
+    <div className="panel-card-body grid md:grid-cols-3 gap-3">
+      {/* Customer name */}
+      <div>
+        <label className="block text-xs font-semibold mb-1">
+          Customer name
+        </label>
+        <input
+          className="history-edit-input"
+          value={manual.customer_name}
+          onChange={(e) =>
+            setManual((m) => ({ ...m, customer_name: e.target.value }))
+          }
+        />
+      </div>
+
+      {/* Phone */}
+      <div>
+        <label className="block text-xs font-semibold mb-1">
+          Phone
+        </label>
+        <input
+          className="history-edit-input"
+          value={manual.phone}
+          onChange={(e) =>
+            setManual((m) => ({ ...m, phone: e.target.value }))
+          }
+        />
+      </div>
+
+      {/* Location type */}
+      <div>
+        <label className="block text-xs font-semibold mb-1">
+          Location
+        </label>
+        <select
+          className="history-edit-input"
+          value={manual.location_type}
+          onChange={(e) =>
+            setManual((m) => ({
+              ...m,
+              location_type: e.target.value as "within" | "outside",
+            }))
+          }
+        >
+          <option value="within">Within region</option>
+          <option value="outside">Outside region</option>
+        </select>
+      </div>
+
+      {/* Region / place name */}
+      <div>
+        <label className="block text-xs font-semibold mb-1">
+          Place / region name
+        </label>
+        <input
+          className="history-edit-input"
+          placeholder={
+            manual.location_type === "within"
+              ? "Eg. Mbezi Beach"
+              : "Eg. Arusha"
+          }
+          value={manual.region}
+          onChange={(e) =>
+            setManual((m) => ({ ...m, region: e.target.value }))
+          }
+        />
+      </div>
+
+      {/* Delivery mode (only when within region) */}
+      {manual.location_type === "within" && (
+        <div>
+          <label className="block text-xs font-semibold mb-1">
+            Delivery mode
+          </label>
+          <select
+            className="history-edit-input"
+            value={manual.delivery_mode}
+            onChange={(e) =>
+              setManual((m) => ({
+                ...m,
+                delivery_mode: e.target.value as "pickup" | "delivery",
+              }))
+            }
+          >
+            <option value="pickup">Pickup</option>
+            <option value="delivery">Delivery</option>
+          </select>
+        </div>
+      )}
+
+      {/* Product */}
+      <div>
+        <label className="block text-xs font-semibold mb-1">Product</label>
+        <select
+          className="history-edit-input"
+          value={manual.product_sku}
+          onChange={(e) =>
+            setManual((m) => ({ ...m, product_sku: e.target.value }))
+          }
+        >
+          <option value="">Select product…</option>
+          {products.map((p) => (
+            <option key={p.id} value={p.sku}>
+              {p.name} — {p.price_tzs.toLocaleString("sw-TZ")} TZS
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {/* Quantity */}
+      <div>
+        <label className="block text-xs font-semibold mb-1">Quantity</label>
+        <input
+          type="number"
+          min={1}
+          className="history-edit-input"
+          value={manual.qty}
+          onChange={(e) =>
+            setManual((m) => ({ ...m, qty: e.target.value }))
+          }
+        />
+      </div>
+
+      {/* Total preview */}
+      <div className="flex flex-col justify-end">
+        <div className="text-xs text-gray-500 mb-1">Calculated total</div>
+        <div className="text-lg font-semibold">
+          {manualTotal > 0
+            ? `${manualTotal.toLocaleString("sw-TZ")} TZS`
+            : "—"}
+        </div>
+      </div>
+    </div>
+
+    <div className="panel-card-footer flex justify-end">
+      <button
+        type="button"
+        className="btn btn-sm btn-success"
+        onClick={async () => {
+          try {
+            if (!manual.customer_name || !manual.phone) {
+              toast.error("Please enter name and phone");
+              return;
+            }
+            if (!manual.product_sku) {
+              toast.error("Please select a product");
+              return;
+            }
+
+            await api("/api/orders/manual", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                customer_name: manual.customer_name,
+                phone: manual.phone,
+                location_type: manual.location_type,
+                region: manual.region,
+                delivery_mode:
+                  manual.location_type === "outside"
+                    ? "delivery"
+                    : manual.delivery_mode,
+                items: [
+                  {
+                    sku: manual.product_sku,
+                    qty: Number(manual.qty || "1"),
+                  },
+                ],
+              }),
+            });
+
+            toast.success("Manual order created");
+            setManual({
+              customer_name: "",
+              phone: "",
+              location_type: "within",
+              region: "",
+              delivery_mode: "pickup",
+              product_sku: "",
+              qty: "1",
+            });
+            setShowManualForm(false);
+            void loadOrders();
+          } catch (err) {
+            console.error("Failed to create manual order", err);
+            toast.error("Failed to create manual order");
+          }
+        }}
+      >
+        Save manual order
+      </button>
+    </div>
+  </div>
+)}
+
 
         {/* Orders table */}
         <div className="panel-card-body flex-1 overflow-auto text-xs">

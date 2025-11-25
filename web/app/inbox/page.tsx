@@ -7,6 +7,7 @@ import Thread from "@/components/Thread";
 import RightPanel from "@/components/RightPanel";
 import { api } from "@/lib/api";
 import { formatPhonePretty } from "@/lib/phone";
+import { useSearchParams } from "next/navigation";
 
 type MobileView = "list" | "chat";
 
@@ -18,6 +19,9 @@ export default function InboxPage() {
   const [isMobile, setIsMobile] = useState(false);
   const [mobileView, setMobileView] = useState<MobileView>("list");
   const [showMobileMenu, setShowMobileMenu] = useState(false);
+  const searchParams = useSearchParams();
+  const phoneFromUrl = searchParams.get("phone");
+
 
   // Detect screen size
   useEffect(() => {
@@ -123,9 +127,11 @@ export default function InboxPage() {
             {mobileView === "list" || !active ? (
               // Mobile: only show the list
               <ConversationList
-                activeId={active ? active.id : null}
-                onPick={handlePick}
-              />
+  activeId={active ? active.id : null}
+  onPick={handlePick}
+  phoneFilter={phoneFromUrl}
+/>
+
             ) : (
               // Mobile: only show the chat + top nav
               <div className="mobile-thread-shell">
@@ -179,10 +185,12 @@ export default function InboxPage() {
         ) : (
           // Desktop: classic 3-column layout
           <>
-            <ConversationList
-              activeId={active ? active.id : null}
-              onPick={handlePick}
-            />
+          <ConversationList
+           activeId={active ? active.id : null}
+           onPick={handlePick}
+           phoneFilter={phoneFromUrl}
+          />
+
 
             {active ? (
               <>

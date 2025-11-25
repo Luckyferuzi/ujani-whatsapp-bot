@@ -95,6 +95,7 @@ const [riderPhoneInput, setRiderPhoneInput] = useState("");
 const [statusError, setStatusError] = useState<string | null>(null);
 const [showPaymentForm, setShowPaymentForm] = useState(false);
 const [showRiderForm, setShowRiderForm] = useState(false);
+const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null);
 
   const handleOpenOrdersPage = () => {
     const phone =
@@ -128,7 +129,18 @@ const [showRiderForm, setShowRiderForm] = useState(false);
       ]);
 
       setSummary(summaryData);
-      setOrders(ordersData?.items ?? []);
+      const newOrders = ordersData?.items ?? [];
+setOrders(newOrders);
+
+if (newOrders.length === 0) {
+  setSelectedOrderId(null);
+} else if (
+  selectedOrderId === null ||
+  !newOrders.some((o) => o.id === selectedOrderId)
+) {
+  setSelectedOrderId(newOrders[0].id);
+}
+
     } catch (err) {
       console.error("Failed to load right panel data", err);
       setSummary(null);
@@ -163,8 +175,13 @@ const [showRiderForm, setShowRiderForm] = useState(false);
   const customer = summary?.customer ?? null;
   const delivery = summary?.delivery ?? null;
   const payment = summary?.payment ?? null;
-  const latestOrder: OrderRow | null =
-    orders && orders.length > 0 ? orders[0] : null;
+const latestOrder: OrderRow | null =
+  orders && orders.length > 0 ? orders[0] : null;
+
+const currentOrder: OrderRow | null =
+  (selectedOrderId !== null
+    ? orders.find((o) => o.id === selectedOrderId) ?? null
+    : null) || latestOrder;
 
   const displayName =
     customer?.name && customer.name.trim().length > 0
@@ -230,13 +247,10 @@ const [showRiderForm, setShowRiderForm] = useState(false);
   }
 };
 
-
-
-
 const handleUpdateOrderStatus = async (
   status: "preparing" | "out_for_delivery" | "delivered"
 ) => {
-  if (!latestOrder) return;
+  if (!currentOrder) return;
 
   const payload: any = { status };
 
@@ -253,7 +267,7 @@ const handleUpdateOrderStatus = async (
   setStatusError(null);
 
   try {
-    await api(`/api/orders/${latestOrder.id}/status`, {
+    await api(`/api/orders/${currentOrder.id}/status`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -347,6 +361,43 @@ const handleUpdateOrderStatus = async (
                     {/* Latest order summary */}
           <div className="panel-card mt-3">
             <div className="panel-card-title">Latest order summary</div>
+
+              {/* Recent orders list */}
+{orders && orders.length > 0 && (
+  <div className="panel-subcard mb-3">
+    <div className="panel-subcard-title">Recent orders</div>
+    <div className="space-y-1">
+      {orders.slice(0, 5).map((o) => {
+        const active = currentOrder && currentOrder.id === o.id;
+        return (
+          <button
+            key={o.id}
+            type="button"
+            className={
+              "recent-order-row w-full text-left text-xs px-2 py-1 rounded " +
+              (active ? "bg-ui-primary text-white" : "hover:bg-ui-subtle")
+            }
+            onClick={() => setSelectedOrderId(o.id)}
+          >
+            <div className="flex justify-between">
+              <span>
+                {o.order_code || `Order #${o.id}`} — {o.status || "pending"}
+              </span>
+              <span>
+                {o.total_tzs.toLocaleString("sw-TZ")}
+                {" TZS"}
+              </span>
+            </div>
+            <div className="text-[10px] opacity-75">
+              {new Date(o.created_at).toLocaleString("sw-TZ")}
+            </div>
+          </button>
+        );
+      })}
+    </div>
+  </div>
+)}
+
 
             {!showLatest ? (
               <div className="panel-card-body panel-card-body--muted text-xs">
