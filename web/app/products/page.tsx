@@ -45,6 +45,20 @@ const emptyForm: ProductForm = {
   is_active: true,
 };
 
+type ProductStat = {
+  sku: string;
+  name: string;
+  total_qty: number;
+  total_revenue: number;
+};
+
+type OverviewStats = {
+  order_count: number;
+  total_revenue: number;
+  total_delivery_fees: number;
+};
+
+
 export default function ProductsPage() {
   const [items, setItems] = useState<Product[]>([]);
   const [loading, setLoading] = useState(false);
@@ -54,6 +68,27 @@ export default function ProductsPage() {
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [search, setSearch] = useState("");
+  const [stats, setStats] = useState<ProductStat[]>([]);
+const [overview, setOverview] = useState<OverviewStats | null>(null);
+
+
+useEffect(() => {
+  void loadProducts();
+
+  const loadStats = async () => {
+    try {
+      const o = await api<OverviewStats>("/api/stats/overview");
+      const p = await api<{ items: ProductStat[] }>("/api/stats/products");
+      setOverview(o);
+      setStats(p.items ?? []);
+    } catch (err) {
+      console.error("Failed to load stats", err);
+    }
+  };
+
+  void loadStats();
+}, []);
+
 
   const filteredItems = items.filter((p) => {
     const q = search.trim().toLowerCase();
@@ -189,6 +224,57 @@ const payload = {
 
         <div className="panel-card-body flex-1 overflow-auto text-xs">
           {error && <div className="text-red-600 mb-2">{error}</div>}
+          {overview && (
+  <div className="grid md:grid-cols-3 gap-3 mb-4">
+    <div className="panel-card">
+      <div className="panel-card-header">Total revenue</div>
+      <div className="panel-card-body text-2xl font-semibold">
+        {overview.total_revenue.toLocaleString("sw-TZ")} TZS
+      </div>
+    </div>
+    <div className="panel-card">
+      <div className="panel-card-header">Total orders</div>
+      <div className="panel-card-body text-2xl font-semibold">
+        {overview.order_count}
+      </div>
+    </div>
+    <div className="panel-card">
+      <div className="panel-card-header">Delivery fees (“spend”)</div>
+      <div className="panel-card-body text-2xl font-semibold">
+        {overview.total_delivery_fees.toLocaleString("sw-TZ")} TZS
+      </div>
+    </div>
+  </div>
+)}
+
+{stats.length > 0 && (
+  <div className="panel-card mb-4">
+    <div className="panel-card-header">Top products by revenue</div>
+    <div className="panel-card-body space-y-2">
+      {stats.map((s, i) => (
+        <div key={s.sku}>
+          <div className="flex justify-between text-xs mb-1">
+            <span>
+              {i + 1}. {s.name}
+            </span>
+            <span>{s.total_revenue.toLocaleString("sw-TZ")} TZS</span>
+          </div>
+          <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-ui-primary"
+              style={{
+                width:
+                  (s.total_revenue / (stats[0]?.total_revenue || 1)) * 100 +
+                  "%",
+              }}
+            />
+          </div>
+        </div>
+      ))}
+    </div>
+  </div>
+)}
+
           {loading ? (
             <div className="panel-card-body--muted">Loading products…</div>
           ) : filteredItems.length === 0 ? (

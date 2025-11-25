@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { formatPhonePretty } from "@/lib/phone";
+import { toast } from "sonner";
 
 type OrderListRow = {
   id: number;
@@ -22,6 +23,15 @@ type OrderListRow = {
   paid_amount?: number | null;
   payment_status?: string | null;
 };
+
+type OrdersResponse = {
+  items?: OrderListRow[];
+  total?: number;
+  page?: number;
+  pageSize?: number;
+  totalPages?: number;
+};
+
 
 function formatTzs(value?: number | null): string {
   if (value == null || !Number.isFinite(value)) return "0";
@@ -105,6 +115,30 @@ export default function OrdersPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showFilters, setShowFilters] = useState(false);
+  // NEW:
+const [page, setPage] = useState(1);
+const [pageSize] = useState(50); // or 20
+const [total, setTotal] = useState(0);
+const [editingOrder, setEditingOrder] = useState<OrderListRow | null>(null);
+const [editForm, setEditForm] = useState({
+  customer_name: "",
+  phone: "",
+  status: "",
+  delivery_mode: "",
+  total_tzs: "",
+  delivery_agent_phone: "",
+});
+
+const [manual, setManual] = useState({
+  customer_name: "",
+  phone: "",
+  delivery_mode: "pickup",
+  total_tzs: "",
+  km: "",
+  fee_tzs: "",
+});
+
+
 
   const hasActiveFilters = useMemo(
     () =>
@@ -118,52 +152,55 @@ export default function OrdersPage() {
       ),
     [q, status, product, minTotal, maxTotal, phoneFilter]
   );
+const loadOrders = async () => {
+  setLoading(true);
+  setError(null);
 
-  const loadOrders = async () => {
-    setLoading(true);
-    setError(null);
+  try {
+    const params = new URLSearchParams();
+    if (q.trim()) params.set("q", q.trim());
+    if (status) params.set("status", status);
+    if (product.trim()) params.set("product", product.trim());
+    if (minTotal.trim()) params.set("min_total", minTotal.trim());
+    if (maxTotal.trim()) params.set("max_total", maxTotal.trim());
+    if (phoneFilter.trim()) params.set("phone", phoneFilter.trim());
 
-    try {
-      const params = new URLSearchParams();
-      if (q.trim()) params.set("q", q.trim());
-      if (status) params.set("status", status);
-      if (product.trim()) params.set("product", product.trim());
-      if (minTotal.trim()) params.set("min_total", minTotal.trim());
-      if (maxTotal.trim()) params.set("max_total", maxTotal.trim());
-      if (phoneFilter.trim()) params.set("phone", phoneFilter.trim());
+    const qs = params.toString();
+    const path = qs ? `/api/orders?${qs}` : "/api/orders";
 
-      const qs = params.toString();
-      const path = qs ? `/api/orders?${qs}` : "/api/orders";
+    // 👇 tell TypeScript the shape of the response
+    const data = await api<{ items: OrderListRow[] }>(path);
 
-      const data = await api<{ items: OrderListRow[] }>(path);
-      setItems(data.items ?? []);
-    } catch (err: any) {
-      console.error("Failed to load orders", err);
-      setItems([]);
-      setError("Failed to load orders. Please try again.");
-    } finally {
-      setLoading(false);
-    }
-  };
+    setItems(data.items ?? []);
+  } catch (err: any) {
+    console.error("Failed to load orders", err);
+    setItems([]);
+    setError("Failed to load orders. Please try again.");
+  } finally {
+    setLoading(false);
+  }
+};
 
   useEffect(() => {
     void loadOrders();
-  }, []);
+  }, [page]);
 
-  const handleSubmitFilters = (e: React.FormEvent) => {
-    e.preventDefault();
-    void loadOrders();
-  };
+const handleSubmitFilters = (e: React.FormEvent) => {
+  e.preventDefault();
+  setPage(1);          // reset to first page when filters change
+  void loadOrders();
+};
 
-  const handleClearFilters = () => {
-    setQ("");
-    setStatus("");
-    setProduct("");
-    setMinTotal("");
-    setMaxTotal("");
-    setPhoneFilter("");
-    void loadOrders();
-  };
+const handleClearFilters = () => {
+  setQ("");
+  setStatus("");
+  setProduct("");
+  setMinTotal("");
+  setMaxTotal("");
+  setPhoneFilter("");
+  setPage(1);
+  void loadOrders();
+};
 
   const handleOpenConversation = (order: OrderListRow) => {
     if (!order.phone) return;
@@ -171,93 +208,216 @@ export default function OrdersPage() {
     router.push(`/inbox?${params.toString()}`);
   };
 
-  const handleEditOrder = async (order: OrderListRow) => {
-    const current = order.status || "pending";
-    const next = window.prompt(
-      "Update status (pending, preparing, out_for_delivery, delivered, cancelled):",
-      current
-    );
-    if (!next || next === current) return;
+const handleCancelOrder = async (order: OrderListRow) => {
+  try {
+    await api(`/api/orders/${order.id}/cancel`, {
+      method: "POST",
+    });
+    void loadOrders();
+  } catch (err: any) {
+    console.error("Failed to cancel order", err);
+    alert("Failed to cancel order. Please try again.");
+  }
+};
 
-    const payload: any = { status: next };
 
-    if (next === "out_for_delivery") {
-      const phone = window.prompt(
-        "Enter rider phone number:",
-        order.delivery_agent_phone || ""
-      );
-      if (!phone) {
-        alert("Rider phone is required for 'out_for_delivery'.");
-        return;
-      }
-      payload.delivery_agent_phone = phone.trim();
-    }
+const handleDeleteOrder = async (order: OrderListRow) => {
+  try {
+    await api(`/api/orders/${order.id}`, { method: "DELETE" });
+    void loadOrders();
+    toast.success("Order deleted");
+  } catch (err) {
+    console.error("Failed to delete order", err);
+    toast.error("Failed to delete order");
+  }
+};
 
-    try {
-      await api(`/api/orders/${order.id}/status`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      void loadOrders();
-    } catch (err) {
-      console.error("Failed to update order status", err);
-      alert("Failed to update order. Please try again.");
-    }
-  };
 
-  const handleDeleteOrder = async (order: OrderListRow) => {
-    const ok = window.confirm(
-      `Are you sure you want to cancel order #${order.order_code || order.id}?`
-    );
-    if (!ok) return;
+const handleExportCsv = async () => {
+  try {
+    const params = new URLSearchParams();
+    if (q.trim()) params.set("q", q.trim());
+    if (status) params.set("status", status);
+    if (product.trim()) params.set("product", product.trim());
+    if (minTotal.trim()) params.set("min_total", minTotal.trim());
+    if (maxTotal.trim()) params.set("max_total", maxTotal.trim());
+    if (phoneFilter.trim()) params.set("phone", phoneFilter.trim());
 
-    try {
-      await api(`/api/orders/${order.id}/status`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "cancelled" }),
-      });
-      void loadOrders();
-    } catch (err) {
-      console.error("Failed to cancel order", err);
-      alert("Failed to cancel order. Please try again.");
-    }
-  };
+    // export more rows at once
+    params.set("limit", "500");
+
+    const path = `/api/orders?${params.toString()}`;
+
+    // 👇 type the response here too
+    const data = await api<{ items: OrderListRow[] }>(path);
+    const rows = data.items ?? [];
+
+    const header = [
+      "Order ID",
+      "Order Code",
+      "Customer Name",
+      "Phone",
+      "Status",
+      "Total TZS",
+      "Delivery Mode",
+      "Region",
+      "Created At",
+    ];
+
+    const csvLines = [
+      header.join(","),
+      ...rows.map((o) =>
+        [
+          o.id,
+          o.order_code ?? "",
+          o.customer_name ?? "",
+          o.phone ?? "",
+          o.status ?? "",
+          o.total_tzs,
+          o.delivery_mode ?? "",
+          o.region ?? "",
+          o.created_at,
+        ]
+          .map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`)
+          .join(",")
+      ),
+    ];
+
+    const blob = new Blob([csvLines.join("\n")], {
+      type: "text/csv;charset=utf-8;",
+    });
+
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `orders-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    console.error("Failed to export orders", err);
+    alert("Failed to export. Please try again.");
+  }
+};
 
   return (
     <div className="flex flex-col h-full p-4 gap-4 overflow-y-auto">
       <div className="panel-card flex-1 flex flex-col">
         {/* Header row with title + filter buttons */}
-        <div className="panel-card-header">
-          <div className="panel-card-title">
-            Orders{" "}
-            <span className="text-xs text-gray-500">
-              ({items.length} result{items.length === 1 ? "" : "s"})
-            </span>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              className={
-                "orders-filter-toggle" +
-                (showFilters ? " orders-filter-toggle--active" : "")
-              }
-              onClick={() => setShowFilters((prev) => !prev)}
-            >
-              ☰ Filters
-            </button>
-            {hasActiveFilters && (
-              <button
-                type="button"
-                className="orders-filter-clear"
-                onClick={handleClearFilters}
-              >
-                Clear all
-              </button>
-            )}
-          </div>
-        </div>
+        <div className="flex items-center gap-2">
+  <button
+    type="button"
+    className="btn btn-xs"
+    onClick={() => setShowFilters((s) => !s)}
+  >
+    {showFilters ? "Hide filters" : "Show filters"}
+  </button>
+  <button
+    type="button"
+    className="btn btn-xs"
+    onClick={handleExportCsv}
+    disabled={loading}
+  >
+    Export to Excel
+  </button>
+</div>
+
+<div className="panel-card mb-4">
+  <div className="panel-card-header">Add manual order</div>
+  <div className="panel-card-body grid md:grid-cols-3 gap-3">
+    <input
+      className="history-edit-input"
+      placeholder="Customer name"
+      value={manual.customer_name}
+      onChange={(e) =>
+        setManual((m) => ({ ...m, customer_name: e.target.value }))
+      }
+    />
+    <input
+      className="history-edit-input"
+      placeholder="Phone"
+      value={manual.phone}
+      onChange={(e) => setManual((m) => ({ ...m, phone: e.target.value }))}
+    />
+    <select
+      className="history-edit-input"
+      value={manual.delivery_mode}
+      onChange={(e) =>
+        setManual((m) => ({ ...m, delivery_mode: e.target.value }))
+      }
+    >
+      <option value="pickup">Pickup</option>
+      <option value="delivery">Delivery</option>
+    </select>
+    <input
+      type="number"
+      className="history-edit-input"
+      placeholder="Total TZS"
+      value={manual.total_tzs}
+      onChange={(e) =>
+        setManual((m) => ({ ...m, total_tzs: e.target.value }))
+      }
+    />
+    <input
+      type="number"
+      className="history-edit-input"
+      placeholder="KM (optional)"
+      value={manual.km}
+      onChange={(e) => setManual((m) => ({ ...m, km: e.target.value }))}
+    />
+    <input
+      type="number"
+      className="history-edit-input"
+      placeholder="Delivery fee TZS (optional)"
+      value={manual.fee_tzs}
+      onChange={(e) =>
+        setManual((m) => ({ ...m, fee_tzs: e.target.value }))
+      }
+    />
+  </div>
+  <div className="panel-card-footer flex justify-end">
+    <button
+      type="button"
+      className="btn btn-sm"
+      onClick={async () => {
+        try {
+          await api("/api/orders/manual", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              customer_name: manual.customer_name,
+              phone: manual.phone,
+              delivery_mode: manual.delivery_mode,
+              total_tzs: Number(manual.total_tzs || 0),
+              km: Number(manual.km || 0) || undefined,
+              fee_tzs: Number(manual.fee_tzs || 0) || undefined,
+            }),
+          });
+          toast.success("Manual order created");
+          setManual({
+            customer_name: "",
+            phone: "",
+            delivery_mode: "pickup",
+            total_tzs: "",
+            km: "",
+            fee_tzs: "",
+          });
+          void loadOrders();
+        } catch (err) {
+          console.error("Failed to create manual order", err);
+          toast.error("Failed to create manual order");
+        }
+      }}
+    >
+      Save manual order
+    </button>
+  </div>
+</div>
+
+
+
+        
 
         {/* Filter form (collapsible) */}
         {showFilters && (
@@ -349,12 +509,155 @@ export default function OrdersPage() {
 
         {/* Orders table */}
         <div className="panel-card-body flex-1 overflow-auto text-xs">
+            {editingOrder && (
+  <div className="mb-4 p-3 border rounded bg-ui-subtle">
+    <h3 className="font-semibold mb-2">Edit order #{editingOrder.id}</h3>
+
+    <div className="grid md:grid-cols-3 gap-3">
+      {/* Name */}
+      <div>
+        <label className="block text-xs font-semibold mb-1">Name</label>
+        <input
+          className="history-edit-input"
+          value={editForm.customer_name}
+          onChange={(e) =>
+            setEditForm((f) => ({ ...f, customer_name: e.target.value }))
+          }
+        />
+      </div>
+
+      {/* Phone */}
+      <div>
+        <label className="block text-xs font-semibold mb-1">Phone</label>
+        <input
+          className="history-edit-input"
+          value={editForm.phone}
+          onChange={(e) =>
+            setEditForm((f) => ({ ...f, phone: e.target.value }))
+          }
+        />
+      </div>
+
+      {/* Status */}
+      <div>
+        <label className="block text-xs font-semibold mb-1">Status</label>
+        <select
+          className="history-edit-input"
+          value={editForm.status}
+          onChange={(e) =>
+            setEditForm((f) => ({ ...f, status: e.target.value }))
+          }
+        >
+          <option value="pending">Pending</option>
+          <option value="preparing">Preparing</option>
+          <option value="verifying">Verifying</option>
+          <option value="out_for_delivery">Out for delivery</option>
+          <option value="delivered">Delivered</option>
+          <option value="cancelled">Cancelled</option>
+          <option value="failed">Failed</option>
+        </select>
+      </div>
+
+      {/* Mode */}
+      <div>
+        <label className="block text-xs font-semibold mb-1">Mode</label>
+        <select
+          className="history-edit-input"
+          value={editForm.delivery_mode}
+          onChange={(e) =>
+            setEditForm((f) => ({ ...f, delivery_mode: e.target.value }))
+          }
+        >
+          <option value="pickup">Pickup</option>
+          <option value="delivery">Delivery</option>
+        </select>
+      </div>
+
+      {/* Total */}
+      <div>
+        <label className="block text-xs font-semibold mb-1">Total (TZS)</label>
+        <input
+          type="number"
+          className="history-edit-input"
+          value={editForm.total_tzs}
+          onChange={(e) =>
+            setEditForm((f) => ({ ...f, total_tzs: e.target.value }))
+          }
+        />
+      </div>
+
+      {/* Rider phone for out_for_delivery */}
+      <div>
+        <label className="block text-xs font-semibold mb-1">
+          Rider phone (if out_for_delivery)
+        </label>
+        <input
+          className="history-edit-input"
+          value={editForm.delivery_agent_phone}
+          onChange={(e) =>
+            setEditForm((f) => ({
+              ...f,
+              delivery_agent_phone: e.target.value,
+            }))
+          }
+        />
+      </div>
+    </div>
+
+    <div className="mt-3 flex gap-2">
+      <button
+        type="button"
+        className="btn btn-sm"
+        onClick={async () => {
+          if (!editingOrder) return;
+
+          // 1) basic fields
+          await api(`/api/orders/${editingOrder.id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              customer_name: editForm.customer_name,
+              phone: editForm.phone,
+              delivery_mode: editForm.delivery_mode,
+              total_tzs: Number(editForm.total_tzs || 0),
+            }),
+          });
+
+          // 2) status (includes WhatsApp side effects)
+          await api(`/api/orders/${editingOrder.id}/status`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              status: editForm.status,
+              delivery_agent_phone:
+                editForm.delivery_agent_phone || undefined,
+            }),
+          });
+
+          setEditingOrder(null);
+          void loadOrders();
+        }}
+      >
+        Save
+      </button>
+      <button
+        type="button"
+        className="btn btn-sm btn-secondary"
+        onClick={() => setEditingOrder(null)}
+      >
+        Cancel
+      </button>
+    </div>
+  </div>
+)}
+
           {error && <div className="text-red-600 mb-2">{error}</div>}
           {items.length === 0 && !loading ? (
             <div className="panel-card-body--muted">
               No orders match the current filters.
             </div>
           ) : (
+            
             <table className="orders-table">
               <thead>
                 <tr>
@@ -402,33 +705,81 @@ export default function OrdersPage() {
                       </td>
                       <td>{formatDateTime(order.created_at)}</td>
                       <td className="orders-actions">
-                        <button
-                          type="button"
-                          className="orders-action-button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            void handleEditOrder(order);
-                          }}
-                        >
-                          ✏️
-                        </button>
-                        <button
-                          type="button"
-                          className="orders-action-button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            void handleDeleteOrder(order);
-                          }}
-                        >
-                          🗑️
-                        </button>
-                      </td>
+<button
+  type="button"
+  className="orders-action-button"
+  onClick={(e) => {
+    e.stopPropagation();
+    setEditingOrder(order);
+    setEditForm({
+      customer_name: order.customer_name ?? "",
+      phone: order.phone ?? "",
+      status: order.status ?? "pending",
+      delivery_mode: order.delivery_mode ?? "pickup",
+      total_tzs: String(order.total_tzs ?? ""),
+      delivery_agent_phone: order.delivery_agent_phone ?? "",
+    });
+  }}
+>
+  ✏️
+</button>
+
+<button
+  type="button"
+  className="orders-action-button"
+  onClick={(e) => {
+    e.stopPropagation();
+    void handleCancelOrder(order);
+  }}
+>
+  ❌
+</button>
+
+<button
+  type="button"
+  className="orders-action-button"
+  onClick={(e) => {
+    e.stopPropagation();
+    void handleDeleteOrder(order);
+  }}
+>
+  🗑️
+</button>
+
+</td>
+
                     </tr>
                   );
                 })}
               </tbody>
             </table>
           )}
+          {items.length > 0 && (
+  <div className="flex items-center justify-between mt-2 text-xs">
+    <div>
+      Page {page} of {Math.max(1, Math.ceil(total / pageSize))}{" "}
+      ({total} orders)
+    </div>
+    <div className="flex gap-2">
+      <button
+        type="button"
+        className="btn btn-xs"
+        disabled={page <= 1 || loading}
+        onClick={() => setPage((p) => Math.max(1, p - 1))}
+      >
+        Previous
+      </button>
+      <button
+        type="button"
+        className="btn btn-xs"
+        disabled={page >= Math.ceil(total / pageSize) || loading}
+        onClick={() => setPage((p) => p + 1)}
+      >
+        Next
+      </button>
+    </div>
+  </div>
+)}
         </div>
       </div>
     </div>

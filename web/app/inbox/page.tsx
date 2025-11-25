@@ -36,9 +36,35 @@ export default function InboxPage() {
     return () => window.removeEventListener("resize", update);
   }, []);
 
+    // Restore last opened conversation after refresh
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem("ujani-inbox-active");
+      if (!raw) return;
+
+      const parsed = JSON.parse(raw) as Convo;
+      setActive(parsed);
+
+      // On small screens, jump straight to chat view
+      if (window.innerWidth < MOBILE_BREAKPOINT) {
+        setMobileView("chat");
+      }
+    } catch {
+      // ignore JSON / storage errors
+    }
+  }, []);
+
+  
   const handlePick = async (convo: Convo) => {
     // update selected conversation in the UI
     setActive(convo);
+
+    // persist selection across refreshes
+    try {
+      window.localStorage.setItem("ujani-inbox-active", JSON.stringify(convo));
+    } catch {
+      // ignore storage errors
+    }
 
     if (isMobile) {
       setMobileView("chat");

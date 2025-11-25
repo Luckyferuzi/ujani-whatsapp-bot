@@ -8,11 +8,10 @@ import {
   type KeyboardEvent,
   type FormEvent
 } from "react";
-import { api } from "@/lib/api";
+import { api, API } from "@/lib/api";
 import { formatPhonePretty } from "@/lib/phone";
 import { socket } from "@/lib/socket";
 import type { Convo } from "./ConversationList";
-import Image from "next/image";
 
 type ThreadProps = {
   convo: Convo;
@@ -118,8 +117,12 @@ function formatInteractiveDisplay(
 function renderBody(
   msg: Msg,
   products: Record<string, string>,
-  onResendMedia?: (kind: string, mediaId: string) => void
+  onResendMedia?: (kind: string, mediaId: string) => void,
+  onDeleteMedia?: (messageId: string | number) => void,
+  activeMediaActionsId?: string | number | null,
+  onToggleMediaActions?: (messageId: string | number) => void
 ) {
+
   const body = msg.body ?? "";
 
   // 0) Interactive markers: [interactive:ID]
@@ -162,39 +165,66 @@ function renderBody(
   }
 
   // 2) MEDIA marker: MEDIA:<kind>:<mediaId>
-  const mediaMatch = body.match(/^MEDIA:(image|video|audio|document):(.+)$/);
+    const mediaMatch = body.match(/^MEDIA:([a-z]+):(.+)$/);
   if (mediaMatch) {
     const kind = mediaMatch[1] as "image" | "video" | "audio" | "document";
     const mediaId = mediaMatch[2];
-    const src = `/api/media/${encodeURIComponent(mediaId)}`;
+    const src = `${API}/api/media/${encodeURIComponent(mediaId)}`;
 
-    const canResend =
-      typeof onResendMedia === "function" &&
-      (msg.direction === "out" ||
-        msg.direction === "outbound" ||
-        msg.direction === "inbound");
+    // 👇 ADD ALL THIS
+    const showActions =
+      activeMediaActionsId != null &&
+      String(activeMediaActionsId) === String(msg.id);
 
-    const resendButton = canResend ? (
-      <button
-        type="button"
-        className="thread-media-resend"
-        onClick={() => onResendMedia(kind, mediaId)}
-      >
-        Tuma tena media
-      </button>
-    ) : null;
+    const editIcon =
+      typeof onToggleMediaActions === "function" ? (
+        <button
+          type="button"
+          className="thread-media-edit"
+          onClick={() => onToggleMediaActions(msg.id)}
+          title="Hariri media"
+        >
+          ✏️
+        </button>
+      ) : null;
+
+    const resendButton =
+      typeof onResendMedia === "function" ? (
+        <button
+          type="button"
+          className="thread-media-resend"
+          onClick={() => onResendMedia(kind, mediaId)}
+        >
+          Tuma tena media
+        </button>
+      ) : null;
+
+    const deleteButton =
+      typeof onDeleteMedia === "function" ? (
+        <button
+          type="button"
+          className="thread-media-delete"
+          onClick={() => onDeleteMedia(msg.id)}
+        >
+          Futa media
+        </button>
+      ) : null;
+// web/components/Thread.tsx (inside the `kind === "image"` block)
 
 if (kind === "image") {
   return (
     <div className="thread-media">
-      <Image
-        src={src} // still dynamic: /api/media/<mediaId>
-        alt="Picha kutoka WhatsApp"
-        width={400}   // pick a size that fits your UI
-        height={400}
-        className="thread-image"
-      />
-      {resendButton}
+      <div className="thread-text">🖼️ Picha kutoka mteja</div>
+      <a href={src} target="_blank" rel="noreferrer">
+        Fungua picha
+      </a>
+      {showActions && (resendButton || deleteButton) && (
+        <div className="thread-media-actions">
+          {resendButton}
+          {deleteButton}
+        </div>
+      )}
+      {editIcon}
     </div>
   );
 }
@@ -203,7 +233,12 @@ if (kind === "image") {
       return (
         <div className="thread-media">
           <video src={src} controls className="thread-video" />
-          {resendButton}
+          {(resendButton || deleteButton) && (
+            <div className="thread-media-actions">
+              {resendButton}
+              {deleteButton}
+            </div>
+          )}
         </div>
       );
     }
@@ -212,7 +247,12 @@ if (kind === "image") {
       return (
         <div className="thread-media">
           <audio src={src} controls className="thread-audio" />
-          {resendButton}
+          {(resendButton || deleteButton) && (
+            <div className="thread-media-actions">
+              {resendButton}
+              {deleteButton}
+            </div>
+          )}
         </div>
       );
     }
@@ -224,7 +264,12 @@ if (kind === "image") {
         <a href={src} target="_blank" rel="noreferrer">
           Fungua faili
         </a>
-        {resendButton}
+        {(resendButton || deleteButton) && (
+          <div className="thread-media-actions">
+            {resendButton}
+            {deleteButton}
+          </div>
+        )}
       </div>
     );
   }
@@ -243,7 +288,11 @@ export default function Thread({ convo }: ThreadProps) {
   const [toggling, setToggling] = useState(false);
   const [sending, setSending] = useState(false);
   const [productNames, setProductNames] = useState<Record<string, string>>({});
+    const [activeMediaActionsId, setActiveMediaActionsId] = useState<
+    string | number | null
+  >(null);
 
+  
   // scrolling
   const messagesRef = useRef<HTMLDivElement | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
@@ -253,6 +302,12 @@ export default function Thread({ convo }: ThreadProps) {
 
   // 👇 NEW: file input ref
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+function handleToggleMediaActions(messageId: string | number) {
+    setActiveMediaActionsId((prev) =>
+      prev != null && String(prev) === String(messageId) ? null : messageId
+    );
+  }
 
 
   function handleInputKeyDown(e: KeyboardEvent<HTMLInputElement>) {
@@ -287,6 +342,30 @@ async function handleResendMedia(kind: string, mediaId: string) {
     );
   }
 }
+
+  async function handleDeleteMedia(messageId: string | number) {
+    const confirmDelete = window.confirm(
+      "Una uhakika unataka kufuta hii media?"
+    );
+    if (!confirmDelete) return;
+
+    try {
+      await api(`/api/messages/${messageId}`, {
+        method: "DELETE",
+      });
+
+      setMessages((prev) =>
+        prev.filter((m) => String(m.id) !== String(messageId))
+      );
+    } catch (err: any) {
+      console.error("Failed to delete media", err);
+      alert(
+        err?.message ??
+          "Imeshindikana kufuta media. Tafadhali jaribu tena baadae."
+      );
+    }
+  }
+
 
 async function handleFileChange(e: ChangeEvent<HTMLInputElement>) {
   const file = e.target.files?.[0];
@@ -570,7 +649,7 @@ async function handleSend(e: FormEvent) {
       }
     >
       <div className="thread-bubble">
-        {renderBody(m, productNames, handleResendMedia)}
+        {renderBody(m, productNames, handleResendMedia, handleDeleteMedia, activeMediaActionsId, handleToggleMediaActions)}
         <div className="thread-meta">
           <span className="thread-time">
             {formatTime(m.created_at)}

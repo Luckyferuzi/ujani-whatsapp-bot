@@ -3,7 +3,7 @@ import { Router, type Request, type Response } from "express";
 import db from "../db/knex.js";
 import { sendText, downloadMedia } from "../whatsapp.js";
 import { emit } from "../sockets.js";
-import { getOrdersForCustomer, listOutstandingOrdersForCustomer } from "../db/queries.js";
+import { getOrdersForCustomer, listOutstandingOrdersForCustomer, createOrderWithPayment } from "../db/queries.js";
 import { t, Lang } from "../i18n.js";
 
 
@@ -658,6 +658,7 @@ inboxRoutes.get("/orders", async (req: Request, res: Response) => {
       typeof req.query.max_total === "string" ? req.query.max_total : undefined;
 
     const qb = db("orders as o")
+    .whereNull("o.deleted_at")
       .leftJoin("customers as u", "u.id", "o.customer_id")
       .leftJoin("payments as p", "p.order_id", "o.id")
       .select(
@@ -791,6 +792,54 @@ inboxRoutes.get("/orders", async (req: Request, res: Response) => {
     return res
       .status(500)
       .json({ error: err?.message ?? "Failed to load orders" });
+  }
+});
+
+
+// POST /api/orders/manual
+inboxRoutes.post("/orders/manual", async (req, res) => {
+  const { customer_name, phone, delivery_mode, total_tzs, km, fee_tzs } =
+    req.body as {
+      customer_name?: string;
+      phone?: string;
+      delivery_mode?: "pickup" | "delivery";
+      total_tzs?: number;
+      km?: number;
+      fee_tzs?: number;
+    };
+
+  if (!customer_name || !phone || !delivery_mode || !total_tzs) {
+    return res.status(400).json({ error: "missing_fields" });
+  }
+
+  try {
+    // find or create customer
+    let customer = await db("customers").where({ phone }).first();
+    if (!customer) {
+      const [row] = await db("customers")
+        .insert({ name: customer_name, phone })
+        .returning("*");
+      customer = row;
+    }
+
+    const { orderId, orderCode } = await createOrderWithPayment({
+      customerId: customer.id,
+      status: "pending",
+      deliveryMode: delivery_mode,
+      km: km ?? null,
+      feeTzs: fee_tzs ?? 0,
+      totalTzs: total_tzs,
+      phone,
+      region: null,
+      lat: null,
+      lon: null,
+      items: [], // you can extend later to add items
+    });
+
+    res.json({ order_id: orderId, order_code: orderCode });
+  } catch (err: any) {
+    console.error("POST /orders/manual failed", err);
+    res.status(500).json({ error: "failed_to_create_manual_order" });
   }
 });
 
@@ -973,6 +1022,18 @@ inboxRoutes.patch("/orders/:id", async (req, res) => {
     return res.status(400).json({ error: "no_updates" });
   }
 
+  const customerName =
+  (req.body.customer_name as string | undefined)?.trim() || undefined;
+
+  const order = await db("orders").where({ id }).first();
+
+if (customerName && order?.customer_id) {
+  await db("customers")
+    .where({ id: order.customer_id })
+    .update({ name: customerName });
+}
+
+
   patch["updated_at"] = new Date();
 
   await db("orders").where({ id }).update(patch);
@@ -993,27 +1054,6 @@ inboxRoutes.post("/orders/:id/cancel", async (req, res) => {
 
   return res.json({ ok: true });
 });
-
-// DELETE /api/orders/:id  -> soft delete (set deleted_at)
-// DELETE /api/orders/:id  -> soft delete (set deleted_at)
-inboxRoutes.delete("/orders/:id", async (req, res) => {
-  const id = Number(req.params.id);
-  if (!Number.isFinite(id)) {
-    return res.status(400).json({ error: "invalid_id" });
-  }
-
-  try {
-    await db("orders").where({ id }).update({
-      deleted_at: new Date(),
-    });
-
-    return res.json({ ok: true });
-  } catch (err: any) {
-    console.error("DELETE /api/orders/:id failed", err);
-    return res.status(500).json({ error: "internal_error" });
-  }
-});
-
 
 // GET /api/customers/:customerId/outstanding-orders
 inboxRoutes.get(
@@ -1233,3 +1273,46 @@ inboxRoutes.delete("/products/:id", async (req, res) => {
   }
 });
 
+// GET /api/stats/overview
+inboxRoutes.get("/stats/overview", async (_req, res) => {
+  try {
+    const row = await db("orders")
+      .whereNull("deleted_at")
+      .whereIn("status", ["paid", "delivered"])
+      .select(
+        db.raw("COUNT(*)::int as order_count"),
+        db.raw("COALESCE(SUM(total_tzs), 0)::int as total_revenue"),
+        db.raw("COALESCE(SUM(fee_tzs), 0)::int as total_delivery_fees")
+      )
+      .first();
+
+    res.json(row ?? { order_count: 0, total_revenue: 0, total_delivery_fees: 0 });
+  } catch (err: any) {
+    console.error("GET /stats/overview failed", err);
+    res.status(500).json({ error: "failed_to_load_stats" });
+  }
+});
+
+// GET /api/stats/products
+inboxRoutes.get("/stats/products", async (_req, res) => {
+  try {
+    const rows = await db("order_items as oi")
+      .join("orders as o", "oi.order_id", "o.id")
+      .join("products as p", "oi.product_sku", "p.sku")
+      .whereNull("o.deleted_at")
+      .whereIn("o.status", ["paid", "delivered"])
+      .groupBy("oi.product_sku", "p.name")
+      .select(
+        "oi.product_sku as sku",
+        "p.name",
+        db.raw("SUM(oi.qty)::int as total_qty"),
+        db.raw("SUM(oi.qty * oi.unit_price_tzs)::int as total_revenue")
+      )
+      .orderBy("total_revenue", "desc");
+
+    res.json({ items: rows });
+  } catch (err: any) {
+    console.error("GET /stats/products failed", err);
+    res.status(500).json({ error: "failed_to_load_stats" });
+  }
+});
