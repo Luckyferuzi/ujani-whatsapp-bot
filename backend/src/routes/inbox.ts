@@ -610,9 +610,22 @@ inboxRoutes.get(
 //   min_total  → minimum total_tzs
 //   max_total  → maximum total_tzs
 //   limit      → max rows (default 100, max 200)
+// GET /api/orders
 inboxRoutes.get("/orders", async (req: Request, res: Response) => {
   try {
-    const limitRaw = req.query.limit;
+    const limitRaw = req.query.page_size ?? req.query.limit;
+    const pageRaw = req.query.page;
+
+    const page =
+      typeof pageRaw === "string" && !Number.isNaN(Number(pageRaw))
+        ? Math.max(1, Number(pageRaw))
+        : 1;
+
+    const pageSize =
+      typeof limitRaw === "string" && !Number.isNaN(Number(limitRaw))
+        ? Math.min(200, Math.max(1, Number(limitRaw))) // max 200 per page
+        : 50; // default
+
     const limit =
       typeof limitRaw === "string" && !Number.isNaN(Number(limitRaw))
         ? Math.min(200, Number(limitRaw))
@@ -718,9 +731,41 @@ inboxRoutes.get("/orders", async (req: Request, res: Response) => {
       });
     }
 
-    const rows = await qb;
+       // 1) Count total matching rows
+    const countRow = await qb
+      .clone()
+      .clearSelect()
+      .clearOrder()
+      .countDistinct<{ total: string }[]>("o.id as total")
+      .first();
 
-    const items = (rows as any[]).map((row) => ({
+    const total = Number(countRow?.total ?? 0);
+
+    // 2) Fetch one page
+    const rows = await qb
+      .select(
+        "o.id",
+        "o.status",
+        "o.delivery_mode",
+        "o.km",
+        "o.fee_tzs",
+        "o.total_tzs",
+        "o.phone as order_phone",
+        "o.region",
+        "o.created_at",
+        "o.delivery_agent_phone",
+        "o.order_code",
+        "u.name as customer_name",
+        "u.phone as customer_phone",
+        "p.id as payment_id",
+        "p.amount_tzs as paid_amount",
+        "p.status as payment_status"
+      )
+      .orderBy("o.created_at", "desc")
+      .limit(pageSize)
+      .offset((page - 1) * pageSize);
+
+    const items = rows.map((row) => ({
       id: row.id,
       status: row.status,
       delivery_mode: row.delivery_mode,
@@ -728,17 +773,19 @@ inboxRoutes.get("/orders", async (req: Request, res: Response) => {
       fee_tzs: row.fee_tzs,
       total_tzs: row.total_tzs,
       phone: row.order_phone ?? row.customer_phone ?? null,
-      region: row.region,
+      region: row.region ?? null,
       created_at: row.created_at,
-      delivery_agent_phone: row.delivery_agent_phone,
-      order_code: row.order_code,
+      delivery_agent_phone: row.delivery_agent_phone ?? null,
+      order_code: row.order_code ?? null,
       customer_name: row.customer_name ?? null,
-      payment_id: row.payment_id ?? null,
       paid_amount: row.paid_amount ?? null,
       payment_status: row.payment_status ?? null,
     }));
 
-    return res.json({ items });
+    const totalPages = pageSize > 0 ? Math.ceil(total / pageSize) : 1;
+
+    return res.json({ items, total, page, pageSize, totalPages });
+
   } catch (err: any) {
     console.error("[GET /api/orders] failed", err);
     return res
@@ -878,6 +925,35 @@ inboxRoutes.post("/orders/:id/status", async (req, res) => {
       .json({ error: err?.message ?? "Failed to update order status" });
   }
 });
+
+// DELETE /api/orders/:id
+// Soft-delete the order (sets deleted_at)
+inboxRoutes.delete("/orders/:id", async (req: Request, res: Response) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) {
+    return res.status(400).json({ error: "Invalid order id" });
+  }
+
+  try {
+    const existing = await db("orders").where({ id }).first();
+    if (!existing) {
+      return res.status(404).json({ error: "Order not found" });
+    }
+
+    await db("orders")
+      .where({ id })
+      .update({
+        deleted_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      });
+
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error("[DELETE /api/orders/:id] failed", err);
+    return res.status(500).json({ error: "internal_error" });
+  }
+});
+
 
 // PATCH /api/orders/:id  -> edit basic order fields
 inboxRoutes.patch("/orders/:id", async (req, res) => {
