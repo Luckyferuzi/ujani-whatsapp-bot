@@ -1296,10 +1296,10 @@ inboxRoutes.delete("/products/:id", async (req, res) => {
 });
 
 // GET /api/stats/overview
-inboxRoutes.get("/stats/overview", async (_req, res) => {
+inboxRoutes.get("/stats/overview", async (_req: Request, res: Response) => {
   try {
+    // Only completed orders should count as "earnings"
     const row = await db("orders")
-      .whereNull("deleted_at")
       .whereIn("status", ["paid", "delivered"])
       .select(
         db.raw("COUNT(*)::int as order_count"),
@@ -1308,33 +1308,41 @@ inboxRoutes.get("/stats/overview", async (_req, res) => {
       )
       .first();
 
-    res.json(row ?? { order_count: 0, total_revenue: 0, total_delivery_fees: 0 });
-  } catch (err: any) {
-    console.error("GET /stats/overview failed", err);
+    // Fallback in case there are no rows yet
+    res.json(
+      row ?? {
+        order_count: 0,
+        total_revenue: 0,
+        total_delivery_fees: 0,
+      }
+    );
+  } catch (err) {
+    console.error("GET /api/stats/overview failed", err);
     res.status(500).json({ error: "failed_to_load_stats" });
   }
 });
 
 // GET /api/stats/products
-inboxRoutes.get("/stats/products", async (_req, res) => {
+inboxRoutes.get("/stats/products", async (_req: Request, res: Response) => {
   try {
     const rows = await db("order_items as oi")
       .join("orders as o", "oi.order_id", "o.id")
-      .join("products as p", "oi.product_sku", "p.sku")
-      .whereNull("o.deleted_at")
+      .join("products as p", "oi.sku", "p.sku")
       .whereIn("o.status", ["paid", "delivered"])
-      .groupBy("oi.product_sku", "p.name")
+      .groupBy("oi.sku", "p.name")
       .select(
-        "oi.product_sku as sku",
+        "oi.sku as sku",
         "p.name",
         db.raw("SUM(oi.qty)::int as total_qty"),
-        db.raw("SUM(oi.qty * oi.unit_price_tzs)::int as total_revenue")
+        db.raw(
+          "COALESCE(SUM(oi.qty * oi.unit_price_tzs), 0)::int as total_revenue"
+        )
       )
       .orderBy("total_revenue", "desc");
 
     res.json({ items: rows });
-  } catch (err: any) {
-    console.error("GET /stats/products failed", err);
+  } catch (err) {
+    console.error("GET /api/stats/products failed", err);
     res.status(500).json({ error: "failed_to_load_stats" });
   }
 });
