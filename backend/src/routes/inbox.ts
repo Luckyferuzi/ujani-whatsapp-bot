@@ -928,28 +928,22 @@ inboxRoutes.post("/orders/:id/status", async (req, res) => {
 
 // DELETE /api/orders/:id
 // Soft-delete the order (sets deleted_at)
-inboxRoutes.delete("/orders/:id", async (req: Request, res: Response) => {
+// DELETE /api/orders/:id  -> soft delete (set deleted_at)
+inboxRoutes.delete("/orders/:id", async (req, res) => {
   const id = Number(req.params.id);
+
   if (!Number.isFinite(id)) {
-    return res.status(400).json({ error: "Invalid order id" });
+    return res.status(400).json({ error: "invalid_id" });
   }
 
   try {
-    const existing = await db("orders").where({ id }).first();
-    if (!existing) {
-      return res.status(404).json({ error: "Order not found" });
-    }
+    await db("orders").where({ id }).update({
+      deleted_at: new Date(),
+    });
 
-    await db("orders")
-      .where({ id })
-      .update({
-        deleted_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      });
-
-    return res.json({ success: true });
+    return res.json({ ok: true });
   } catch (err: any) {
-    console.error("[DELETE /api/orders/:id] failed", err);
+    console.error("DELETE /api/orders/:id failed", err);
     return res.status(500).json({ error: "internal_error" });
   }
 });
