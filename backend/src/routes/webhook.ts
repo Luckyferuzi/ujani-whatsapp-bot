@@ -105,7 +105,7 @@ function clampRow(titleIn: string, descIn?: string) {
 async function sendListMessageSafe(p: SafeListPayload) {
   const sections = (p.sections || [])
     .map((sec) => ({
-      title: (sec.title || '').slice(0, MAX_SECTION_TITLE) || '—',
+      title: (sec.title || "").slice(0, MAX_SECTION_TITLE) || "—",
       rows: (sec.rows || []).slice(0, MAX_LIST_ROWS).map((r) => {
         const { title, description } = clampRow(r.title, r.description);
         return { id: r.id, title, description };
@@ -113,25 +113,123 @@ async function sendListMessageSafe(p: SafeListPayload) {
     }))
     .filter((sec) => (sec.rows?.length ?? 0) > 0);
 
-  if (!sections.length) return sendText(p.to, p.body || ' ');
-  return sendListMessage({
+  // If there are no rows, behave like a simple text message (and log it)
+  if (!sections.length) {
+    return sendBotText(p.to, p.body || " ");
+  }
+
+  // Build a plain-text summary of this menu for the admin inbox
+  const lines: string[] = [];
+  if (p.header && p.header.trim().length > 0) {
+    lines.push(p.header.trim());
+  }
+  if (p.body && p.body.trim().length > 0) {
+    lines.push(p.body.trim());
+  }
+
+  for (const sec of sections) {
+    const title = (sec.title || "").trim();
+    const rows = sec.rows || [];
+    if (rows.length === 0) continue;
+
+    lines.push(""); // blank line between sections
+    if (title) {
+      lines.push(title + ":");
+    }
+
+    for (const row of rows) {
+      if (row.title) {
+        lines.push("• " + row.title);
+      }
+    }
+  }
+
+  const summaryBody = (lines.join("\n").trim() || p.body || " ").toString();
+
+  // 1) Send the actual interactive list to WhatsApp
+  await sendListMessage({
     to: p.to,
     header: p.header,
-    body: p.body || ' ',
+    body: p.body || " ",
     footer: p.footer,
-    buttonText: (p.buttonText || 'Open').slice(0, MAX_BUTTON_TITLE),
+    buttonText: (p.buttonText || "Open").slice(0, MAX_BUTTON_TITLE),
     sections,
   } as any);
+
+  // 2) Log a single outbound "bot" message for the admin inbox
+  try {
+    const customerId = await upsertCustomerByWa(p.to, undefined, p.to);
+    const conversationId = await getOrCreateConversation(customerId);
+    const inserted = await insertOutboundMessage(
+      conversationId,
+      "text",
+      summaryBody
+    );
+
+    emit("message.created", {
+      conversation_id: conversationId,
+      message: inserted,
+    });
+    emit("conversation.updated", {});
+  } catch (err) {
+    console.error("[webhook] failed to log list menu:", err);
+  }
 }
 
 type Button = { id: string; title: string };
-async function sendButtonsMessageSafe(to: string, body: string, buttons: Button[]) {
+async function sendButtonsMessageSafe(
+  to: string,
+  body: string,
+  buttons: Button[]
+) {
   const trimmed = (buttons || []).slice(0, 3).map((b) => ({
     id: b.id,
-    title: (b.title || '').slice(0, MAX_BUTTON_TITLE) || '•',
+    title: (b.title || "").slice(0, MAX_BUTTON_TITLE) || "•",
   }));
-  if (!trimmed.length) return sendText(to, body);
-  return sendButtonsMessage(to, (body || ' ').slice(0, 1000), trimmed);
+
+  // If there are no buttons, fall back to a normal text message (and log it)
+  if (!trimmed.length) {
+    return sendBotText(to, body);
+  }
+
+  // Build a plain-text summary for the admin inbox
+  const lines: string[] = [];
+  if (body && body.trim().length > 0) {
+    lines.push(body.trim());
+  }
+  if (trimmed.length) {
+    lines.push("");
+    lines.push("Vitendo:");
+    for (const btn of trimmed) {
+      if (btn.title) {
+        lines.push("• " + btn.title);
+      }
+    }
+  }
+
+  const summaryBody = (lines.join("\n").trim() || body || " ").toString();
+
+  // 1) Send the actual buttons message to WhatsApp
+  await sendButtonsMessage(to, (body || " ").slice(0, 1000), trimmed);
+
+  // 2) Log a single outbound "bot" message for the admin inbox
+  try {
+    const customerId = await upsertCustomerByWa(to, undefined, to);
+    const conversationId = await getOrCreateConversation(customerId);
+    const inserted = await insertOutboundMessage(
+      conversationId,
+      "text",
+      summaryBody
+    );
+
+    emit("message.created", {
+      conversation_id: conversationId,
+      message: inserted,
+    });
+    emit("conversation.updated", {});
+  } catch (err) {
+    console.error("[webhook] failed to log buttons message:", err);
+  }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -341,14 +439,39 @@ webhook.post('/webhook', async (req: Request, res: Response) => {
           const text: string | undefined = type === 'text' ? (msg.text?.body as string) : undefined;
 
           // Interactive reply id (and debug)
-          let interactiveId: string | undefined;
-          if (type === 'interactive') {
-            const itype = msg.interactive?.type;
-            console.log('[webhook] interactive type:', itype, 'payload:', JSON.stringify(msg.interactive));
-            if (itype === 'list_reply')  interactiveId = msg.interactive?.list_reply?.id;
-            if (itype === 'button_reply') interactiveId = msg.interactive?.button_reply?.id;
-          }
-          if (interactiveId) console.log('[webhook] interactive id:', interactiveId);
+// Interactive reply id + label (what the user actually clicked)
+let interactiveId: string | undefined;
+let interactiveTitle: string | undefined;
+
+if (type === "interactive") {
+  const itype = msg.interactive?.type;
+  console.log(
+    "[webhook] interactive type:",
+    itype,
+    "payload:",
+    JSON.stringify(msg.interactive)
+  );
+
+  if (itype === "list_reply") {
+    interactiveId = msg.interactive?.list_reply?.id;
+    interactiveTitle = msg.interactive?.list_reply?.title || undefined;
+  }
+
+  if (itype === "button_reply") {
+    interactiveId = msg.interactive?.button_reply?.id;
+    interactiveTitle = msg.interactive?.button_reply?.title || undefined;
+  }
+}
+
+if (interactiveId) {
+  console.log(
+    "[webhook] interactive id:",
+    interactiveId,
+    "title:",
+    interactiveTitle
+  );
+}
+
 
           // Location pin
           const hasLocation = type === 'location';
@@ -362,14 +485,18 @@ try {
   // 1) Ensure customer + conversation exist
   const customerId = await upsertCustomerByWa(from, undefined, from);
   const conversationId = await getOrCreateConversation(customerId);
+// 2) Pick a body to store (text, user's choice label, location coords, or media)
+let bodyForDb: string | null = text ?? null;
 
-  // 2) Pick a body to store (text, interactive marker, location coords, or media)
-  let bodyForDb: string | null = text ?? null;
-
-  // Interactive replies
-  if (!bodyForDb && interactiveId) {
+// Interactive replies: store the label the customer saw (e.g. "Kuhusu bidhaa")
+if (!bodyForDb && interactiveId) {
+  if (interactiveTitle && interactiveTitle.trim().length > 0) {
+    bodyForDb = interactiveTitle.trim();
+  } else {
+    // Fallback for older / weird payloads
     bodyForDb = `[interactive:${interactiveId}]`;
   }
+}
 
   // Location pin
   if (
