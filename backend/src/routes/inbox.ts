@@ -795,6 +795,28 @@ inboxRoutes.get("/orders", async (req: Request, res: Response) => {
   }
 });
 
+// GET /api/orders/:id/items  -> list products in a specific order
+inboxRoutes.get("/orders/:id/items", async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) {
+    return res.status(400).json({ error: "invalid_id" });
+  }
+
+  try {
+    const rows = await db("order_items")
+      .where({ order_id: id })
+      .select("sku", "name", "qty", "unit_price_tzs");
+
+    return res.json({ items: rows });
+  } catch (err: any) {
+    console.error("[GET /api/orders/:id/items] failed", err);
+    return res
+      .status(500)
+      .json({ error: err?.message ?? "Failed to load order items" });
+  }
+});
+
+
 
 // POST /api/orders/manual  -> create manual order with product + qty
 inboxRoutes.post("/orders/manual", async (req, res) => {
