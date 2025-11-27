@@ -817,76 +817,131 @@ inboxRoutes.get("/orders/:id/items", async (req, res) => {
 });
 
 
-
-// POST /api/orders/manual  -> create manual order with product + qty
+// POST /api/orders/manual  -> create manual order with multiple products
 inboxRoutes.post("/orders/manual", async (req, res) => {
-  const {
-    customer_name,
-    phone,
-    location_type,
-    region,
-    delivery_mode,
-    items,
-  } = req.body as {
-    customer_name?: string;
-    phone?: string;
-    location_type?: "within" | "outside";
-    region?: string;
-    delivery_mode?: "pickup" | "delivery";
-    items?: { sku: string; qty: number }[];
-  };
-
-  if (!customer_name || !phone) {
-    return res.status(400).json({ error: "missing_customer_fields" });
-  }
-
-  if (!location_type || !["within", "outside"].includes(location_type)) {
-    return res.status(400).json({ error: "missing_or_invalid_location_type" });
-  }
-
-  if (!items || !Array.isArray(items) || items.length === 0) {
-    return res.status(400).json({ error: "no_items" });
-  }
-
-  // If within region, allow pickup/delivery; if outside -> delivery only
-  let finalDeliveryMode: "pickup" | "delivery" = "delivery";
-  if (location_type === "within") {
-    finalDeliveryMode =
-      delivery_mode && ["pickup", "delivery"].includes(delivery_mode)
-        ? delivery_mode
-        : "pickup";
-  } else {
-    finalDeliveryMode = "delivery";
-  }
-
   try {
-    // find or create customer
-    let customer = await db("customers").where({ phone }).first();
-    if (!customer) {
-      const [row] = await db("customers")
-        .insert({ name: customer_name, phone })
-        .returning("*");
-      customer = row;
+    const {
+      customer_name,
+      phone,
+      location_type,
+      region,
+      delivery_mode,
+      items,
+    } = req.body as {
+      customer_name?: string;
+      phone?: string;
+      location_type?: "within" | "outside";
+      region?: string;
+      delivery_mode?: "pickup" | "delivery";
+      items?: { sku?: string; qty?: number }[];
+    };
+
+    if (!customer_name || !phone || !items || !items.length) {
+      return res.status(400).json({
+        error: "Missing customer_name, phone or items",
+      });
     }
 
-    const { orderId, orderCode, totalTzs } = await createManualOrderFromSkus({
-      customerId: customer.id,
-      phone,
-      deliveryMode: finalDeliveryMode,
-      region: region?.trim() || null,
-      locationType: location_type,
-      items: items.map((i) => ({
-        sku: i.sku,
-        qty: Number(i.qty) || 1,
-      })),
+    const cleanedItems = items
+      .map((it) => ({
+        sku: (it.sku || "").trim(),
+        qty: Number(it.qty || 0),
+      }))
+      .filter((it) => it.sku && it.qty > 0);
+
+    if (!cleanedItems.length) {
+      return res.status(400).json({ error: "No valid items provided" });
+    }
+
+    // Look up products and build order_items
+    const productRows = await db("products")
+      .whereIn(
+        "sku",
+        cleanedItems.map((it) => it.sku)
+      )
+      .select("id", "sku", "name", "price_tzs", "stock_qty");
+
+    const bySku = new Map(productRows.map((p) => [p.sku, p]));
+
+    let subtotal = 0;
+    const orderItemsToInsert: any[] = [];
+    const stockUpdates: { product_id: number; newStock: number }[] = [];
+
+    for (const item of cleanedItems) {
+      const product = bySku.get(item.sku);
+      if (!product) continue;
+
+      const qty = item.qty;
+      const unitPrice = Number(product.price_tzs);
+
+      subtotal += unitPrice * qty;
+
+      orderItemsToInsert.push({
+        product_id: product.id,
+        sku: product.sku,
+        name: product.name,
+        qty,
+        unit_price_tzs: unitPrice,
+      });
+
+      const currentStock = Number(product.stock_qty ?? 0);
+      const newStock = Math.max(0, currentStock - qty);
+      stockUpdates.push({ product_id: product.id, newStock });
+    }
+
+    if (!orderItemsToInsert.length) {
+      return res
+        .status(400)
+        .json({ error: "No valid products found for items" });
+    }
+
+    const deliveryFee = 0; // keep simple here; you can hook your delivery logic
+    const total = subtotal + deliveryFee;
+
+    const [order] = await db.transaction(async (trx) => {
+      const [createdOrder] = await trx("orders")
+        .insert(
+          {
+            customer_name,
+            phone,
+            location_type,
+            region,
+            delivery_mode,
+            subtotal_tzs: subtotal,
+            delivery_fee_tzs: deliveryFee,
+            total_tzs: total,
+            status: "prepared",
+          },
+          "*"
+        );
+
+      // insert order_items
+      for (const oi of orderItemsToInsert) {
+        await trx("order_items").insert({
+          ...oi,
+          order_id: createdOrder.id,
+        });
+      }
+
+      // update product stock
+      for (const upd of stockUpdates) {
+        await trx("products")
+          .where({ id: upd.product_id })
+          .update({ stock_qty: upd.newStock });
+      }
+
+      return [createdOrder];
     });
 
-    res.json({ order_id: orderId, order_code: orderCode, total_tzs: totalTzs });
+    return res.status(201).json({ order });
   } catch (err: any) {
-    console.error("POST /orders/manual failed", err);
-    res.status(500).json({ error: "failed_to_create_manual_order" });
+    console.error("[POST /api/orders/manual] failed", err);
+    return res
+      .status(500)
+      .json({ error: err?.message ?? "Failed to create manual order" });
   }
 });
+
 
 // POST /api/orders/:id/status
 // Body:
@@ -1112,16 +1167,6 @@ inboxRoutes.get(
     return res.json({ items });
   }
 );
-
-// ---------------------------------------------------------------------------
-// Products CRUD for admin UI
-// ---------------------------------------------------------------------------
-
-// GET /api/products  -> list all products for admin
-// ---------------------------------------------------------------------------
-// Products CRUD for admin UI (bilingual descriptions)
-// ---------------------------------------------------------------------------
-
 // GET /api/products  -> list all products for admin
 inboxRoutes.get("/products", async (req, res) => {
   try {
@@ -1138,6 +1183,7 @@ inboxRoutes.get("/products", async (req, res) => {
         "description_en",
         "is_installment",
         "is_active",
+        "stock_qty",    // <-- NEW: expose stock
         "created_at"
       );
 
@@ -1171,62 +1217,75 @@ inboxRoutes.get("/products/:id", async (req, res) => {
 inboxRoutes.post("/products", async (req, res) => {
   try {
     const {
+      id,
       sku,
       name,
       price_tzs,
       short_description,
-      short_description_en,
       description,
+      short_description_en,
       description_en,
       is_installment,
       is_active,
-    } = req.body ?? {};
+      stock_qty,
+    } = req.body;
 
-    const priceNumeric = Number(price_tzs);
-
-    if (
-      !sku ||
-      !name ||
-      !short_description ||
-      !Number.isFinite(priceNumeric) ||
-      priceNumeric <= 0
-    ) {
-      return res.status(400).json({
-        error:
-          "Please provide SKU, product name, short description (Swahili) and a positive price.",
-      });
+    if (!sku || !name || !price_tzs) {
+      return res.status(400).json({ error: "Missing sku, name or price_tzs" });
     }
 
-    const [inserted] = await db("products")
-      .insert({
-        sku: String(sku).trim(),
-        name: String(name).trim(),
-        price_tzs: priceNumeric,
-        short_description: String(short_description).trim(), // SW (required)
-        short_description_en: short_description_en
-          ? String(short_description_en).trim()
-          : null,
-        description: description ? String(description).trim() : "",
-        description_en: description_en
-          ? String(description_en).trim()
-          : null,
-        usage_instructions: "",
-        warnings: "",
-        is_installment: !!is_installment,
-        is_active: is_active === false ? false : true,
-      })
-      .returning("*");
+    const stock = Number(stock_qty ?? 0);
+    const stockSafe = Number.isFinite(stock) && stock >= 0 ? Math.floor(stock) : 0;
 
-    return res.json({ product: inserted });
+    if (id) {
+      // Update existing product
+      const [updated] = await db("products")
+        .where({ id })
+        .update(
+          {
+            sku,
+            name,
+            price_tzs,
+            short_description,
+            description,
+            short_description_en,
+            description_en,
+            is_installment: !!is_installment,
+            is_active: !!is_active,
+            stock_qty: stockSafe,
+          },
+          "*"
+        );
+
+      return res.json({ item: updated });
+    } else {
+      // Create new product
+      const [inserted] = await db("products")
+        .insert(
+          {
+            sku,
+            name,
+            price_tzs,
+            short_description,
+            description,
+            short_description_en,
+            description_en,
+            is_installment: !!is_installment,
+            is_active: !!is_active,
+            stock_qty: stockSafe,
+          },
+          "*"
+        );
+
+      return res.status(201).json({ item: inserted });
+    }
   } catch (err: any) {
-    console.error("POST /products failed", err);
-    if (err?.code === "23505") {
-      return res.status(400).json({ error: "SKU already exists" });
-    }
-    return res.status(500).json({ error: "Failed to create product" });
+    console.error("[POST /api/products] failed", err);
+    return res
+      .status(500)
+      .json({ error: err?.message ?? "Failed to save product" });
   }
 });
-
 
 // PUT /api/products/:id  -> update existing product
 inboxRoutes.put("/products/:id", async (req, res) => {
@@ -1246,9 +1305,11 @@ inboxRoutes.put("/products/:id", async (req, res) => {
       description_en,
       is_installment,
       is_active,
+      stock_qty,
     } = req.body ?? {};
 
     const patch: Record<string, any> = {};
+
     if (sku !== undefined) patch.sku = String(sku).trim();
     if (name !== undefined) patch.name = String(name).trim();
     if (price_tzs !== undefined) patch.price_tzs = Number(price_tzs);
@@ -1267,6 +1328,16 @@ inboxRoutes.put("/products/:id", async (req, res) => {
     if (is_installment !== undefined)
       patch.is_installment = !!is_installment;
     if (is_active !== undefined) patch.is_active = !!is_active;
+
+    if (stock_qty !== undefined) {
+      const stockNum = Number(stock_qty);
+      if (!Number.isFinite(stockNum) || stockNum < 0) {
+        return res
+          .status(400)
+          .json({ error: "Invalid stock_qty (must be >= 0)" });
+      }
+      patch.stock_qty = Math.floor(stockNum);
+    }
 
     if (Object.keys(patch).length === 0) {
       return res.status(400).json({ error: "No fields to update" });
