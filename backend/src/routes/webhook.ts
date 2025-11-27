@@ -103,7 +103,9 @@ function clampRow(titleIn: string, descIn?: string) {
 }
 
 async function sendListMessageSafe(p: SafeListPayload) {
-  const sections = (p.sections || [])
+  const rawSections = p.sections || [];
+
+  const sections = rawSections
     .map((sec) => ({
       title: (sec.title || "").slice(0, MAX_SECTION_TITLE) || "—",
       rows: (sec.rows || []).slice(0, MAX_LIST_ROWS).map((r) => {
@@ -113,38 +115,10 @@ async function sendListMessageSafe(p: SafeListPayload) {
     }))
     .filter((sec) => (sec.rows?.length ?? 0) > 0);
 
-  // If there are no rows, behave like a simple text message (and log it)
+  // If no rows, just behave as a normal bot text message (and log it)
   if (!sections.length) {
     return sendBotText(p.to, p.body || " ");
   }
-
-  // Build a plain-text summary of this menu for the admin inbox
-  const lines: string[] = [];
-  if (p.header && p.header.trim().length > 0) {
-    lines.push(p.header.trim());
-  }
-  if (p.body && p.body.trim().length > 0) {
-    lines.push(p.body.trim());
-  }
-
-  for (const sec of sections) {
-    const title = (sec.title || "").trim();
-    const rows = sec.rows || [];
-    if (rows.length === 0) continue;
-
-    lines.push(""); // blank line between sections
-    if (title) {
-      lines.push(title + ":");
-    }
-
-    for (const row of rows) {
-      if (row.title) {
-        lines.push("• " + row.title);
-      }
-    }
-  }
-
-  const summaryBody = (lines.join("\n").trim() || p.body || " ").toString();
 
   // 1) Send the actual interactive list to WhatsApp
   await sendListMessage({
@@ -156,7 +130,21 @@ async function sendListMessageSafe(p: SafeListPayload) {
     sections,
   } as any);
 
-  // 2) Log a single outbound "bot" message for the admin inbox
+  // 2) Build a JSON payload that the web UI can render as buttons
+  const summaryPayload = {
+    kind: "menu",
+    subtype: "list",
+    header: p.header || null,
+    body: p.body || null,
+    sections: sections.map((sec) => ({
+      title: sec.title || null,
+      rows: (sec.rows || []).map((r) => r.title || ""),
+    })),
+  };
+
+  const summaryBody = `[MENU]${JSON.stringify(summaryPayload)}`;
+
+  // 3) Log it as an outbound message for the admin inbox
   try {
     const customerId = await upsertCustomerByWa(p.to, undefined, p.to);
     const conversationId = await getOrCreateConversation(customerId);
@@ -176,7 +164,9 @@ async function sendListMessageSafe(p: SafeListPayload) {
   }
 }
 
+
 type Button = { id: string; title: string };
+
 async function sendButtonsMessageSafe(
   to: string,
   body: string,
@@ -187,32 +177,26 @@ async function sendButtonsMessageSafe(
     title: (b.title || "").slice(0, MAX_BUTTON_TITLE) || "•",
   }));
 
-  // If there are no buttons, fall back to a normal text message (and log it)
+  // If there are no buttons, fall back to a normal bot text message (and log it)
   if (!trimmed.length) {
     return sendBotText(to, body);
   }
 
-  // Build a plain-text summary for the admin inbox
-  const lines: string[] = [];
-  if (body && body.trim().length > 0) {
-    lines.push(body.trim());
-  }
-  if (trimmed.length) {
-    lines.push("");
-    lines.push("Vitendo:");
-    for (const btn of trimmed) {
-      if (btn.title) {
-        lines.push("• " + btn.title);
-      }
-    }
-  }
-
-  const summaryBody = (lines.join("\n").trim() || body || " ").toString();
-
   // 1) Send the actual buttons message to WhatsApp
   await sendButtonsMessage(to, (body || " ").slice(0, 1000), trimmed);
 
-  // 2) Log a single outbound "bot" message for the admin inbox
+  // 2) Build a JSON payload for the admin UI
+  const summaryPayload = {
+    kind: "menu",
+    subtype: "buttons",
+    header: null,
+    body: body || null,
+    buttons: trimmed.map((b) => b.title),
+  };
+
+  const summaryBody = `[MENU]${JSON.stringify(summaryPayload)}`;
+
+  // 3) Log it as an outbound message for the admin inbox
   try {
     const customerId = await upsertCustomerByWa(to, undefined, to);
     const conversationId = await getOrCreateConversation(customerId);
@@ -228,9 +212,10 @@ async function sendButtonsMessageSafe(
     });
     emit("conversation.updated", {});
   } catch (err) {
-    console.error("[webhook] failed to log buttons message:", err);
+    console.error("[webhook] failed to log buttons menu:", err);
   }
 }
+
 
 /* -------------------------------------------------------------------------- */
 /*                               Local helpers                                */
