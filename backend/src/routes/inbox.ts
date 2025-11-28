@@ -837,15 +837,13 @@ inboxRoutes.post("/orders/manual", async (req, res) => {
 
     // Basic validation
     if (!customer_name || !phone) {
-      return res.status(400).json({
-        error: "Missing customer_name or phone",
-      });
+      return res
+        .status(400)
+        .json({ error: "Missing customer_name or phone" });
     }
 
     if (!items || !Array.isArray(items) || items.length === 0) {
-      return res.status(400).json({
-        error: "No items provided",
-      });
+      return res.status(400).json({ error: "No items provided" });
     }
 
     // Clean and normalize items
@@ -862,84 +860,50 @@ inboxRoutes.post("/orders/manual", async (req, res) => {
       });
     }
 
-    // Look up all product rows for these SKUs
-    const productRows = await db("products")
-      .whereIn(
-        "sku",
-        cleanedItems.map((it) => it.sku)
-      )
-      .select("id", "sku", "name", "price_tzs", "stock_qty");
+    const trimmedPhone = phone.trim();
+    const trimmedName = customer_name.trim();
 
-    const bySku = new Map(productRows.map((p: any) => [p.sku, p]));
+    // Find or create a customer for this phone
+    let customer = await db("customers")
+      .where({ phone: trimmedPhone })
+      .first();
 
-    let subtotal = 0;
-    const orderItemsToInsert: any[] = [];
-
-    for (const item of cleanedItems) {
-      const product = bySku.get(item.sku);
-      if (!product) continue;
-
-      const qty = item.qty;
-      const unitPrice = Number(product.price_tzs);
-
-      subtotal += unitPrice * qty;
-
-      orderItemsToInsert.push({
-        product_id: product.id,
-        sku: product.sku,
-        name: product.name,
-        qty,
-        unit_price_tzs: unitPrice,
-      });
-    }
-
-    if (!orderItemsToInsert.length) {
-      return res.status(400).json({
-        error: "No valid products found for items",
-      });
-    }
-
-    // Delivery fee & total – we only store fee_tzs + total_tzs in this table
-    const deliveryFee = 0;
-    const total = subtotal + deliveryFee;
-
-    const [order] = await db.transaction(async (trx) => {
-      // IMPORTANT: only insert columns that actually exist on "orders"
-      // We align with createOrderWithPayment(): customer_id, status,
-      // delivery_mode, km, fee_tzs, total_tzs, phone, region, lat, lon...
-      const [createdOrder] = await trx("orders")
+    if (!customer) {
+      const [inserted] = await db("customers")
         .insert(
           {
-            customer_id: null, // manual order, not from WhatsApp customer
-            status: "pending",
-            delivery_mode: delivery_mode ?? "delivery",
-            km: null,
-            fee_tzs: deliveryFee,
-            total_tzs: total,
-            phone,
-            region: region ?? null,
-            lat: null,
-            lon: null,
+            name: trimmedName,
+            phone: trimmedPhone,
+            wa_id: null,
+            lang: null,
           },
           "*"
-        );
+        )
+        .returning("*");
+      customer = inserted;
+    }
 
-      // Insert order_items rows
-      for (const oi of orderItemsToInsert) {
-        await trx("order_items").insert({
-          ...oi,
-          order_id: createdOrder.id,
-        });
-      }
+    // Use existing helper to create the order + order_items + payment
+    const { orderId, orderCode, totalTzs } =
+      await createManualOrderFromSkus({
+        customerId: customer.id,
+        phone: trimmedPhone,
+        deliveryMode: (delivery_mode as "pickup" | "delivery") ?? "delivery",
+        region: region ?? null,
+        locationType:
+          (location_type as "within" | "outside") ?? "within",
+        items: cleanedItems.map((it) => ({
+          sku: it.sku,
+          qty: it.qty,
+        })),
+      });
 
-      // NOTE: We DO NOT touch products.stock_qty here.
-      // Stock is reduced only when status changes to "preparing"
-      // in POST /api/orders/:id/status.
-
-      return [createdOrder];
+    return res.status(201).json({
+      ok: true,
+      order_id: orderId,
+      order_code: orderCode,
+      total_tzs: totalTzs,
     });
-
-    return res.status(201).json({ order });
   } catch (err: any) {
     console.error("[POST /api/orders/manual] failed", err);
     return res.status(500).json({
