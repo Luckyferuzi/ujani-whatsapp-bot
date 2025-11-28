@@ -816,7 +816,6 @@ inboxRoutes.get("/orders/:id/items", async (req, res) => {
   }
 });
 
-
 // POST /api/orders/manual  -> create manual order with multiple products
 inboxRoutes.post("/orders/manual", async (req, res) => {
   try {
@@ -836,12 +835,19 @@ inboxRoutes.post("/orders/manual", async (req, res) => {
       items?: { sku?: string; qty?: number }[];
     };
 
-    if (!customer_name || !phone || !items || !items.length) {
+    if (!customer_name || !phone) {
       return res.status(400).json({
-        error: "Missing customer_name, phone or items",
+        error: "Missing customer_name or phone",
       });
     }
 
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({
+        error: "No items provided",
+      });
+    }
+
+    // Clean up input items
     const cleanedItems = items
       .map((it) => ({
         sku: (it.sku || "").trim(),
@@ -850,10 +856,12 @@ inboxRoutes.post("/orders/manual", async (req, res) => {
       .filter((it) => it.sku && it.qty > 0);
 
     if (!cleanedItems.length) {
-      return res.status(400).json({ error: "No valid items provided" });
+      return res.status(400).json({
+        error: "No valid items (sku & qty) provided",
+      });
     }
 
-    // Look up products and build order_items
+    // Look up products for all SKUs
     const productRows = await db("products")
       .whereIn(
         "sku",
@@ -861,11 +869,10 @@ inboxRoutes.post("/orders/manual", async (req, res) => {
       )
       .select("id", "sku", "name", "price_tzs", "stock_qty");
 
-    const bySku = new Map(productRows.map((p) => [p.sku, p]));
+    const bySku = new Map(productRows.map((p: any) => [p.sku, p]));
 
     let subtotal = 0;
     const orderItemsToInsert: any[] = [];
-    const stockUpdates: { product_id: number; newStock: number }[] = [];
 
     for (const item of cleanedItems) {
       const product = bySku.get(item.sku);
@@ -883,39 +890,37 @@ inboxRoutes.post("/orders/manual", async (req, res) => {
         qty,
         unit_price_tzs: unitPrice,
       });
-
-      const currentStock = Number(product.stock_qty ?? 0);
-      const newStock = Math.max(0, currentStock - qty);
-      stockUpdates.push({ product_id: product.id, newStock });
     }
 
     if (!orderItemsToInsert.length) {
-      return res
-        .status(400)
-        .json({ error: "No valid products found for items" });
+      return res.status(400).json({
+        error: "No valid products found for items",
+      });
     }
 
-    const deliveryFee = 0; // keep simple here; you can hook your delivery logic
+    // For manual order we can keep delivery fee simple (0 or compute if you like)
+    const deliveryFee = 0;
     const total = subtotal + deliveryFee;
 
     const [order] = await db.transaction(async (trx) => {
+      // Create order (status can start as "pending" or "created")
       const [createdOrder] = await trx("orders")
         .insert(
           {
             customer_name,
             phone,
-            location_type,
-            region,
-            delivery_mode,
+            location_type: location_type ?? null,
+            region: region ?? null,
+            delivery_mode: delivery_mode ?? "delivery",
             subtotal_tzs: subtotal,
             delivery_fee_tzs: deliveryFee,
             total_tzs: total,
-            status: "prepared",
+            status: "pending",
           },
           "*"
         );
 
-      // insert order_items
+      // Insert all order_items
       for (const oi of orderItemsToInsert) {
         await trx("order_items").insert({
           ...oi,
@@ -923,12 +928,9 @@ inboxRoutes.post("/orders/manual", async (req, res) => {
         });
       }
 
-      // update product stock
-      for (const upd of stockUpdates) {
-        await trx("products")
-          .where({ id: upd.product_id })
-          .update({ stock_qty: upd.newStock });
-      }
+      // NOTE: we DO NOT touch stock here.
+      // Stock will be reduced only when status is changed to "preparing"
+      // in /api/orders/:id/status (we already implemented that logic).
 
       return [createdOrder];
     });
@@ -936,11 +938,12 @@ inboxRoutes.post("/orders/manual", async (req, res) => {
     return res.status(201).json({ order });
   } catch (err: any) {
     console.error("[POST /api/orders/manual] failed", err);
-    return res
-      .status(500)
-      .json({ error: err?.message ?? "Failed to create manual order" });
+    return res.status(500).json({
+      error: err?.message ?? "Failed to create manual order",
+    });
   }
 });
+
 
 
 // POST /api/orders/:id/status
@@ -948,7 +951,6 @@ inboxRoutes.post("/orders/manual", async (req, res) => {
 //   {
 //     status: "pending" | "preparing" | "out_for_delivery" | "delivered" | "cancelled",
 //     delivery_agent_phone?: string // required when status === "out_for_delivery"
-// POST /api/orders/:id/status -> update order status
 inboxRoutes.post("/orders/:id/status", async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) {
@@ -1165,6 +1167,7 @@ inboxRoutes.get("/products", async (req, res) => {
         "sku",
         "name",
         "price_tzs",
+        "stock_qty",
         "short_description",
         "short_description_en",
         "description",
