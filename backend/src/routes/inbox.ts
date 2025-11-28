@@ -1215,76 +1215,90 @@ inboxRoutes.get("/products/:id", async (req, res) => {
 });
 
 // POST /api/products  -> create new product
+// helper to auto-generate a SKU from the name
+function generateSkuFromName(rawName: string | undefined): string {
+  const base = (rawName || "product")
+    .toString()
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  const rand = Math.random().toString(36).slice(2, 6).toUpperCase();
+  const ts = Date.now().toString(36).toUpperCase();
+
+  return `${base || "product"}-${rand}${ts}`.toUpperCase();
+}
+
 inboxRoutes.post("/products", async (req, res) => {
   try {
     const {
-      id,
       sku,
       name,
       price_tzs,
       short_description,
-      description,
       short_description_en,
+      description,
       description_en,
       is_installment,
       is_active,
       stock_qty,
-    } = req.body;
+    } = req.body ?? {};
 
-    if (!sku || !name || !price_tzs) {
-      return res.status(400).json({ error: "Missing sku, name or price_tzs" });
+    if (!name || price_tzs == null) {
+      return res
+        .status(400)
+        .json({ error: "Missing name or price_tzs" });
     }
 
-    const stock = Number(stock_qty ?? 0);
-    const stockSafe = Number.isFinite(stock) && stock >= 0 ? Math.floor(stock) : 0;
-
-    if (id) {
-      // Update existing product
-      const [updated] = await db("products")
-        .where({ id })
-        .update(
-          {
-            sku,
-            name,
-            price_tzs,
-            short_description,
-            description,
-            short_description_en,
-            description_en,
-            is_installment: !!is_installment,
-            is_active: !!is_active,
-            stock_qty: stockSafe,
-          },
-          "*"
-        );
-
-      return res.json({ item: updated });
-    } else {
-      // Create new product
-      const [inserted] = await db("products")
-        .insert(
-          {
-            sku,
-            name,
-            price_tzs,
-            short_description,
-            description,
-            short_description_en,
-            description_en,
-            is_installment: !!is_installment,
-            is_active: !!is_active,
-            stock_qty: stockSafe,
-          },
-          "*"
-        );
-
-      return res.status(201).json({ item: inserted });
+    const price = Number(price_tzs);
+    if (!Number.isFinite(price) || price <= 0) {
+      return res.status(400).json({ error: "Invalid price" });
     }
+
+    const stockNum =
+      stock_qty === undefined || stock_qty === null
+        ? 0
+        : Number(stock_qty);
+
+    // if sku is not provided, auto-generate one
+    let finalSku = (sku ?? "").toString().trim();
+    if (!finalSku) {
+      finalSku = generateSkuFromName(name);
+    }
+
+    const [created] = await db("products")
+      .insert(
+        {
+          sku: finalSku,
+          name: String(name).trim(),
+          price_tzs: price,
+          short_description: short_description
+            ? String(short_description).trim()
+            : "",
+          short_description_en: short_description_en
+            ? String(short_description_en).trim()
+            : null,
+          description: description ? String(description).trim() : "",
+          description_en: description_en
+            ? String(description_en).trim()
+            : null,
+          is_installment: !!is_installment,
+          is_active: is_active !== undefined ? !!is_active : true,
+          stock_qty: Number.isFinite(stockNum)
+            ? Math.max(0, Math.floor(stockNum))
+            : 0,
+        },
+        "*"
+      );
+
+    return res.status(201).json({ product: created });
   } catch (err: any) {
-    console.error("[POST /api/products] failed", err);
-    return res
-      .status(500)
-      .json({ error: err?.message ?? "Failed to save product" });
+    console.error("POST /products failed", err);
+    if (err?.code === "23505") {
+      return res.status(400).json({ error: "SKU already exists" });
+    }
+    return res.status(500).json({ error: "Failed to create product" });
   }
 });
 
@@ -1365,7 +1379,7 @@ inboxRoutes.put("/products/:id", async (req, res) => {
   }
 });
 
-// DELETE /api/products/:id  -> soft delete (mark inactive)
+// DELETE /api/products/:id  -> hard delete (no soft inactive)
 inboxRoutes.delete("/products/:id", async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) {
@@ -1373,19 +1387,18 @@ inboxRoutes.delete("/products/:id", async (req, res) => {
   }
 
   try {
-    const [updated] = await db("products")
-      .where({ id })
-      .update({ is_active: false, updated_at: new Date() })
-      .returning("*");
+    const deletedCount = await db("products").where({ id }).del();
 
-    if (!updated) {
+    if (deletedCount === 0) {
       return res.status(404).json({ error: "Product not found" });
     }
 
     return res.json({ ok: true });
   } catch (err: any) {
     console.error("DELETE /products/:id failed", err);
-    return res.status(500).json({ error: "Failed to delete product" });
+    return res
+      .status(500)
+      .json({ error: "Failed to delete product" });
   }
 });
 
