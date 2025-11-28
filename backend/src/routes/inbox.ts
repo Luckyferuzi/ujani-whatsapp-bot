@@ -948,129 +948,117 @@ inboxRoutes.post("/orders/manual", async (req, res) => {
 //   {
 //     status: "pending" | "preparing" | "out_for_delivery" | "delivered" | "cancelled",
 //     delivery_agent_phone?: string // required when status === "out_for_delivery"
-//   }
+// POST /api/orders/:id/status -> update order status
 inboxRoutes.post("/orders/:id/status", async (req, res) => {
   const id = Number(req.params.id);
-
-  const body = req.body as {
-    status?: string;
-    delivery_agent_phone?: string;
-  };
-
-  const status = body.status;
-  let deliveryAgentPhone: string | undefined = body.delivery_agent_phone;
-
   if (!Number.isFinite(id)) {
     return res.status(400).json({ error: "Invalid order id" });
   }
 
-  const allowed = [
-    "pending",
-    "preparing",
-    "out_for_delivery",
-    "delivered",
-    "cancelled",
-  ];
-  if (!status || !allowed.includes(status)) {
-    return res.status(400).json({ error: "Invalid status" });
-  }
+  const { status: newStatusRaw, delivery_agent_phone } = req.body ?? {};
+  const newStatus =
+    typeof newStatusRaw === "string" ? newStatusRaw.trim() : "";
 
-  if (status === "out_for_delivery") {
-    if (
-      !deliveryAgentPhone ||
-      typeof deliveryAgentPhone !== "string" ||
-      deliveryAgentPhone.trim().length < 4
-    ) {
-      return res.status(400).json({
-        error:
-          "delivery_agent_phone is required when marking order as out_for_delivery",
-      });
-    }
-    deliveryAgentPhone = deliveryAgentPhone.trim();
+  if (!newStatus) {
+    return res.status(400).json({ error: "Missing status" });
   }
 
   try {
-    const update: any = { status };
-    if (status === "out_for_delivery" && deliveryAgentPhone) {
-      update.delivery_agent_phone = deliveryAgentPhone;
-    }
-
-    const [order] = await db("orders")
+    // Fetch current order (to know previous status)
+    const existingOrder = await db("orders")
       .where({ id })
-      .update(update)
-      .returning("*");
+      .first<{
+        id: number;
+        status: string | null;
+      }>();
 
-    if (!order) {
+    if (!existingOrder) {
       return res.status(404).json({ error: "Order not found" });
     }
 
-    // Notify customer via WhatsApp
-    if (order.customer_id) {
-      const customer = await db("customers")
-        .where({ id: order.customer_id })
-        .first();
+    const prevStatus = existingOrder.status || null;
 
-      const waId = customer?.wa_id as string | undefined;
-      const lang: Lang = (customer?.lang === "en" || customer?.lang === "sw"
-        ? customer.lang
-        : "sw") as Lang;
+    // Do everything in a transaction
+    const updatedOrder = await db.transaction(async (trx) => {
+      const update: Record<string, any> = {
+        status: newStatus,
+        updated_at: new Date(),
+      };
 
-      const orderCode = order.order_code || `UJ-${order.id}`;
-      let msg: string | null = null;
-
-      if (status === "preparing") {
-        msg = t(lang, "order.preparing_message", { orderCode });
-      } else if (status === "out_for_delivery") {
-        const phoneForMsg =
-          deliveryAgentPhone ??
-          ((order.delivery_agent_phone as string | undefined) ?? "");
-        msg = t(lang, "order.out_for_delivery_message", {
-          orderCode,
-          deliveryAgentPhone: phoneForMsg,
-        });
-      } else if (status === "delivered") {
-        msg = t(lang, "order.delivered_message", { orderCode });
+      if (
+        typeof delivery_agent_phone === "string" &&
+        delivery_agent_phone.trim()
+      ) {
+        update.delivery_agent_phone = delivery_agent_phone.trim();
       }
 
-      if (waId && msg) {
-        const convo = await db("conversations")
-          .where({ customer_id: order.customer_id })
-          .orderBy("created_at", "desc")
-          .first();
+      // 1) Update the order status
+      await trx("orders").where({ id }).update(update);
 
-        const conversationId = convo?.id as number | undefined;
+      // 2) If moving into "preparing" (and we weren't in preparing before),
+      //    then reduce stock based on order_items.
+      if (prevStatus !== "preparing" && newStatus === "preparing") {
+        // Get all items for this order (must have product_id)
+        const items = await trx("order_items")
+          .where({ order_id: id })
+          .select<{
+            product_id: number | null;
+            qty: number;
+          }[]>("product_id", "qty");
 
-        try {
-          await sendText(waId, msg);
-        } catch (e) {
-          console.warn("Failed to send order status message:", e);
-        }
+        if (items.length > 0) {
+          const qtyByProduct = new Map<number, number>();
 
-        if (conversationId) {
-          const [msgRow] = await db("messages")
-            .insert({
-              conversation_id: conversationId,
-              direction: "out",
-              type: "text",
-              body: msg,
-              status: "sent",
-            })
-            .returning("*");
+          for (const item of items) {
+            if (!item.product_id) continue;
 
-          req.app.get("io")?.emit("message.created", {
-            conversation_id: conversationId,
-            message: msgRow,
-          });
+            const pid = item.product_id;
+            const qty = Number(item.qty) || 0;
+            if (qty <= 0) continue;
+
+            const existing = qtyByProduct.get(pid) || 0;
+            qtyByProduct.set(pid, existing + qty);
+          }
+
+          const productIds = Array.from(qtyByProduct.keys());
+
+          if (productIds.length > 0) {
+            const productRows = await trx("products")
+              .whereIn("id", productIds)
+              .select<{
+                id: number;
+                stock_qty: number | null;
+              }[]>("id", "stock_qty");
+
+            for (const product of productRows) {
+              const pid = product.id;
+              const currentStock = Number(product.stock_qty ?? 0);
+              const delta = qtyByProduct.get(pid) || 0;
+
+              const newStock = Math.max(0, currentStock - delta);
+
+              await trx("products")
+                .where({ id: pid })
+                .update({ stock_qty: newStock });
+            }
+          }
         }
       }
-    }
 
-    return res.json({ order });
+      // Return fresh order row
+      const updated = await trx("orders").where({ id }).first("*");
+      return updated;
+    });
+
+    return res.json({
+      ok: true,
+      order: updatedOrder,
+    });
   } catch (err: any) {
     console.error("POST /orders/:id/status failed", err);
-    return res
-      .status(500)
-      .json({ error: err?.message ?? "Failed to update order status" });
+    return res.status(500).json({
+      error: err?.message ?? "Failed to update order status",
+    });
   }
 });
 
