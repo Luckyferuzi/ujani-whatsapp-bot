@@ -835,6 +835,7 @@ inboxRoutes.post("/orders/manual", async (req, res) => {
       items?: { sku?: string; qty?: number }[];
     };
 
+    // Basic validation
     if (!customer_name || !phone) {
       return res.status(400).json({
         error: "Missing customer_name or phone",
@@ -847,7 +848,7 @@ inboxRoutes.post("/orders/manual", async (req, res) => {
       });
     }
 
-    // Clean up input items
+    // Clean and normalize items
     const cleanedItems = items
       .map((it) => ({
         sku: (it.sku || "").trim(),
@@ -861,7 +862,7 @@ inboxRoutes.post("/orders/manual", async (req, res) => {
       });
     }
 
-    // Look up products for all SKUs
+    // Look up all product rows for these SKUs
     const productRows = await db("products")
       .whereIn(
         "sku",
@@ -898,29 +899,32 @@ inboxRoutes.post("/orders/manual", async (req, res) => {
       });
     }
 
-    // For manual order we can keep delivery fee simple (0 or compute if you like)
+    // Delivery fee & total – we only store fee_tzs + total_tzs in this table
     const deliveryFee = 0;
     const total = subtotal + deliveryFee;
 
     const [order] = await db.transaction(async (trx) => {
-      // Create order (status can start as "pending" or "created")
+      // IMPORTANT: only insert columns that actually exist on "orders"
+      // We align with createOrderWithPayment(): customer_id, status,
+      // delivery_mode, km, fee_tzs, total_tzs, phone, region, lat, lon...
       const [createdOrder] = await trx("orders")
         .insert(
           {
-            customer_name,
-            phone,
-            location_type: location_type ?? null,
-            region: region ?? null,
-            delivery_mode: delivery_mode ?? "delivery",
-            subtotal_tzs: subtotal,
-            delivery_fee_tzs: deliveryFee,
-            total_tzs: total,
+            customer_id: null, // manual order, not from WhatsApp customer
             status: "pending",
+            delivery_mode: delivery_mode ?? "delivery",
+            km: null,
+            fee_tzs: deliveryFee,
+            total_tzs: total,
+            phone,
+            region: region ?? null,
+            lat: null,
+            lon: null,
           },
           "*"
         );
 
-      // Insert all order_items
+      // Insert order_items rows
       for (const oi of orderItemsToInsert) {
         await trx("order_items").insert({
           ...oi,
@@ -928,9 +932,9 @@ inboxRoutes.post("/orders/manual", async (req, res) => {
         });
       }
 
-      // NOTE: we DO NOT touch stock here.
-      // Stock will be reduced only when status is changed to "preparing"
-      // in /api/orders/:id/status (we already implemented that logic).
+      // NOTE: We DO NOT touch products.stock_qty here.
+      // Stock is reduced only when status changes to "preparing"
+      // in POST /api/orders/:id/status.
 
       return [createdOrder];
     });
@@ -943,7 +947,6 @@ inboxRoutes.post("/orders/manual", async (req, res) => {
     });
   }
 });
-
 
 
 // POST /api/orders/:id/status
