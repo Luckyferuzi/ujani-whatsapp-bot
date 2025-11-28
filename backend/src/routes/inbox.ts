@@ -1183,7 +1183,7 @@ inboxRoutes.get("/products", async (req, res) => {
         "description_en",
         "is_installment",
         "is_active",
-        "stock_qty",    // <-- NEW: expose stock
+        "stock_qty",   // <-- include stock
         "created_at"
       );
 
@@ -1193,6 +1193,7 @@ inboxRoutes.get("/products", async (req, res) => {
     return res.status(500).json({ error: "Failed to load products" });
   }
 });
+
 
 // GET /api/products/:id  -> single product (for editing)
 inboxRoutes.get("/products/:id", async (req, res) => {

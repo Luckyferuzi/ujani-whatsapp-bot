@@ -160,6 +160,8 @@ const dict: Dict = {
       'Oda yako {orderCode} imekabidhiwa mpeleka mzigo na iko njiani kufika. Namba ya mpeleka mzigo ni {deliveryAgentPhone}. Tafadhali mpigie au mtumie WhatsApp kwa mawasiliano zaidi.',
     'order.delivered_message':
       'Oda yako {orderCode} imewasilishwa. Asante kwa kuamini Ujani Herbals 🌿.',
+          'product.unavailable':
+      'Pole sana, *{name}* kwa sasa haipatikani kwa sababu stock imeisha. Tutakujulisha ikirudi tena. 🙏',
   },
 
   en: {
@@ -308,8 +310,9 @@ const dict: Dict = {
       'Your order {orderCode} has been handed to the delivery rider and is on the way. Rider phone: {deliveryAgentPhone}. You can call or WhatsApp them for more info.',
     'order.delivered_message':
       'Your order {orderCode} has been delivered. Thank you for choosing Ujani Herbals 🌿.',
-    
-
+          'product.unavailable':
+      'We’re very sorry, *{name}* is currently unavailable due to being out of stock. We will notify you when it is back. 🙏',
+      
 
   },
 };

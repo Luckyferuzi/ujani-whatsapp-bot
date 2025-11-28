@@ -36,6 +36,92 @@ type Msg = {
   created_at: string;
 };
 
+/**
+ * Parse outbound menu text like:
+ *
+ * Karibu Ujani Herbals Chatbot
+ * Karibu Ujani Herbals Chatbot
+ *
+ * Angalia Bidhaa zetu:
+ * • UJANI DAWA YA GANZI
+ * • UJANI KIBOKO KIBAMIA
+ *
+ * Vitendo:
+ * • Angalia kikapu
+ * • Kamilisha oda
+ * ...
+ */
+function parseMenuFromBody(body: string): ParsedMenu | null {
+  if (!body) return null;
+
+  const rawLines = body.split("\n");
+  const lines = rawLines.map((l) => l.trimEnd());
+  const trimmed = lines.map((l) => l.trim());
+
+  // Must have at least one "• something" for this to be a menu
+  const hasBullet = trimmed.some((l) => l.startsWith("• "));
+  if (!hasBullet) return null;
+
+  // Find first "Section:" line
+  let firstHeaderIndex = -1;
+  for (let i = 0; i < trimmed.length; i++) {
+    const line = trimmed[i];
+    if (!line) continue;
+    if (line.endsWith(":")) {
+      firstHeaderIndex = i;
+      break;
+    }
+  }
+
+  if (firstHeaderIndex === -1) return null;
+
+  const introLines = trimmed.slice(0, firstHeaderIndex).filter(Boolean);
+  const sections: ParsedMenu["sections"] = [];
+
+  let i = firstHeaderIndex;
+  while (i < trimmed.length) {
+    // skip empty lines
+    while (i < trimmed.length && !trimmed[i]) i++;
+    if (i >= trimmed.length) break;
+
+    const headerLine = trimmed[i];
+    if (!headerLine.endsWith(":")) break;
+
+    const title = headerLine.slice(0, -1); // remove trailing ":"
+    i++;
+
+    const options: string[] = [];
+
+    while (i < trimmed.length) {
+      const line = trimmed[i];
+
+      if (!line) {
+        i++;
+        continue;
+      }
+
+      // Next section header
+      if (line.endsWith(":")) break;
+
+      // Option line: starts with "• "
+      if (line.startsWith("• ")) {
+        options.push(line.slice(2).trim());
+      }
+
+      i++;
+    }
+
+    if (options.length > 0) {
+      sections.push({ title, options });
+    }
+  }
+
+  if (!sections.length) return null;
+
+  return { introLines, sections };
+}
+
+
 type ProductSummary = {
   id: number;
   sku: string;
@@ -45,6 +131,192 @@ type ProductSummary = {
 type ProductsResponse = {
   items: ProductSummary[];
 };
+
+type ParsedMenu = {
+  introLines: string[];
+  sections: { title: string; options: string[] }[];
+};
+
+/**
+ * Menus stored as JSON, e.g.
+ * [MENU]{"kind":"menu","subtype":"buttons","header":null,"body":"Vitendo",...}
+ */
+function parseMenuFromJsonBody(body: string): ParsedMenu | null {
+  const match = body.match(/^\[MENU\](.+)$/);
+  if (!match) return null;
+
+  try {
+    const payload = JSON.parse(match[1]);
+
+    if (!payload || payload.kind !== "menu") return null;
+
+    const introLines: string[] = [];
+    const header =
+      typeof payload.header === "string" ? payload.header.trim() : "";
+    const text =
+      typeof payload.body === "string" ? payload.body.trim() : "";
+
+    if (header) introLines.push(header);
+    if (text && text !== header) introLines.push(text);
+
+    const sections: ParsedMenu["sections"] = [];
+
+    // Buttons menus
+    if (payload.subtype === "buttons" && Array.isArray(payload.buttons)) {
+      const opts = (payload.buttons as unknown[])
+        .filter((v): v is string => typeof v === "string")
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+      if (opts.length) {
+        sections.push({
+          title: text || header || "",
+          options: opts,
+        });
+      }
+    }
+
+    // List menus
+    if (payload.subtype === "list" && Array.isArray(payload.sections)) {
+      for (const sec of payload.sections as any[]) {
+        const secTitle =
+          typeof sec?.title === "string" ? sec.title.trim() : "";
+        const rows = Array.isArray(sec?.rows) ? sec.rows : [];
+        const opts = rows
+          .map((r: any) =>
+            typeof r === "string"
+              ? r
+              : typeof r?.title === "string"
+              ? r.title
+              : ""
+          )
+          .map((s: string) => s.trim())
+          .filter(Boolean);
+
+        if (opts.length) {
+          sections.push({
+            title: secTitle || text || header || "",
+            options: opts,
+          });
+        }
+      }
+    }
+
+    if (!sections.length) return null;
+
+    return { introLines, sections };
+  } catch (err) {
+    console.error("Failed to parse [MENU] JSON", err);
+    return null;
+  }
+}
+
+/**
+ * Menus stored as plain text, e.g.
+ *
+ * Vitendo:
+ * • Ongeza kikapuni
+ * • Nunua sasa
+ * • Maelezo zaidi
+ */
+function parseMenuFromPlainBody(body: string): ParsedMenu | null {
+  if (!body) return null;
+
+  const rawLines = body.split("\n");
+  const trimmed = rawLines.map((l) => l.trim());
+
+  // Must have at least one "• something"
+  const hasBullet = trimmed.some((l) => l.startsWith("• "));
+  if (!hasBullet) return null;
+
+  // Find first "Section:" line
+  let firstHeaderIndex = -1;
+  for (let i = 0; i < trimmed.length; i++) {
+    const line = trimmed[i];
+    if (!line) continue;
+    if (line.endsWith(":")) {
+      firstHeaderIndex = i;
+      break;
+    }
+  }
+  if (firstHeaderIndex === -1) return null;
+
+  const introLines = trimmed.slice(0, firstHeaderIndex).filter(Boolean);
+  const sections: ParsedMenu["sections"] = [];
+
+  let i = firstHeaderIndex;
+  while (i < trimmed.length) {
+    while (i < trimmed.length && !trimmed[i]) i++;
+    if (i >= trimmed.length) break;
+
+    const headerLine = trimmed[i];
+    if (!headerLine.endsWith(":")) break;
+
+    const title = headerLine.slice(0, -1);
+    i++;
+
+    const options: string[] = [];
+
+    while (i < trimmed.length) {
+      const line = trimmed[i];
+
+      if (!line) {
+        i++;
+        continue;
+      }
+
+      // Next section header
+      if (line.endsWith(":")) break;
+
+      // Option line: starts with "• "
+      if (line.startsWith("• ")) {
+        options.push(line.slice(2).trim());
+      }
+
+      i++;
+    }
+
+    if (options.length) {
+      sections.push({ title, options });
+    }
+  }
+
+  if (!sections.length) return null;
+
+  return { introLines, sections };
+}
+
+/** Common React renderer for both kinds of menus */
+function renderMenuBlock(parsed: ParsedMenu) {
+  return (
+    <div className="thread-menu">
+      {parsed.introLines.length > 0 && (
+        <div className="thread-menu-intro">
+          {parsed.introLines.map((line, idx) => (
+            <div key={idx}>{line}</div>
+          ))}
+        </div>
+      )}
+
+      {parsed.sections.map((section, idx) => (
+        <div key={idx} className="thread-menu-section">
+          {section.title && (
+            <div className="thread-menu-section-title">
+              {section.title}
+            </div>
+          )}
+          <div className="thread-menu-options">
+            {section.options.map((opt, j) => (
+              <div key={j} className="thread-menu-option">
+                {opt}
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 function formatInteractiveDisplay(
   id: string,
@@ -122,10 +394,31 @@ function renderBody(
   activeMediaActionsId?: string | number | null,
   onToggleMediaActions?: (messageId: string | number) => void
 ) {
-
   const body = msg.body ?? "";
+  const inbound =
+    msg.direction === "in" || msg.direction === "inbound";
+  const outbound = !inbound;
 
-  // 0) Interactive markers: [interactive:ID]
+  /* ------------------------------------------------------------------ */
+  /* 0) Menus: first try JSON [MENU]{...}, then plain-text bullets      */
+  /* ------------------------------------------------------------------ */
+
+  const jsonMenu = parseMenuFromJsonBody(body);
+  if (jsonMenu) {
+    return renderMenuBlock(jsonMenu);
+  }
+
+  if (outbound) {
+    const plainMenu = parseMenuFromPlainBody(body);
+    if (plainMenu) {
+      return renderMenuBlock(plainMenu);
+    }
+  }
+
+  /* ------------------------------------------------------------- */
+  /* 1) Old interactive markers: [interactive:ID] (for older msgs) */
+  /* ------------------------------------------------------------- */
+
   const interactiveMatch = body.match(/^\[interactive:(.+)\]$/);
   if (interactiveMatch) {
     const id = interactiveMatch[1];
@@ -133,7 +426,10 @@ function renderBody(
     return <div className="thread-text">{pretty}</div>;
   }
 
-  // 1) LOCATION "LOCATION lat,lng"
+  /* ----------------------------- */
+  /* 2) LOCATION "LOCATION lat,lng" */
+  /* ----------------------------- */
+
   if (body.startsWith("LOCATION ")) {
     const raw = body.substring("LOCATION ".length).trim();
     const [latStr, lngStr] = raw.split(",").map((p) => p.trim());
@@ -164,14 +460,20 @@ function renderBody(
     );
   }
 
-  // 2) MEDIA marker: MEDIA:<kind>:<mediaId>
-    const mediaMatch = body.match(/^MEDIA:([a-z]+):(.+)$/);
+  /* ------------------------------- */
+  /* 3) MEDIA marker: MEDIA:kind:id  */
+  /* ------------------------------- */
+
+  const mediaMatch = body.match(/^MEDIA:([a-z]+):(.+)$/);
   if (mediaMatch) {
-    const kind = mediaMatch[1] as "image" | "video" | "audio" | "document";
+    const kind = mediaMatch[1] as
+      | "image"
+      | "video"
+      | "audio"
+      | "document";
     const mediaId = mediaMatch[2];
     const src = `${API}/api/media/${encodeURIComponent(mediaId)}`;
 
-    // 👇 ADD ALL THIS
     const showActions =
       activeMediaActionsId != null &&
       String(activeMediaActionsId) === String(msg.id);
@@ -209,36 +511,53 @@ function renderBody(
           Futa media
         </button>
       ) : null;
-// web/components/Thread.tsx (inside the `kind === "image"` block)
 
-if (kind === "image") {
-  return (
-    <div className="thread-media">
-      <div className="thread-text">🖼️ Picha kutoka mteja</div>
-      <a href={src} target="_blank" rel="noreferrer">
-        Fungua picha
-      </a>
-      {showActions && (resendButton || deleteButton) && (
-        <div className="thread-media-actions">
-          {resendButton}
-          {deleteButton}
-        </div>
-      )}
-      {editIcon}
-    </div>
-  );
-}
-
-    if (kind === "video") {
+    if (kind === "image") {
       return (
         <div className="thread-media">
-          <video src={src} controls className="thread-video" />
-          {(resendButton || deleteButton) && (
+          <img
+            src={src}
+            className="thread-image"
+            alt="Picha kutoka mteja"
+          />
+          <a
+            href={src}
+            target="_blank"
+            rel="noreferrer"
+            className="thread-media-link"
+          >
+            Fungua picha
+          </a>
+          {showActions && (resendButton || deleteButton) && (
             <div className="thread-media-actions">
               {resendButton}
               {deleteButton}
             </div>
           )}
+          {editIcon}
+        </div>
+      );
+    }
+
+    if (kind === "video") {
+      return (
+        <div className="thread-media">
+          <video src={src} controls className="thread-video" />
+          <a
+            href={src}
+            target="_blank"
+            rel="noreferrer"
+            className="thread-media-link"
+          >
+            Fungua video
+          </a>
+          {showActions && (resendButton || deleteButton) && (
+            <div className="thread-media-actions">
+              {resendButton}
+              {deleteButton}
+            </div>
+          )}
+          {editIcon}
         </div>
       );
     }
@@ -247,36 +566,47 @@ if (kind === "image") {
       return (
         <div className="thread-media">
           <audio src={src} controls className="thread-audio" />
-          {(resendButton || deleteButton) && (
+          {showActions && (resendButton || deleteButton) && (
             <div className="thread-media-actions">
               {resendButton}
               {deleteButton}
             </div>
           )}
+          {editIcon}
         </div>
       );
     }
 
-    // document
-    return (
-      <div className="thread-media">
-        <div className="thread-text">📄 Faili kutoka mteja</div>
-        <a href={src} target="_blank" rel="noreferrer">
-          Fungua faili
-        </a>
-        {(resendButton || deleteButton) && (
-          <div className="thread-media-actions">
-            {resendButton}
-            {deleteButton}
-          </div>
-        )}
-      </div>
-    );
+    if (kind === "document") {
+      return (
+        <div className="thread-media">
+          <a
+            href={src}
+            target="_blank"
+            rel="noreferrer"
+            className="thread-media-link"
+          >
+            Fungua faili
+          </a>
+          {showActions && (resendButton || deleteButton) && (
+            <div className="thread-media-actions">
+              {resendButton}
+              {deleteButton}
+            </div>
+          )}
+          {editIcon}
+        </div>
+      );
+    }
   }
 
-  // 3) Default: plain text
+  /* ------------------------ */
+  /* 4) Default: plain text   */
+  /* ------------------------ */
+
   return <div className="thread-text">{body}</div>;
 }
+
 
 export default function Thread({ convo }: ThreadProps) {
   const [messages, setMessages] = useState<Msg[]>([]);

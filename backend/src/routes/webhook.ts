@@ -647,6 +647,12 @@ async function showProductActions(user: string, sku: string, lang: Lang) {
   const prod = await resolveProductForSkuAsync(sku);
   if (!prod) return;
 
+  // If we know stock and it's empty -> tell customer it's unavailable
+  if (typeof prod.stockQty === "number" && prod.stockQty <= 0) {
+    await sendText(user, t(lang, "product.unavailable", { name: prod.name }));
+    return;
+  }
+
   await sendText(user, `*${prod.name}* — ${fmtTZS(prod.price)} TZS`);
   const hasVariants = !!(prod.children && prod.children.length);
 
@@ -660,6 +666,7 @@ async function showProductActions(user: string, sku: string, lang: Lang) {
   ];
   await sendButtonsMessageSafe(user, t(lang, "menu.actions_section"), buttons);
 }
+
 
 async function showVariants(user: string, parentSku: string, lang: Lang) {
   const parent = await getProductBySkuAsync(parentSku);

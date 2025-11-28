@@ -844,6 +844,89 @@ body > div:first-of-type {
   color: var(--danger);
 }
 
+/* ----- Bot menu bubbles (WhatsApp-style options) ----- */
+
+.thread-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.thread-menu-header {
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.thread-menu-body {
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+
+.thread-menu-options {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* Each option row, similar to the white buttons inside a WhatsApp bubble */
+.thread-menu-option {
+  background-color: #ffffff;
+  color: #111827;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+  padding: 6px 10px;
+  font-size: 13px;
+  text-align: left;
+}
+
+/* ===== WhatsApp-style bot menus in the thread ===== */
+
+.thread-message--outbound .thread-bubble:has(.thread-menu) {
+  /* Make the menu bubble look like a WhatsApp card (white) */
+  background-color: #ffffff;
+  color: #111827;
+}
+
+.thread-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* Top text, e.g. "Karibu Ujani Herbals Chatbot" / "Vitendo" */
+.thread-menu-intro {
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+/* Each section title: "Angalia Bidhaa zetu", "Vitendo", etc */
+.thread-menu-section {
+  margin-top: 4px;
+}
+
+.thread-menu-section-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #6b7280; /* muted grey */
+}
+
+/* The options themselves – look like WhatsApp buttons */
+.thread-menu-options {
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.thread-menu-option {
+  padding: 7px 10px;
+  border-radius: 999px; /* pill style similar to WhatsApp */
+  border: 1px solid #e5e7eb;
+  background-color: #ffffff;
+  font-size: 13px;
+  text-align: left;
+}
+
 
 /* ===== Right panel (orders/settings) ===== */
 
@@ -1317,7 +1400,7 @@ body > div:first-of-type {
 }
 
 .orders-row {
-  cursor: pointer;
+  cursor: default;
 }
 
 .orders-row:hover {
@@ -1422,4 +1505,62 @@ body > div:first-of-type {
   color: var(--text-muted);
   cursor: pointer;
   text-decoration: underline;
+}
+
+/* Clickable order id link */
+.orders-link-button {
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: #2563eb;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.orders-link-button:hover {
+  text-decoration: none;
+}
+
+/* Panel that shows products for the selected order */
+.orders-items-panel {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background-color: #f9fafb;
+  border: 1px solid #e5e7eb;
+}
+
+.orders-items-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.orders-items-empty {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.orders-items-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.orders-items-item {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  padding: 2px 0;
+}
+
+.orders-items-name {
+  flex: 1;
+  margin-right: 8px;
+}
+
+.orders-items-qty {
+  font-weight: 600;
 }

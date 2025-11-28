@@ -28,6 +28,7 @@ export type Product = {
   price: number;
   short?: string;         // short subtitle in product list
   children?: Product[];   // variants (e.g., Pro Max A/B/C)
+  stockQty?: number;      // <-- current stock for DB-backed products
 };
 
 /**
@@ -124,9 +125,10 @@ export async function getProductBySkuAsync(
       name: row.name,
       price: row.price_tzs,
       short: row.short_description,
+      stockQty: row.stock_qty ?? undefined, // <-- DB stock
     };
   }
-  // fallback to static
+  // fallback to static (no stock info, treated as unlimited)
   return PRODUCTS.find((p) => p.sku === sku);
 }
 

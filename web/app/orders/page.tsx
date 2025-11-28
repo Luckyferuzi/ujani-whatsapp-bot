@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { formatPhonePretty } from "@/lib/phone";
 import { toast } from "sonner";
@@ -31,6 +31,12 @@ type ProductOption = {
   price_tzs: number;
 };
 
+type OrderItemRow = {
+  sku: string;
+  name: string;
+  qty: number;
+  unit_price_tzs?: number | null;
+};
 
 
 function formatTzs(value?: number | null): string {
@@ -97,8 +103,6 @@ function getStatusBadge(
 
 export default function OrdersPage() {
   const searchParams = useSearchParams();
-  const router = useRouter();
-
   const initialPhone = searchParams.get("phone") ?? "";
   const [q, setQ] = useState(searchParams.get("q") ?? "");
   const [status, setStatus] = useState(searchParams.get("status") ?? "");
@@ -142,6 +146,12 @@ const [manual, setManual] = useState({
   product_sku: "",
   qty: "1",
 });
+
+  const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null);
+  const [selectedOrderItems, setSelectedOrderItems] = useState<
+    OrderItemRow[] | null
+  >(null);
+
 
 
 const loadOrders = async () => {
@@ -214,11 +224,26 @@ const handleClearFilters = () => {
   void loadOrders();
 };
 
-  const handleOpenConversation = (order: OrderListRow) => {
-    if (!order.phone) return;
-    const params = new URLSearchParams({ phone: order.phone });
-    router.push(`/inbox?${params.toString()}`);
-  };
+const handleViewItems = async (order: OrderListRow) => {
+  // If this order is already selected, clicking again will close the panel
+  if (selectedOrderId === order.id) {
+    setSelectedOrderId(null);
+    setSelectedOrderItems(null);
+    return;
+  }
+
+  try {
+    const data = await api<{ items: OrderItemRow[] }>(
+      `/api/orders/${order.id}/items`
+    );
+    setSelectedOrderId(order.id);
+    setSelectedOrderItems(data.items ?? []);
+  } catch (err: any) {
+    console.error("Failed to load order items", err);
+    toast.error("Failed to load order items");
+  }
+};
+
 
 const handleCancelOrder = async (order: OrderListRow) => {
   try {
@@ -775,13 +800,35 @@ const handleExportCsv = async () => {
 )}
 
           {error && <div className="text-red-600 mb-2">{error}</div>}
+
+          {selectedOrderId != null && selectedOrderItems && (
+            <div className="orders-items-panel">
+              <div className="orders-items-title">
+                Products for order #{selectedOrderId}
+              </div>
+              {selectedOrderItems.length === 0 ? (
+                <div className="orders-items-empty">No items found.</div>
+              ) : (
+                <ul className="orders-items-list">
+                  {selectedOrderItems.map((it) => (
+                    <li key={`${it.sku}-${it.name}`} className="orders-items-item">
+                      <span className="orders-items-name">{it.name}</span>
+                      <span className="orders-items-qty">x{it.qty}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+
           {items.length === 0 && !loading ? (
             <div className="panel-card-body--muted">
               No orders match the current filters.
             </div>
           ) : (
-            
+
             <table className="orders-table">
+
               <thead>
                 <tr>
                   <th>Order</th>
@@ -793,26 +840,29 @@ const handleExportCsv = async () => {
                   <th className="text-right">Actions</th>
                 </tr>
               </thead>
-              <tbody>
-                {items.map((order) => {
-                  const badge = getStatusBadge(order.status);
-                  return (
-                    <tr
-                      key={order.id}
-                      className="orders-row"
-                      onClick={() => handleOpenConversation(order)}
-                    >
-                      <td>#{order.order_code || order.id}</td>
-                      <td>
-                        <div className="orders-customer-name">
-                          {order.customer_name || "—"}
-                        </div>
-                        <div className="orders-customer-phone">
-                          {order.phone
-                            ? formatPhonePretty(order.phone)
-                            : "—"}
-                        </div>
-                      </td>
+<tbody>
+  {items.map((order) => {
+    const badge = getStatusBadge(order.status);
+    return (
+      <tr key={order.id} className="orders-row">
+        <td>
+          <button
+            type="button"
+            className="orders-link-button"
+            onClick={() => handleViewItems(order)}
+          >
+            #{order.order_code || order.id}
+          </button>
+        </td>
+        <td>
+          <div className="orders-customer-name">
+            {order.customer_name || "—"}
+          </div>
+          <div className="orders-customer-phone">
+            {order.phone ? formatPhonePretty(order.phone) : "—"}
+          </div>
+        </td>
+
                       <td>
                         <span className={badge.className}>{badge.label}</span>
                       </td>

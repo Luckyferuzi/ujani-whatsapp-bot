@@ -15,7 +15,9 @@ export interface ProductRow {
   warnings: string;
   is_installment: boolean;
   is_active: boolean;
+  stock_qty?: number; // <-- from products.stock_qty (may be undefined on old rows)
 }
+
 
 export async function listActiveProducts(): Promise<ProductRow[]> {
   const rows = await db<ProductRow>("products")
