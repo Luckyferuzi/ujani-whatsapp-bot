@@ -931,79 +931,81 @@ inboxRoutes.post("/orders/manual", async (req, res) => {
 // Body:
 //   {
 //     status: "pending" | "preparing" | "out_for_delivery" | "delivered" | "cancelled",
+//     delivery_agent_phone?: string // required when status === "out_for_delivery"
+//   }
 inboxRoutes.post("/orders/:id/status", async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) {
     return res.status(400).json({ error: "Invalid order id" });
   }
 
-  const parsed = updateOrderStatusSchema.safeParse(req.body);
-  if (!parsed.success) {
-    return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });
+  const { status: newStatusRaw, delivery_agent_phone } = req.body ?? {};
+  const newStatus =
+    typeof newStatusRaw === "string" ? newStatusRaw.trim() : "";
+
+  if (!newStatus) {
+    return res.status(400).json({ error: "Missing status" });
   }
 
-  const { status: newStatus, delivery_agent_phone } = parsed.data;
-
-  let affectedProductIds: number[] = [];
-
   try {
+    // Fetch current order (to know previous status)
+    const existingOrder = await db("orders")
+      .where({ id })
+      .first<{
+        id: number;
+        status: string | null;
+      }>();
+
+    if (!existingOrder) {
+      return res.status(404).json({ error: "Order not found" });
+    }
+
+    const prevStatus = existingOrder.status || null;
+
+    const isEnteringPreparing =
+      prevStatus !== "preparing" && newStatus === "preparing";
+    const isCancellingFromPreparing =
+      prevStatus === "preparing" && newStatus === "cancelled";
+
     const updatedOrder = await db.transaction(async (trx) => {
-      // Load existing order
-      const existing = await trx("orders").where({ id }).first("*");
-      if (!existing) {
-        throw Object.assign(new Error("Order not found"), { statusCode: 404 });
-      }
-
-      const prevStatus: string | null = existing.status ?? null;
-
-      // Prepare order update
-      const update: any = {
+      const update: Record<string, any> = {
         status: newStatus,
-        updated_at: trx.fn.now(),
+        updated_at: new Date(),
       };
 
-      if (delivery_agent_phone !== undefined) {
-        update.delivery_agent_phone = delivery_agent_phone || null;
+      if (
+        typeof delivery_agent_phone === "string" &&
+        delivery_agent_phone.trim()
+      ) {
+        update.delivery_agent_phone = delivery_agent_phone.trim();
       }
 
+      // 1) Update order row
       await trx("orders").where({ id }).update(update);
 
-      // ===== STOCK ADJUSTMENTS =====
-      //
-      // 1) When transition INTO "preparing" from any other status:
-      //    - Reserve stock (subtract qty from products.stock_qty)
-      //
-      // 2) When transition FROM "preparing" TO "cancelled":
-      //    - Refund stock (add qty back to products.stock_qty)
-      //
-      const isReserveTransition =
-        prevStatus !== "preparing" && newStatus === "preparing";
-      const isRefundTransition =
-        prevStatus === "preparing" && newStatus === "cancelled";
-
-      if (isReserveTransition || isRefundTransition) {
+      // 2) Adjust stock:
+      //    - entering "preparing"  => reserve stock (subtract)
+      //    - cancelling from "preparing" => refund stock (add back)
+      if (isEnteringPreparing || isCancellingFromPreparing) {
         const items = await trx("order_items")
           .where({ order_id: id })
-          .select<{ product_id: number | null; qty: number }[]>(
-            "product_id",
-            "qty"
-          );
+          .select<{
+            product_id: number | null;
+            qty: number;
+          }[]>("product_id", "qty");
 
         if (items.length > 0) {
           const qtyByProduct = new Map<number, number>();
 
           for (const item of items) {
             if (!item.product_id) continue;
+
             const pid = item.product_id;
             const qty = Number(item.qty) || 0;
             if (qty <= 0) continue;
 
-            // sign: -1 when reserving, +1 when refunding
-            const sign = isReserveTransition ? -1 : isRefundTransition ? 1 : 0;
-            if (!sign) continue;
-
-            const existingQty = qtyByProduct.get(pid) ?? 0;
-            qtyByProduct.set(pid, existingQty + sign * qty);
+            const existingQty = qtyByProduct.get(pid) || 0;
+            qtyByProduct.set(pid, existingQty + qty);
           }
 
           const productIds = Array.from(qtyByProduct.keys());
@@ -1011,56 +1013,49 @@ inboxRoutes.post("/orders/:id/status", async (req, res) => {
           if (productIds.length > 0) {
             const productRows = await trx("products")
               .whereIn("id", productIds)
-              .select<{ id: number; stock_qty: number | null }[]>(
-                "id",
-                "stock_qty"
-              );
+              .select<{
+                id: number;
+                stock_qty: number | null;
+              }[]>("id", "stock_qty");
 
             for (const product of productRows) {
               const pid = product.id;
               const currentStock = Number(product.stock_qty ?? 0);
-              const delta = qtyByProduct.get(pid) ?? 0;
-              if (!delta) continue;
+              const deltaQty = qtyByProduct.get(pid) || 0;
 
-              // clamp at >= 0
-              const newStock = Math.max(0, currentStock + delta);
+              // Reserve when entering preparing, refund when cancelling from preparing
+              const sign = isEnteringPreparing ? -1 : 1;
+              const newStock = Math.max(0, currentStock + sign * deltaQty);
 
               await trx("products")
                 .where({ id: pid })
                 .update({ stock_qty: newStock });
             }
-
-            affectedProductIds = productIds;
           }
         }
       }
 
-      // Return fresh order row
       const updated = await trx("orders").where({ id }).first("*");
-      return updated!;
+      return updated;
     });
 
-    // Notify UI about stock changes (Products + Orders pages)
-    if (affectedProductIds.length > 0) {
-      const updatedProducts = await db("products")
-        .whereIn("id", affectedProductIds)
-        .select("*");
-
-      emit("products.updated", { products: updatedProducts });
+    // Let frontends know stock/products changed
+    if (isEnteringPreparing || isCancellingFromPreparing) {
+      emit("products.updated", {
+        reason: "order_status_change",
+        order_id: id,
+      });
     }
 
-    // Also emit order update if your UI listens for it
-    emit("orders.updated", { order: updatedOrder });
-
-    return res.json({ ok: true, order: updatedOrder });
+    return res.json({
+      ok: true,
+      order: updatedOrder,
+    });
   } catch (err: any) {
-    console.error("[orders/:id/status] error", err);
-
-    if (err?.statusCode === 404) {
-      return res.status(404).json({ error: "Order not found" });
-    }
-
-    return res.status(500).json({ error: "Failed to update order status" });
+    console.error("POST /orders/:id/status failed", err);
+    return res.status(500).json({
+      error: err?.message ?? "Failed to update order status",
+    });
   }
 });
 
