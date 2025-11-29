@@ -912,12 +912,20 @@ inboxRoutes.post("/orders/manual", async (req, res) => {
         })),
       });
 
+    // Stock is already reduced in createOrderWithPayment.
+    // Just notify UIs that product stock may have changed.
+    emit("products.updated", {
+      reason: "manual_order_created",
+      order_id: orderId,
+    });
+
     return res.status(201).json({
       ok: true,
       order_id: orderId,
       order_code: orderCode,
       total_tzs: totalTzs,
     });
+
   } catch (err: any) {
     console.error("[POST /api/orders/manual] failed", err);
     return res.status(500).json({
@@ -946,6 +954,7 @@ inboxRoutes.post("/orders/:id/status", async (req, res) => {
   if (!newStatus) {
     return res.status(400).json({ error: "Missing status" });
   }
+    let affectedProductIds: number[] = [];
 
   try {
     // Fetch current order (to know previous status)
@@ -980,13 +989,19 @@ inboxRoutes.post("/orders/:id/status", async (req, res) => {
         update.delivery_agent_phone = delivery_agent_phone.trim();
       }
 
-      // 1) Update order row
+      // 1) Update the order status
       await trx("orders").where({ id }).update(update);
 
-      // 2) Adjust stock:
-      //    - entering "preparing"  => reserve stock (subtract)
-      //    - cancelling from "preparing" => refund stock (add back)
+      // 2) Adjust stock on status transitions:
+      //    - Reserve stock: anything  → "preparing"
+      //    - Refund stock: "preparing" → "cancelled"
+      const isEnteringPreparing =
+        prevStatus !== "preparing" && newStatus === "preparing";
+      const isCancellingFromPreparing =
+        prevStatus === "preparing" && newStatus === "cancelled";
+
       if (isEnteringPreparing || isCancellingFromPreparing) {
+        // Get all items for this order (must have product_id)
         const items = await trx("order_items")
           .where({ order_id: id })
           .select<{
@@ -1004,11 +1019,13 @@ inboxRoutes.post("/orders/:id/status", async (req, res) => {
             const qty = Number(item.qty) || 0;
             if (qty <= 0) continue;
 
-            const existingQty = qtyByProduct.get(pid) || 0;
-            qtyByProduct.set(pid, existingQty + qty);
+            const existing = qtyByProduct.get(pid) || 0;
+            qtyByProduct.set(pid, existing + qty);
           }
 
-          const productIds = Array.from(qtyByProduct.keys());
+          const productIds = Array.from(qtyByProduct.keys());    
+          affectedProductIds = productIds;
+
 
           if (productIds.length > 0) {
             const productRows = await trx("products")
@@ -1021,11 +1038,11 @@ inboxRoutes.post("/orders/:id/status", async (req, res) => {
             for (const product of productRows) {
               const pid = product.id;
               const currentStock = Number(product.stock_qty ?? 0);
-              const deltaQty = qtyByProduct.get(pid) || 0;
+              const delta = qtyByProduct.get(pid) || 0;
 
-              // Reserve when entering preparing, refund when cancelling from preparing
-              const sign = isEnteringPreparing ? -1 : 1;
-              const newStock = Math.max(0, currentStock + sign * deltaQty);
+              const newStock = isEnteringPreparing
+                ? Math.max(0, currentStock - delta) // reserve
+                : currentStock + delta;             // refund
 
               await trx("products")
                 .where({ id: pid })
@@ -1034,6 +1051,7 @@ inboxRoutes.post("/orders/:id/status", async (req, res) => {
           }
         }
       }
+
 
       const updated = await trx("orders").where({ id }).first("*");
       return updated;
@@ -1044,6 +1062,15 @@ inboxRoutes.post("/orders/:id/status", async (req, res) => {
       emit("products.updated", {
         reason: "order_status_change",
         order_id: id,
+      });
+    }
+
+     // Let all admin UIs know products/stock changed
+    if (affectedProductIds.length > 0) {
+      emit("products.updated", {
+        reason: "order_status_change",
+        order_id: id,
+        product_ids: affectedProductIds,
       });
     }
 
@@ -1058,7 +1085,6 @@ inboxRoutes.post("/orders/:id/status", async (req, res) => {
     });
   }
 });
-
 
 // DELETE /api/orders/:id
 // Soft-delete the order (sets deleted_at)

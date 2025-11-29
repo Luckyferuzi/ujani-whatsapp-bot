@@ -1124,6 +1124,12 @@ async function onFlow(user: string, step: FlowStep, m: Incoming, lang: Lang) {
         })),
       });
 
+            emit("products.updated", {
+        reason: "whatsapp_order_created",
+        order_id: orderId,
+      });
+
+
       const codeToShow = orderCode || `UJ-${orderId}`;
       await sendBotText(
         user,
