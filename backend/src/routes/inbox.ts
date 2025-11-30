@@ -1419,31 +1419,58 @@ inboxRoutes.delete("/products/:id", async (req, res) => {
 });
 
 // GET /api/stats/overview
+// GET /api/stats/overview
 inboxRoutes.get("/stats/overview", async (_req: Request, res: Response) => {
   try {
-    // Only completed orders should count as "earnings"
-    const row = await db("orders")
+    // 1) Income from completed orders
+    const orderRow = await db("orders")
       .whereIn("status", ["paid", "delivered"])
       .select(
         db.raw("COUNT(*)::int as order_count"),
         db.raw("COALESCE(SUM(total_tzs), 0)::int as total_revenue"),
         db.raw("COALESCE(SUM(fee_tzs), 0)::int as total_delivery_fees")
       )
+      .first<{
+        order_count: number;
+        total_revenue: number;
+        total_delivery_fees: number;
+      }>();
+
+    const safeOrder = orderRow ?? {
+      order_count: 0,
+      total_revenue: 0,
+      total_delivery_fees: 0,
+    };
+
+    // 2) Real expenses from the expenses table
+    const expenseRow = await db("expenses")
+      .sum<{ total_expenses: number | null }>(
+        "amount_tzs as total_expenses"
+      )
       .first();
 
-    // Fallback in case there are no rows yet
-    res.json(
-      row ?? {
-        order_count: 0,
-        total_revenue: 0,
-        total_delivery_fees: 0,
-      }
-    );
+    const total_expenses =
+      (expenseRow?.total_expenses != null
+        ? Number(expenseRow.total_expenses)
+        : 0) || 0;
+
+    // 3) Approximate profit = revenue - expenses (COGS will come later)
+    const approximate_profit =
+      (safeOrder.total_revenue ?? 0) - total_expenses;
+
+    res.json({
+      order_count: safeOrder.order_count,
+      total_revenue: safeOrder.total_revenue,
+      total_delivery_fees: safeOrder.total_delivery_fees,
+      total_expenses,
+      approximate_profit,
+    });
   } catch (err) {
     console.error("GET /api/stats/overview failed", err);
     res.status(500).json({ error: "failed_to_load_stats" });
   }
 });
+
 
 // GET /api/stats/products
 inboxRoutes.get("/stats/products", async (_req: Request, res: Response) => {
@@ -1467,5 +1494,161 @@ inboxRoutes.get("/stats/products", async (_req: Request, res: Response) => {
   } catch (err) {
     console.error("GET /api/stats/products failed", err);
     res.status(500).json({ error: "failed_to_load_stats" });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Expenses CRUD for admin (to track rent, riders, salaries, etc.)
+// ---------------------------------------------------------------------------
+
+// GET /api/expenses  -> list recent expenses
+inboxRoutes.get("/expenses", async (req: Request, res: Response) => {
+  try {
+    const limitRaw = req.query.limit;
+    const limit = Math.min(
+      200,
+      Math.max(
+        1,
+        Number(
+          typeof limitRaw === "string" ? limitRaw : (limitRaw ?? 50)
+        )
+      )
+    );
+
+    const rows = await db("expenses")
+      .orderBy("incurred_on", "desc")
+      .orderBy("id", "desc")
+      .limit(limit);
+
+    res.json({ items: rows });
+  } catch (err) {
+    console.error("GET /api/expenses failed", err);
+    res.status(500).json({ error: "Failed to load expenses" });
+  }
+});
+
+// POST /api/expenses  -> create new expense
+inboxRoutes.post("/expenses", async (req: Request, res: Response) => {
+  try {
+    const {
+      incurred_on,
+      category,
+      amount_tzs,
+      description,
+    } = req.body ?? {};
+
+    const amount = Number(amount_tzs);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return res
+        .status(400)
+        .json({ error: "Invalid amount_tzs (must be > 0)" });
+    }
+
+    let incurredDate: Date | null = null;
+    if (incurred_on) {
+      const d = new Date(String(incurred_on));
+      if (!Number.isNaN(d.getTime())) {
+        incurredDate = d;
+      }
+    }
+
+    const [inserted] = await db("expenses")
+      .insert({
+        incurred_on: incurredDate ?? new Date(),
+        category: (category ?? "other").toString().slice(0, 50),
+        amount_tzs: Math.round(amount),
+        description:
+          description != null ? String(description).trim() : null,
+      })
+      .returning("*");
+
+    res.json({ expense: inserted });
+  } catch (err) {
+    console.error("POST /api/expenses failed", err);
+    res.status(500).json({ error: "Failed to create expense" });
+  }
+});
+
+// PUT /api/expenses/:id  -> update an expense
+inboxRoutes.put("/expenses/:id", async (req: Request, res: Response) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id) || id <= 0) {
+    return res.status(400).json({ error: "Invalid expense id" });
+  }
+
+  try {
+    const {
+      incurred_on,
+      category,
+      amount_tzs,
+      description,
+    } = req.body ?? {};
+
+    const patch: any = {};
+
+    if (incurred_on !== undefined) {
+      const d = new Date(String(incurred_on));
+      if (!Number.isNaN(d.getTime())) {
+        patch.incurred_on = d;
+      }
+    }
+
+    if (category !== undefined) {
+      patch.category = String(category).slice(0, 50);
+    }
+
+    if (amount_tzs !== undefined) {
+      const amount = Number(amount_tzs);
+      if (!Number.isFinite(amount) || amount <= 0) {
+        return res
+          .status(400)
+          .json({ error: "Invalid amount_tzs (must be > 0)" });
+      }
+      patch.amount_tzs = Math.round(amount);
+    }
+
+    if (description !== undefined) {
+      patch.description =
+        description != null ? String(description).trim() : null;
+    }
+
+    if (Object.keys(patch).length === 0) {
+      return res.status(400).json({ error: "No fields to update" });
+    }
+
+    patch.updated_at = new Date();
+
+    const [updated] = await db("expenses")
+      .where({ id })
+      .update(patch)
+      .returning("*");
+
+    if (!updated) {
+      return res.status(404).json({ error: "Expense not found" });
+    }
+
+    res.json({ expense: updated });
+  } catch (err) {
+    console.error("PUT /api/expenses/:id failed", err);
+    res.status(500).json({ error: "Failed to update expense" });
+  }
+});
+
+// DELETE /api/expenses/:id  -> delete an expense
+inboxRoutes.delete("/expenses/:id", async (req: Request, res: Response) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id) || id <= 0) {
+    return res.status(400).json({ error: "Invalid expense id" });
+  }
+
+  try {
+    const deleted = await db("expenses").where({ id }).del();
+    if (!deleted) {
+      return res.status(404).json({ error: "Expense not found" });
+    }
+    res.status(204).send();
+  } catch (err) {
+    console.error("DELETE /api/expenses/:id failed", err);
+    res.status(500).json({ error: "Failed to delete expense" });
   }
 });
