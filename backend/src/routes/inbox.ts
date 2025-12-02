@@ -934,11 +934,10 @@ inboxRoutes.post("/orders/manual", async (req, res) => {
   }
 });
 
-
 // POST /api/orders/:id/status
 // Body:
 //   {
-//     status: "pending" | "preparing" | "out_for_delivery" | "delivered" | "cancelled",
+//     status: "pending" | "preparing" | "verifying" | "out_for_delivery" | "delivered" | "cancelled",
 //     delivery_agent_phone?: string // required when status === "out_for_delivery"
 //   }
 inboxRoutes.post("/orders/:id/status", async (req, res) => {
@@ -947,14 +946,25 @@ inboxRoutes.post("/orders/:id/status", async (req, res) => {
     return res.status(400).json({ error: "Invalid order id" });
   }
 
-  const { status: newStatusRaw, delivery_agent_phone } = req.body ?? {};
-  const newStatus =
-    typeof newStatusRaw === "string" ? newStatusRaw.trim() : "";
-
-  if (!newStatus) {
-    return res.status(400).json({ error: "Missing status" });
+  // Validate body with zod schema so we only accept known statuses
+  const parsed = updateOrderStatusSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Invalid status payload" });
   }
-    let affectedProductIds: number[] = [];
+
+  const { status: newStatus, delivery_agent_phone } = parsed.data;
+
+  // If going out for delivery, we require a rider phone number
+  if (
+    newStatus === "out_for_delivery" &&
+    (!delivery_agent_phone || !delivery_agent_phone.trim())
+  ) {
+    return res
+      .status(400)
+      .json({ error: "Missing delivery_agent_phone for out_for_delivery" });
+  }
+
+  let affectedProductIds: number[] = [];
 
   try {
     // Fetch current order (to know previous status)
@@ -969,7 +979,7 @@ inboxRoutes.post("/orders/:id/status", async (req, res) => {
       return res.status(404).json({ error: "Order not found" });
     }
 
-    const prevStatus = existingOrder.status || null;
+    const prevStatus = existingOrder.status ?? "pending";
 
     const isEnteringPreparing =
       prevStatus !== "preparing" && newStatus === "preparing";
@@ -989,19 +999,12 @@ inboxRoutes.post("/orders/:id/status", async (req, res) => {
         update.delivery_agent_phone = delivery_agent_phone.trim();
       }
 
-      // 1) Update the order status
+      // 1) Update the order row
       await trx("orders").where({ id }).update(update);
 
-      // 2) Adjust stock on status transitions:
-      //    - Reserve stock: anything  → "preparing"
-      //    - Refund stock: "preparing" → "cancelled"
-      const isEnteringPreparing =
-        prevStatus !== "preparing" && newStatus === "preparing";
-      const isCancellingFromPreparing =
-        prevStatus === "preparing" && newStatus === "cancelled";
-
+      // 2) Adjust stock ONLY when moving into or out of "preparing"
       if (isEnteringPreparing || isCancellingFromPreparing) {
-        // Get all items for this order (must have product_id)
+        // Get all items for this order (must have product_id to adjust stock)
         const items = await trx("order_items")
           .where({ order_id: id })
           .select<{
@@ -1009,82 +1012,147 @@ inboxRoutes.post("/orders/:id/status", async (req, res) => {
             qty: number;
           }[]>("product_id", "qty");
 
-        if (items.length > 0) {
-          const qtyByProduct = new Map<number, number>();
+        const qtyByProduct = new Map<number, number>();
 
-          for (const item of items) {
-            if (!item.product_id) continue;
+        for (const item of items) {
+          if (!item.product_id) continue;
 
-            const pid = item.product_id;
-            const qty = Number(item.qty) || 0;
-            if (qty <= 0) continue;
+          const pid = item.product_id;
+          const qty = Number(item.qty) || 0;
+          if (qty <= 0) continue;
 
-            const existing = qtyByProduct.get(pid) || 0;
-            qtyByProduct.set(pid, existing + qty);
-          }
+          const existing = qtyByProduct.get(pid) || 0;
+          qtyByProduct.set(pid, existing + qty);
+        }
 
-          const productIds = Array.from(qtyByProduct.keys());    
-          affectedProductIds = productIds;
+        const productIds = Array.from(qtyByProduct.keys());
+        affectedProductIds = productIds;
 
+        if (productIds.length > 0) {
+          const productRows = await trx("products")
+            .whereIn("id", productIds)
+            .select<{
+              id: number;
+              stock_qty: number | null;
+            }[]>("id", "stock_qty");
 
-          if (productIds.length > 0) {
-            const productRows = await trx("products")
-              .whereIn("id", productIds)
-              .select<{
-                id: number;
-                stock_qty: number | null;
-              }[]>("id", "stock_qty");
+          for (const product of productRows) {
+            const pid = product.id;
+            const currentStock = Number(product.stock_qty ?? 0);
+            const delta = qtyByProduct.get(pid) || 0;
 
-            for (const product of productRows) {
-              const pid = product.id;
-              const currentStock = Number(product.stock_qty ?? 0);
-              const delta = qtyByProduct.get(pid) || 0;
+            const newStock = isEnteringPreparing
+              ? Math.max(0, currentStock - delta) // reserve
+              : currentStock + delta; // refund
 
-              const newStock = isEnteringPreparing
-                ? Math.max(0, currentStock - delta) // reserve
-                : currentStock + delta;             // refund
-
-              await trx("products")
-                .where({ id: pid })
-                .update({ stock_qty: newStock });
-            }
+            await trx("products")
+              .where({ id: pid })
+              .update({ stock_qty: newStock });
           }
         }
       }
-
 
       const updated = await trx("orders").where({ id }).first("*");
       return updated;
     });
 
-    // Let frontends know stock/products changed
-    if (isEnteringPreparing || isCancellingFromPreparing) {
-      emit("products.updated", {
-        reason: "order_status_change",
-        order_id: id,
-      });
-    }
-
-     // Let all admin UIs know products/stock changed
+    // Notify web clients that products might have changed stock
     if (affectedProductIds.length > 0) {
       emit("products.updated", {
-        reason: "order_status_change",
+        reason: "order_status_changed",
         order_id: id,
         product_ids: affectedProductIds,
       });
     }
 
-    return res.json({
-      ok: true,
-      order: updatedOrder,
-    });
+    // Always emit an order update
+    emit("orders.updated", { order_id: id, status: newStatus });
+
+    // Send WhatsApp message to customer for key status changes
+    if (updatedOrder && updatedOrder.customer_id) {
+      const orderRow = await db("orders as o")
+        .leftJoin("customers as c", "c.id", "o.customer_id")
+        .leftJoin("conversations as v", "v.customer_id", "c.id")
+        .select(
+          "o.id as order_id",
+          "o.order_code",
+          "o.delivery_agent_phone",
+          "c.id as customer_id",
+          "c.wa_id",
+          "c.lang",
+          "c.name as customer_name",
+          "v.id as conversation_id"
+        )
+        .where("o.id", id)
+        .orderBy("v.created_at", "desc")
+        .first();
+
+      if (orderRow && orderRow.wa_id) {
+        const lang: Lang =
+          orderRow.lang === "en" || orderRow.lang === "sw"
+            ? (orderRow.lang as Lang)
+            : "sw";
+
+        let templateKey: string | null = null;
+
+        if (newStatus === "preparing") {
+          templateKey = "order.preparing_message";
+        } else if (newStatus === "out_for_delivery") {
+          templateKey = "order.out_for_delivery_message";
+        } else if (newStatus === "delivered") {
+          templateKey = "order.delivered_message";
+        }
+
+        if (templateKey) {
+          const orderCode =
+            orderRow.order_code || `UJ-${orderRow.order_id}`;
+
+          const msg = t(lang, templateKey, {
+            orderCode,
+            agentPhone:
+              orderRow.delivery_agent_phone ||
+              delivery_agent_phone ||
+              "",
+          });
+
+          try {
+            await sendText(orderRow.wa_id, msg);
+          } catch (err) {
+            console.warn(
+              "Failed to send order status notification:",
+              err
+            );
+          }
+
+          if (orderRow.conversation_id) {
+            const [msgRow] = await db("messages")
+              .insert({
+                conversation_id: orderRow.conversation_id,
+                direction: "out",
+                type: "text",
+                body: msg,
+                status: "sent",
+              })
+              .returning("*");
+
+            emit("message.created", {
+              conversation_id: orderRow.conversation_id,
+              message: msgRow,
+            });
+          }
+        }
+      }
+    }
+
+    return res.json({ ok: true, order: updatedOrder });
   } catch (err: any) {
-    console.error("POST /orders/:id/status failed", err);
+    console.error("[POST /api/orders/:id/status] failed", err);
     return res.status(500).json({
       error: err?.message ?? "Failed to update order status",
     });
   }
 });
+
 
 // DELETE /api/orders/:id
 // Soft-delete the order (sets deleted_at)
