@@ -1419,57 +1419,108 @@ inboxRoutes.delete("/products/:id", async (req, res) => {
 });
 
 // GET /api/stats/overview
+// ------------------------------- STATS --------------------------------------
+
 // GET /api/stats/overview
-inboxRoutes.get("/stats/overview", async (_req: Request, res: Response) => {
+// High–level numbers used on the Stats page
+inboxRoutes.get("/stats/overview", async (req: Request, res: Response) => {
   try {
-    // 1) Income from completed orders
-    const orderRow = await db("orders")
-      .whereIn("status", ["paid", "delivered"])
-      .select(
-        db.raw("COUNT(*)::int as order_count"),
-        db.raw("COALESCE(SUM(total_tzs), 0)::int as total_revenue"),
-        db.raw("COALESCE(SUM(fee_tzs), 0)::int as total_delivery_fees")
+    // Sum of APPROVED incomes
+    const incomeAgg = (await db("incomes")
+      .where("status", "approved")
+      .sum<{ total_revenue: string | number }>(
+        "amount_tzs as total_revenue"
       )
-      .first<{
-        order_count: number;
-        total_revenue: number;
-        total_delivery_fees: number;
-      }>();
+      .first()) as { total_revenue?: string | number } | undefined;
 
-    const safeOrder = orderRow ?? {
-      order_count: 0,
-      total_revenue: 0,
-      total_delivery_fees: 0,
-    };
-
-    // 2) Real expenses from the expenses table
-    const expenseRow = await db("expenses")
-      .sum<{ total_expenses: number | null }>(
+    // Sum of ALL expenses
+    const expenseAgg = (await db("expenses")
+      .sum<{ total_expenses: string | number }>(
         "amount_tzs as total_expenses"
       )
-      .first();
+      .first()) as { total_expenses?: string | number } | undefined;
 
+    // Completed orders = delivered
+    const orderAgg = (await db("orders")
+      .where("status", "delivered")
+      .count<{ order_count: string | number }>("* as order_count")
+      .first()) as { order_count?: string | number } | undefined;
+
+    // Delivery fees from delivered orders
+    const deliveryAgg = (await db("orders")
+      .where("status", "delivered")
+      .sum<{ total_delivery_fees: string | number }>(
+        "fee_tzs as total_delivery_fees"
+      )
+      .first()) as {
+      total_delivery_fees?: string | number;
+    } | undefined;
+
+    const total_revenue =
+      Number(incomeAgg?.total_revenue ?? 0) || 0;
     const total_expenses =
-      (expenseRow?.total_expenses != null
-        ? Number(expenseRow.total_expenses)
-        : 0) || 0;
+      Number(expenseAgg?.total_expenses ?? 0) || 0;
+    const order_count =
+      Number(orderAgg?.order_count ?? 0) || 0;
+    const total_delivery_fees =
+      Number(deliveryAgg?.total_delivery_fees ?? 0) || 0;
 
-    // 3) Approximate profit = revenue - expenses (COGS will come later)
-    const approximate_profit =
-      (safeOrder.total_revenue ?? 0) - total_expenses;
+    const approximate_profit = total_revenue - total_expenses;
 
     res.json({
-      order_count: safeOrder.order_count,
-      total_revenue: safeOrder.total_revenue,
-      total_delivery_fees: safeOrder.total_delivery_fees,
+      order_count,
+      total_revenue,
+      total_delivery_fees,
       total_expenses,
       approximate_profit,
     });
   } catch (err) {
     console.error("GET /api/stats/overview failed", err);
-    res.status(500).json({ error: "failed_to_load_stats" });
+    res.status(500).json({ error: "Failed to load overview stats" });
   }
 });
+
+// GET /api/stats/daily-incomes
+// Used for the "Profit Trend" chart – sums APPROVED incomes per day
+inboxRoutes.get(
+  "/stats/daily-incomes",
+  async (req: Request, res: Response) => {
+    try {
+      const raw = req.query.days;
+      let days = Number(
+        typeof raw === "string" ? raw : raw ?? 7
+      );
+      if (!Number.isFinite(days) || days <= 0) days = 7;
+      if (days > 60) days = 60;
+
+      const since = new Date();
+      since.setDate(since.getDate() - (days - 1));
+      const sinceDate = since.toISOString().slice(0, 10);
+
+      const rows = await db("incomes")
+        .where("status", "approved")
+        .andWhere("recorded_at", ">=", sinceDate)
+        .select(
+          db.raw("DATE(recorded_at) as day"),
+          db.raw("SUM(amount_tzs) as total_tzs")
+        )
+        .groupBy("day")
+        .orderBy("day", "asc");
+
+      const points = (rows as any[]).map((r) => ({
+        date: r.day as string,
+        total_tzs: Number(r.total_tzs ?? 0) || 0,
+      }));
+
+      res.json({ points });
+    } catch (err) {
+      console.error("GET /api/stats/daily-incomes failed", err);
+      res
+        .status(500)
+        .json({ error: "Failed to load daily incomes" });
+    }
+  }
+);
 
 
 // GET /api/stats/products
@@ -1841,3 +1892,4 @@ inboxRoutes.delete("/incomes/:id", async (req: Request, res: Response) => {
     res.status(500).json({ error: "Failed to delete income" });
   }
 });
+
