@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback,useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
+import { socket } from "@/lib/socket";
 import { formatPhonePretty } from "@/lib/phone";
 import { toast } from "sonner";
 
@@ -29,6 +30,12 @@ type ProductOption = {
   sku: string;
   name: string;
   price_tzs: number;
+  stock_qty: number | null;
+};
+
+type ManualOrderItem = {
+  product_sku: string;
+  qty: string;
 };
 
 type OrderItemRow = {
@@ -55,7 +62,6 @@ function formatDateTime(value: string): string {
     minute: "2-digit",
   });
 }
-
 function getStatusBadge(
   status: string | null
 ): { label: string; className: string } {
@@ -91,11 +97,6 @@ function getStatusBadge(
         label: "Cancelled",
         className: "orders-status-badge orders-status--cancelled",
       };
-    case "failed":
-      return {
-        label: "Failed",
-        className: "orders-status-badge orders-status--failed",
-      };
     default:
       return { label: s, className: "orders-status-badge" };
   }
@@ -129,11 +130,16 @@ const [editForm, setEditForm] = useState({
   phone: "",
   status: "",
   delivery_mode: "",
+  region: "",
+  km: "",
+  fee_tzs: "",
   total_tzs: "",
   delivery_agent_phone: "",
 });
+const [editSaving, setEditSaving] = useState(false);
 
 const [products, setProducts] = useState<ProductOption[]>([]);
+
 
 const [showManualForm, setShowManualForm] = useState(false);
 
@@ -143,15 +149,112 @@ const [manual, setManual] = useState({
   location_type: "within" as "within" | "outside",
   region: "",
   delivery_mode: "pickup" as "pickup" | "delivery",
-  product_sku: "",
-  qty: "1",
 });
+
+const [manualItems, setManualItems] = useState<ManualOrderItem[]>([
+  { product_sku: "", qty: "1" },
+]);
+
+const [manualSaving, setManualSaving] = useState(false);
+const [manualError, setManualError] = useState<string | null>(null);
+
 
   const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null);
   const [selectedOrderItems, setSelectedOrderItems] = useState<
     OrderItemRow[] | null
   >(null);
 
+const handleSaveManualOrder = async (e: React.FormEvent) => {
+  e.preventDefault();
+  setManualSaving(true);
+  setManualError(null);
+
+  try {
+    const name = manual.customer_name.trim();
+    const phone = manual.phone.trim();
+    const regionOrAddress = manual.region.trim();
+
+    if (!name || !phone) {
+      const msg = "Jina la mteja na namba ya simu ni lazima.";
+      setManualSaving(false);
+      setManualError(msg);
+      toast.error("Taarifa hazijakamilika", { description: msg });
+      return;
+    }
+
+    const cleanedItems = manualItems
+      .map((row) => ({
+        sku: row.product_sku.trim(),
+        qty: Number(row.qty || "0"),
+      }))
+      .filter((it) => it.sku && it.qty > 0);
+
+    if (!cleanedItems.length) {
+      const msg = "Ongeza angalau bidhaa moja na ujaze kiasi.";
+      setManualSaving(false);
+      setManualError(msg);
+      toast.error("Hakuna bidhaa kwenye order", { description: msg });
+      return;
+    }
+
+    // Validate stock (if we know it)
+    for (const item of cleanedItems) {
+      const product = products.find((p) => p.sku === item.sku);
+      if (!product) continue;
+
+      const stock = product.stock_qty ?? null;
+      if (typeof stock === "number" && item.qty > stock) {
+        const msg = `Kiasi cha "${product.name}" kinazidi stock (${stock}).`;
+        setManualSaving(false);
+        setManualError(msg);
+        toast.error("Stock haitoshi", { description: msg });
+        return;
+      }
+    }
+
+    const payload = {
+      customer_name: name,
+      phone,
+      location_type: manual.location_type,
+      region: regionOrAddress,
+      delivery_mode:
+        manual.location_type === "outside"
+          ? "delivery"
+          : manual.delivery_mode,
+      items: cleanedItems,
+    };
+
+    await api("/api/orders/manual", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    toast.success("Manual order imeundwa kwa mafanikio.");
+
+    // Reset
+    setManual({
+      customer_name: "",
+      phone: "",
+      location_type: "within",
+      region: "",
+      delivery_mode: "pickup",
+    });
+    setManualItems([{ product_sku: "", qty: "1" }]);
+    setManualSaving(false);
+    setShowManualForm(false);
+    void loadOrders();
+  } catch (err: any) {
+    console.error("Failed to create manual order", err);
+    const msg =
+      err?.message ?? "Imeshindikana kuunda order. Jaribu tena.";
+    setManualSaving(false);
+    setManualError(msg);
+    toast.error("Imeshindikana kuunda order.", {
+      description: "Tafadhali jaribu tena muda mfupi baadaye.",
+    });
+  }
+};
 
 
 const loadOrders = async () => {
@@ -187,24 +290,55 @@ const loadOrders = async () => {
     void loadOrders();
   }, [page]);
 
+  // Load products for manual order form and keep in sync with stock changes
   useEffect(() => {
-  void (async () => {
-    try {
-      const data = await api<{ items: ProductOption[] }>("/api/products");
-      setProducts(data.items ?? []);
-    } catch (err) {
-      console.error("Failed to load products", err);
+    let isMounted = true;
+
+    const loadProducts = async () => {
+      try {
+        const data = await api<{ items: ProductOption[] }>("/api/products");
+        if (isMounted) {
+          setProducts(data.items ?? []);
+        }
+      } catch (err) {
+        console.error("Failed to load products", err);
+      }
+    };
+
+    // initial load
+    void loadProducts();
+
+    // keep in sync with backend stock/product changes
+    const s = socket();
+    if (s) {
+      const handler = () => {
+        void loadProducts();
+      };
+      s.on("products.updated", handler);
+
+      return () => {
+        isMounted = false;
+        s.off("products.updated", handler);
+      };
     }
-  })();
-}, []);
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
 
-const selectedProduct = products.find((p) => p.sku === manual.product_sku);
-const manualQty = Number(manual.qty) || 1;
-const manualTotal =
-  selectedProduct && manualQty > 0
-    ? selectedProduct.price_tzs * manualQty
-    : 0;
+
+const manualItemsWithProducts = manualItems.map((it) => {
+  const product = products.find((p) => p.sku === it.product_sku) ?? null;
+  const qty = Number(it.qty || "0") || 0;
+  return { ...it, product, qty };
+});
+
+const manualTotal = manualItemsWithProducts.reduce((sum, item) => {
+  if (!item.product || item.qty <= 0) return sum;
+  return sum + item.product.price_tzs * item.qty;
+}, 0);
 
 
 const handleSubmitFilters = (e: React.FormEvent) => {
@@ -244,12 +378,16 @@ const handleViewItems = async (order: OrderListRow) => {
   }
 };
 
-
 const handleCancelOrder = async (order: OrderListRow) => {
+  if (!window.confirm("Cancel this order?")) return;
+
   try {
-    await api(`/api/orders/${order.id}/cancel`, {
+    await api(`/api/orders/${order.id}/status`, {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "cancelled" }),
     });
+
     void loadOrders();
   } catch (err: any) {
     console.error("Failed to cancel order", err);
@@ -337,6 +475,17 @@ const handleExportCsv = async () => {
     alert("Failed to export. Please try again.");
   }
 };
+
+const handleAddManualItemRow = () => {
+  setManualItems((rows) => [...rows, { product_sku: "", qty: "1" }]);
+};
+
+const handleRemoveManualItemRow = (index: number) => {
+  setManualItems((rows) =>
+    rows.length <= 1 ? rows : rows.filter((_, i) => i !== index)
+  );
+};
+
 
   return (
     <div className="flex flex-col h-full p-4 gap-4 overflow-y-auto">
@@ -457,309 +606,332 @@ const handleExportCsv = async () => {
           </form>
         )}
 
-        {showManualForm && (
-  <div className="panel-card mb-4">
-    <div className="panel-card-title">Manual order</div>
-    <div className="panel-card-body grid md:grid-cols-3 gap-3">
-      {/* Customer name */}
+{showManualForm && (
+  <div className="orders-form-card">
+    <div className="orders-form-header">
       <div>
-        <label className="block text-xs font-semibold mb-1">
-          Customer name
-        </label>
-        <input
-          className="history-edit-input"
-          value={manual.customer_name}
-          onChange={(e) =>
-            setManual((m) => ({ ...m, customer_name: e.target.value }))
-          }
-        />
+        <div className="orders-form-title">New manual order</div>
+        <div className="orders-form-subtitle">
+          Unda order ya mteja aliye kupigia simu au aliye ofisini.
+        </div>
       </div>
-
-      {/* Phone */}
-      <div>
-        <label className="block text-xs font-semibold mb-1">
-          Phone
-        </label>
-        <input
-          className="history-edit-input"
-          value={manual.phone}
-          onChange={(e) =>
-            setManual((m) => ({ ...m, phone: e.target.value }))
-          }
-        />
-      </div>
-
-      {/* Location type */}
-      <div>
-        <label className="block text-xs font-semibold mb-1">
-          Location
-        </label>
-        <select
-          className="history-edit-input"
-          value={manual.location_type}
-          onChange={(e) =>
-            setManual((m) => ({
-              ...m,
-              location_type: e.target.value as "within" | "outside",
-            }))
-          }
+      <div className="orders-form-header-right">
+        <span className="orders-form-badge">MANUAL</span>
+        <button
+          type="button"
+          className="orders-form-close-btn"
+          onClick={() => {
+            setShowManualForm(false);
+            setManualError(null);
+          }}
         >
-          <option value="within">Within region</option>
-          <option value="outside">Outside region</option>
-        </select>
+          ✕
+        </button>
+      </div>
+    </div>
+
+    <form className="orders-form" onSubmit={handleSaveManualOrder}>
+      {manualError && (
+        <div className="orders-form-error">{manualError}</div>
+      )}
+
+      {/* Customer details */}
+      <div className="orders-form-grid">
+        <div className="orders-field">
+          <label className="orders-label">Customer name</label>
+          <input
+            className="orders-input"
+            value={manual.customer_name}
+            onChange={(e) =>
+              setManual((m) => ({ ...m, customer_name: e.target.value }))
+            }
+            placeholder="Mfano: Asha Mohamed"
+            required
+          />
+        </div>
+
+        <div className="orders-field">
+          <label className="orders-label">Phone</label>
+          <input
+            className="orders-input"
+            value={manual.phone}
+            onChange={(e) =>
+              setManual((m) => ({ ...m, phone: e.target.value }))
+            }
+            placeholder="Mfano: 07XXXXXXXX"
+            required
+          />
+        </div>
       </div>
 
-      {/* Region / place name */}
-      <div>
-        <label className="block text-xs font-semibold mb-1">
-          Place / region name
-        </label>
-        <input
-          className="history-edit-input"
-          placeholder={
-            manual.location_type === "within"
-              ? "Eg. Mbezi Beach"
-              : "Eg. Arusha"
-          }
-          value={manual.region}
-          onChange={(e) =>
-            setManual((m) => ({ ...m, region: e.target.value }))
-          }
-        />
-      </div>
-
-      {/* Delivery mode (only when within region) */}
-      {manual.location_type === "within" && (
-        <div>
-          <label className="block text-xs font-semibold mb-1">
-            Delivery mode
-          </label>
+      {/* Location / address */}
+      <div className="orders-form-grid">
+        <div className="orders-field">
+          <label className="orders-label">Location type</label>
           <select
-            className="history-edit-input"
-            value={manual.delivery_mode}
+            className="orders-input"
+            value={manual.location_type}
             onChange={(e) =>
               setManual((m) => ({
                 ...m,
-                delivery_mode: e.target.value as "pickup" | "delivery",
+                location_type: e.target.value as "within" | "outside",
               }))
             }
           >
-            <option value="pickup">Pickup</option>
-            <option value="delivery">Delivery</option>
+            <option value="within">Within Dar es Salaam</option>
+            <option value="outside">Outside region</option>
           </select>
+          <p className="orders-help">
+            Chagua kama mteja yupo ndani ya Dar au nje ya mkoa.
+          </p>
         </div>
-      )}
 
-      {/* Product */}
-      <div>
-        <label className="block text-xs font-semibold mb-1">Product</label>
-        <select
-          className="history-edit-input"
-          value={manual.product_sku}
-          onChange={(e) =>
-            setManual((m) => ({ ...m, product_sku: e.target.value }))
-          }
-        >
-          <option value="">Select product…</option>
-          {products.map((p) => (
-            <option key={p.id} value={p.sku}>
-              {p.name} — {p.price_tzs.toLocaleString("sw-TZ")} TZS
-            </option>
-          ))}
-        </select>
+        <div className="orders-field">
+          <label className="orders-label">
+            {manual.location_type === "within"
+              ? "Address"
+              : "Region / Area"}
+          </label>
+          <input
+            className="orders-input"
+            value={manual.region}
+            onChange={(e) =>
+              setManual((m) => ({ ...m, region: e.target.value }))
+            }
+            placeholder={
+              manual.location_type === "within"
+                ? "Mfano: Mbagala, Kilungule"
+                : "Mfano: Morogoro, Dodoma..."
+            }
+          />
+          <p className="orders-help">
+            {manual.location_type === "within"
+              ? "Andika anuani ya mteja ndani ya Dar es Salaam."
+              : "Andika mkoa / eneo la mteja kama yupo nje ya Dar."}
+          </p>
+        </div>
+
+        {manual.location_type === "within" && (
+          <div className="orders-field">
+            <label className="orders-label">Delivery mode</label>
+            <select
+              className="orders-input"
+              value={manual.delivery_mode}
+              onChange={(e) =>
+                setManual((m) => ({
+                  ...m,
+                  delivery_mode: e.target.value as "pickup" | "delivery",
+                }))
+              }
+            >
+              <option value="delivery">Delivery</option>
+              <option value="pickup">Pickup</option>
+            </select>
+            <p className="orders-help">
+              Kama ni ndani ya Dar, chagua kama ni kufikishiwa au kuchukua.
+            </p>
+          </div>
+        )}
       </div>
 
-      {/* Quantity */}
-      <div>
-        <label className="block text-xs font-semibold mb-1">Quantity</label>
-        <input
-          type="number"
-          min={1}
-          className="history-edit-input"
-          value={manual.qty}
-          onChange={(e) =>
-            setManual((m) => ({ ...m, qty: e.target.value }))
-          }
-        />
-      </div>
+      {/* Products list */}
+      <div className="orders-section">
+        <div className="orders-section-header">
+          <div>
+            <div className="orders-section-title">
+              Products in this order
+            </div>
+            <div className="orders-section-subtitle">
+              Ongeza bidhaa moja au zaidi kwenye order hii.
+            </div>
+          </div>
+          <button
+            type="button"
+            className="orders-secondary-btn orders-secondary-btn--sm"
+            onClick={() =>
+              setManualItems((rows) => [
+                ...rows,
+                { product_sku: "", qty: "1" },
+              ])
+            }
+          >
+            + Add product
+          </button>
+        </div>
 
-      {/* Total preview */}
-      <div className="flex flex-col justify-end">
-        <div className="text-xs text-gray-500 mb-1">Calculated total</div>
-        <div className="text-lg font-semibold">
-          {manualTotal > 0
-            ? `${manualTotal.toLocaleString("sw-TZ")} TZS`
-            : "—"}
+        <div className="orders-items-stack">
+          {manualItems.map((row, index) => {
+            const product =
+              products.find((p) => p.sku === row.product_sku) ?? null;
+            const stock = product?.stock_qty ?? null;
+            const qtyNum = Number(row.qty || "0") || 0;
+
+            return (
+              <div key={index} className="orders-item-row">
+                <div className="orders-field orders-field--grow">
+                  <label className="orders-label">Product</label>
+                  <select
+                    className="orders-input"
+                    value={row.product_sku}
+                    onChange={(e) =>
+                      setManualItems((rows) =>
+                        rows.map((it, i) =>
+                          i === index
+                            ? { ...it, product_sku: e.target.value }
+                            : it
+                        )
+                      )
+                    }
+                  >
+                    <option value="">Select product…</option>
+                    {products.map((p) => (
+                      <option key={p.id} value={p.sku}>
+                        {p.name} —{" "}
+                        {p.price_tzs.toLocaleString("sw-TZ")} TZS
+                        {typeof p.stock_qty === "number"
+                          ? ` (stock: ${p.stock_qty})`
+                          : ""}
+                      </option>
+                    ))}
+                  </select>
+                  {product && (
+                    <div className="orders-help">
+                      {typeof stock === "number"
+                        ? `Stock available: ${stock}`
+                        : "No stock information for this product."}
+                    </div>
+                  )}
+                </div>
+
+                <div className="orders-field orders-field--qty">
+                  <label className="orders-label">Qty</label>
+                  <input
+                    type="number"
+                    min={1}
+                    className="orders-input"
+                    value={row.qty}
+                    onChange={(e) =>
+                      setManualItems((rows) =>
+                        rows.map((it, i) =>
+                          i === index
+                            ? {
+                                ...it,
+                                qty: e.target.value.replace(/[^\d]/g, ""),
+                              }
+                            : it
+                        )
+                      )
+                    }
+                  />
+                  {product &&
+                    typeof stock === "number" &&
+                    qtyNum > stock && (
+                      <div className="orders-help orders-help--error">
+                        Quantity exceeds available stock!
+                      </div>
+                    )}
+                </div>
+
+                <div className="orders-item-actions">
+                  {manualItems.length > 1 && (
+                    <button
+                      type="button"
+                      className="orders-secondary-btn orders-secondary-btn--danger orders-secondary-btn--icon"
+                      onClick={() =>
+                        setManualItems((rows) =>
+                          rows.filter((_, i) => i !== index)
+                        )
+                      }
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
-    </div>
 
-    <div className="panel-card-footer flex justify-end">
-      <button
-        type="button"
-        className="btn btn-sm btn-success"
-        onClick={async () => {
-          try {
-            if (!manual.customer_name || !manual.phone) {
-              toast.error("Please enter name and phone");
-              return;
-            }
-            if (!manual.product_sku) {
-              toast.error("Please select a product");
-              return;
-            }
-
-            await api("/api/orders/manual", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                customer_name: manual.customer_name,
-                phone: manual.phone,
-                location_type: manual.location_type,
-                region: manual.region,
-                delivery_mode:
-                  manual.location_type === "outside"
-                    ? "delivery"
-                    : manual.delivery_mode,
-                items: [
-                  {
-                    sku: manual.product_sku,
-                    qty: Number(manual.qty || "1"),
-                  },
-                ],
-              }),
-            });
-
-            toast.success("Manual order created");
-            setManual({
-              customer_name: "",
-              phone: "",
-              location_type: "within",
-              region: "",
-              delivery_mode: "pickup",
-              product_sku: "",
-              qty: "1",
-            });
-            setShowManualForm(false);
-            void loadOrders();
-          } catch (err) {
-            console.error("Failed to create manual order", err);
-            toast.error("Failed to create manual order");
-          }
-        }}
-      >
-        Save manual order
-      </button>
-    </div>
+      {/* Total + footer */}
+      <div className="orders-form-footer">
+        <div className="orders-total-block">
+          <div className="orders-total-label">Calculated total</div>
+          <div className="orders-total-value">
+            {manualTotal > 0
+              ? `${manualTotal.toLocaleString("sw-TZ")} TZS`
+              : "—"}
+          </div>
+        </div>
+        <div className="orders-form-buttons">
+          <button
+            type="button"
+            className="orders-secondary-btn"
+            onClick={() => {
+              setShowManualForm(false);
+              setManualError(null);
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            className="orders-primary-btn"
+            disabled={manualSaving}
+          >
+            {manualSaving ? "Saving..." : "Save manual order"}
+          </button>
+        </div>
+      </div>
+    </form>
   </div>
 )}
 
 
         {/* Orders table */}
         <div className="panel-card-body flex-1 overflow-auto text-xs">
-            {editingOrder && (
-  <div className="mb-4 p-3 border rounded bg-ui-subtle">
-    <h3 className="font-semibold mb-2">Edit order #{editingOrder.id}</h3>
-
-    <div className="grid md:grid-cols-3 gap-3">
-      {/* Name */}
+{editingOrder && (
+  <div className="orders-form-card orders-form-card--edit">
+    <div className="orders-form-header">
       <div>
-        <label className="block text-xs font-semibold mb-1">Name</label>
-        <input
-          className="history-edit-input"
-          value={editForm.customer_name}
-          onChange={(e) =>
-            setEditForm((f) => ({ ...f, customer_name: e.target.value }))
-          }
-        />
+        <div className="orders-form-title">
+          Edit order #{editingOrder.order_code || editingOrder.id}
+        </div>
+        <div className="orders-form-subtitle">
+          Update customer details, totals and delivery info for this order.
+        </div>
       </div>
-
-      {/* Phone */}
-      <div>
-        <label className="block text-xs font-semibold mb-1">Phone</label>
-        <input
-          className="history-edit-input"
-          value={editForm.phone}
-          onChange={(e) =>
-            setEditForm((f) => ({ ...f, phone: e.target.value }))
-          }
-        />
-      </div>
-
-      {/* Status */}
-      <div>
-        <label className="block text-xs font-semibold mb-1">Status</label>
-        <select
-          className="history-edit-input"
-          value={editForm.status}
-          onChange={(e) =>
-            setEditForm((f) => ({ ...f, status: e.target.value }))
-          }
+      <div className="orders-form-header-right">
+        <span className="orders-form-badge">
+          {getStatusBadge(editingOrder.status || "unknown").label}
+        </span>
+        <button
+          type="button"
+          className="orders-form-close-btn"
+          onClick={() => setEditingOrder(null)}
         >
-          <option value="pending">Pending</option>
-          <option value="preparing">Preparing</option>
-          <option value="verifying">Verifying</option>
-          <option value="out_for_delivery">Out for delivery</option>
-          <option value="delivered">Delivered</option>
-          <option value="cancelled">Cancelled</option>
-          <option value="failed">Failed</option>
-        </select>
-      </div>
-
-      {/* Mode */}
-      <div>
-        <label className="block text-xs font-semibold mb-1">Mode</label>
-        <select
-          className="history-edit-input"
-          value={editForm.delivery_mode}
-          onChange={(e) =>
-            setEditForm((f) => ({ ...f, delivery_mode: e.target.value }))
-          }
-        >
-          <option value="pickup">Pickup</option>
-          <option value="delivery">Delivery</option>
-        </select>
-      </div>
-
-      {/* Total */}
-      <div>
-        <label className="block text-xs font-semibold mb-1">Total (TZS)</label>
-        <input
-          type="number"
-          className="history-edit-input"
-          value={editForm.total_tzs}
-          onChange={(e) =>
-            setEditForm((f) => ({ ...f, total_tzs: e.target.value }))
-          }
-        />
-      </div>
-
-      {/* Rider phone for out_for_delivery */}
-      <div>
-        <label className="block text-xs font-semibold mb-1">
-          Rider phone (if out_for_delivery)
-        </label>
-        <input
-          className="history-edit-input"
-          value={editForm.delivery_agent_phone}
-          onChange={(e) =>
-            setEditForm((f) => ({
-              ...f,
-              delivery_agent_phone: e.target.value,
-            }))
-          }
-        />
+          ×
+        </button>
       </div>
     </div>
 
-    <div className="mt-3 flex gap-2">
-      <button
-        type="button"
-        className="btn btn-sm"
-        onClick={async () => {
-          if (!editingOrder) return;
+    <form
+      className="orders-form"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        if (!editingOrder) return;
 
-          // 1) basic fields
+        if (
+          editForm.status === "out_for_delivery" &&
+          !editForm.delivery_agent_phone.trim()
+        ) {
+          toast.error("Rider phone is required when status is out_for_delivery.");
+          return;
+        }
+
+        setEditSaving(true);
+        try {
+          // 1) basic fields + delivery info
           await api(`/api/orders/${editingOrder.id}`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
@@ -767,6 +939,9 @@ const handleExportCsv = async () => {
               customer_name: editForm.customer_name,
               phone: editForm.phone,
               delivery_mode: editForm.delivery_mode,
+              region: editForm.region || undefined,
+              km: editForm.km ? Number(editForm.km) : undefined,
+              fee_tzs: editForm.fee_tzs ? Number(editForm.fee_tzs) : undefined,
               total_tzs: Number(editForm.total_tzs || 0),
             }),
           });
@@ -782,20 +957,206 @@ const handleExportCsv = async () => {
             }),
           });
 
+          toast.success("Order updated.");
           setEditingOrder(null);
           void loadOrders();
-        }}
-      >
-        Save
-      </button>
-      <button
-        type="button"
-        className="btn btn-sm btn-secondary"
-        onClick={() => setEditingOrder(null)}
-      >
-        Cancel
-      </button>
-    </div>
+        } catch (err: any) {
+          console.error(err);
+          toast.error("Failed to update order", {
+            description:
+              (err as any)?.message ??
+              "Tafadhali jaribu tena muda mfupi baadaye.",
+          });
+        } finally {
+          setEditSaving(false);
+        }
+      }}
+    >
+      <div className="orders-form-grid">
+        {/* Customer name */}
+        <div className="orders-field">
+          <label className="orders-label">Customer name</label>
+          <input
+            className="orders-input"
+            value={editForm.customer_name}
+            onChange={(e) =>
+              setEditForm((f) => ({ ...f, customer_name: e.target.value }))
+            }
+          />
+          <p className="orders-help">
+            Jina la mteja litakalotumika kwenye order na risiti.
+          </p>
+        </div>
+
+        {/* Phone */}
+        <div className="orders-field">
+          <label className="orders-label">Phone</label>
+          <input
+            className="orders-input"
+            value={editForm.phone}
+            onChange={(e) =>
+              setEditForm((f) => ({ ...f, phone: e.target.value }))
+            }
+          />
+          <p className="orders-help">
+            Namba ya simu ya mawasiliano kwa huyu mteja.
+          </p>
+        </div>
+
+        {/* Status */}
+        <div className="orders-field">
+          <label className="orders-label">Status</label>
+          <select
+            className="orders-input"
+            value={editForm.status}
+            onChange={(e) =>
+              setEditForm((f) => ({ ...f, status: e.target.value }))
+            }
+          >
+            <option value="pending">Pending</option>
+            <option value="preparing">Preparing</option>
+            <option value="verifying">Verifying</option>
+            <option value="out_for_delivery">Out for delivery</option>
+            <option value="delivered">Delivered</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+          <p className="orders-help">
+            Hii ina-control hatua ambayo order imefikia kwa sasa.
+          </p>
+        </div>
+
+        {/* Mode */}
+        <div className="orders-field">
+          <label className="orders-label">Mode</label>
+          <select
+            className="orders-input"
+            value={editForm.delivery_mode}
+            onChange={(e) =>
+              setEditForm((f) => ({ ...f, delivery_mode: e.target.value }))
+            }
+          >
+            <option value="pickup">Pickup</option>
+            <option value="delivery">Delivery</option>
+          </select>
+          <p className="orders-help">
+            Chagua kama order inachukuliwa dukani au inapelekwa kwa mteja.
+          </p>
+        </div>
+
+        {/* Region / address */}
+        <div className="orders-field">
+          <label className="orders-label">
+            {editForm.delivery_mode === "delivery"
+              ? "Delivery region / address"
+              : "Region / notes"}
+          </label>
+          <input
+            className="orders-input"
+            value={editForm.region}
+            onChange={(e) =>
+              setEditForm((f) => ({ ...f, region: e.target.value }))
+            }
+            placeholder={
+              editForm.delivery_mode === "delivery"
+                ? "Mfano: Keko, Kigamboni, Mbagala..."
+                : "Mfano: Kigamboni, Keko (hiari)"
+            }
+          />
+          <p className="orders-help">
+            Maelezo mafupi ya eneo la mteja au maelezo ya ziada ya order.
+          </p>
+        </div>
+
+        {/* Distance & fee – only relevant for delivery */}
+        {editForm.delivery_mode === "delivery" && (
+          <>
+            <div className="orders-field">
+              <label className="orders-label">Distance (km)</label>
+              <input
+                type="number"
+                className="orders-input"
+                value={editForm.km}
+                onChange={(e) =>
+                  setEditForm((f) => ({ ...f, km: e.target.value }))
+                }
+              />
+              <p className="orders-help">
+                Umbali wa makadirio kutoka kituo hadi kwa mteja.
+              </p>
+            </div>
+
+            <div className="orders-field">
+              <label className="orders-label">Delivery fee (TZS)</label>
+              <input
+                type="number"
+                className="orders-input"
+                value={editForm.fee_tzs}
+                onChange={(e) =>
+                  setEditForm((f) => ({ ...f, fee_tzs: e.target.value }))
+                }
+              />
+              <p className="orders-help">
+                Gharama ya delivery (bila kujumuisha products).
+              </p>
+            </div>
+          </>
+        )}
+
+        {/* Total */}
+        <div className="orders-field">
+          <label className="orders-label">Total (TZS)</label>
+          <input
+            type="number"
+            className="orders-input"
+            value={editForm.total_tzs}
+            onChange={(e) =>
+              setEditForm((f) => ({ ...f, total_tzs: e.target.value }))
+            }
+          />
+          <p className="orders-help">
+            Jumla yote ya order (products + delivery kama ipo).
+          </p>
+        </div>
+
+        {/* Rider phone */}
+        <div className="orders-field">
+          <label className="orders-label">
+            Rider phone (if out_for_delivery)
+          </label>
+          <input
+            className="orders-input"
+            value={editForm.delivery_agent_phone}
+            onChange={(e) =>
+              setEditForm((f) => ({
+                ...f,
+                delivery_agent_phone: e.target.value,
+              }))
+            }
+          />
+          <p className="orders-help">
+            Weka namba ya rider endapo status ni out_for_delivery.
+          </p>
+        </div>
+      </div>
+
+      <div className="orders-form-footer">
+        <button
+          type="button"
+          className="orders-secondary-btn"
+          onClick={() => setEditingOrder(null)}
+          disabled={editSaving}
+        >
+          Cancel
+        </button>
+        <button
+          type="submit"
+          className="orders-primary-btn"
+          disabled={editSaving}
+        >
+          {editSaving ? "Saving..." : "Save changes"}
+        </button>
+      </div>
+    </form>
   </div>
 )}
 
@@ -883,15 +1244,19 @@ const handleExportCsv = async () => {
   className="orders-action-button"
   onClick={(e) => {
     e.stopPropagation();
-    setEditingOrder(order);
-    setEditForm({
-      customer_name: order.customer_name ?? "",
-      phone: order.phone ?? "",
-      status: order.status ?? "pending",
-      delivery_mode: order.delivery_mode ?? "pickup",
-      total_tzs: String(order.total_tzs ?? ""),
-      delivery_agent_phone: order.delivery_agent_phone ?? "",
-    });
+setEditingOrder(order);
+setEditForm({
+  customer_name: order.customer_name ?? "",
+  phone: order.phone ?? "",
+  status: order.status ?? "pending",
+  delivery_mode: order.delivery_mode ?? "pickup",
+  region: order.region ?? "",
+  km: order.km != null ? String(order.km) : "",
+  fee_tzs: order.fee_tzs != null ? String(order.fee_tzs) : "",
+  total_tzs: String(order.total_tzs ?? ""),
+  delivery_agent_phone: order.delivery_agent_phone ?? "",
+});
+
   }}
 >
   ✏️

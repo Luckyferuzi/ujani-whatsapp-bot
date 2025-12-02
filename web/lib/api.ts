@@ -11,48 +11,38 @@ export type ApiError = Error & { status?: number };
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (!API) {
     throw new Error(
-      'NEXT_PUBLIC_API_BASE is missing. ' +
-        'Set it in your environment, e.g. NEXT_PUBLIC_API_BASE=https://ujani-whatsapp-bot.onrender.com'
+      "NEXT_PUBLIC_API_BASE is missing. " +
+        "Set it in your environment, e.g. NEXT_PUBLIC_API_BASE=https://ujani-whatsapp-bot.onrender.com"
     );
   }
 
-  const url = `${API}${path}`;
+  const url = API + path;
 
-  // Build headers as a plain object so we can safely add our custom header
-  const originalHeaders = init.headers ?? {};
-  const headersObj: Record<string, string> =
-    originalHeaders instanceof Headers
-      ? Object.fromEntries(originalHeaders.entries())
-      : Array.isArray(originalHeaders)
-      ? Object.fromEntries(originalHeaders)
-      : { ...originalHeaders };
-
-  // Attach inbox key for admin UI auth, if configured
+  const headers = new Headers(init.headers ?? {});
   if (INBOX_KEY) {
-    headersObj["x-inbox-key"] = INBOX_KEY;
+    headers.set("X-Inbox-Key", INBOX_KEY);
   }
 
-  let res: Response;
-  try {
-    res = await fetch(url, {
-      ...init,
-      headers: headersObj,
-      cache: "no-store",
-    });
-  } catch (err: any) {
-    console.error("[api] request failed", err);
-    const e: ApiError = new Error("Failed to reach API");
-    throw e;
+  const res = await fetch(url, {
+    ...init,
+    headers,
+  });
+
+  // --- Special case: 204 No Content (e.g. DELETE) ---
+  if (res.status === 204) {
+    // No body to parse, just return undefined
+    return undefined as unknown as T;
   }
 
+  // --- Handle non-OK responses (4xx / 5xx) ---
   if (!res.ok) {
     let body: any = undefined;
     try {
       body = await res.json();
     } catch {
-      // ignore non-JSON error bodies
+      // ignore parse errors – some error responses are not JSON
     }
-    console.error("[api] non-OK response", res.status, body);
+    console.error("[api] non-OK response", res.status, body ?? {});
     const e: ApiError = new Error(
       body?.error ?? `API error (${res.status})`
     );
@@ -60,10 +50,22 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     throw e;
   }
 
-  return (await res.json()) as T;
+  // --- OK response: try to parse JSON, but handle empty body ---
+  const text = await res.text();
+  if (!text) {
+    return undefined as unknown as T;
+  }
+
+  try {
+    return JSON.parse(text) as T;
+  } catch (err) {
+    console.error("[api] failed to parse JSON", err, { text });
+    const e: ApiError = new Error("Failed to parse API JSON response");
+    e.status = res.status;
+    throw e;
+  }
 }
 
-// Optional helpers – safe even if not used elsewhere
 export function get<T>(path: string, init?: RequestInit) {
   return api<T>(path, { ...init, method: "GET" });
 }

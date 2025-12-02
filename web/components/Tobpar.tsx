@@ -7,6 +7,7 @@ const NAV_ITEMS = [
   { href: "/inbox", label: "Inbox" },
   { href: "/orders", label: "Orders" },   // if you already have /orders
   { href: "/products", label: "Products" },
+  { href: "/expenses", label: "Expenses" },
   { href: "/stats", label: "📊 Stats" },
 ];
 

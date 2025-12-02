@@ -1,51 +1,46 @@
 "use client";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { api, post } from "@/lib/api";
+import { api, get, post } from "@/lib/api";
+import { toast } from "sonner";
+import { socket } from "@/lib/socket";
 
 type Product = {
   id: number;
-  sku: string;
+  sku: string; // still exists in backend but hidden from UI
   name: string;
-  price_tzs: number; // from backend
-  short_description: string;
-  short_description_en: string | null;
+  price_tzs: number;
   description: string;
   description_en: string | null;
   is_installment: boolean;
   is_active: boolean;
-  stock_qty: number | null; // <-- NEW
+  stock_qty: number | null;
   created_at?: string;
 };
 
 type ProductForm = {
-  sku: string;
   name: string;
-  price_tzs: string; // string in form
-  short_description: string;
-  short_description_en: string;
+  price_tzs: string;
   description: string;
   description_en: string;
   is_installment: boolean;
   is_active: boolean;
-  stock_qty: string; // <-- NEW
+  stock_qty: string;
 };
 
 type ListResponse = { items: Product[] };
 type SingleResponse = { product: Product };
 
 const emptyForm: ProductForm = {
-  sku: "",
   name: "",
   price_tzs: "",
-  short_description: "",
-  short_description_en: "",
   description: "",
   description_en: "",
   is_installment: false,
   is_active: true,
-  stock_qty: "", // <-- NEW
+  stock_qty: "",
 };
+
 
 export default function ProductsPage() {
   const [items, setItems] = useState<Product[]>([]);
@@ -56,7 +51,7 @@ export default function ProductsPage() {
   const [form, setForm] = useState<ProductForm>(emptyForm);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [search, setSearch] = useState("");
-  const [showForm, setShowForm] = useState(false); // <-- NEW
+  const [showForm, setShowForm] = useState(false);
 
   const filteredItems = items.filter((p) => {
     const q = search.trim().toLowerCase();
@@ -64,11 +59,11 @@ export default function ProductsPage() {
     return (
       p.name.toLowerCase().includes(q) ||
       p.sku.toLowerCase().includes(q) ||
-      (p.short_description ?? "").toLowerCase().includes(q)
+      (p.description ?? "").toLowerCase().includes(q)
     );
   });
 
-  const LOW_STOCK_THRESHOLD = 5; // you can change this
+  const LOW_STOCK_THRESHOLD = 5;
 
   const lowStockItems = items.filter((p) => {
     const stock = p.stock_qty ?? 0;
@@ -80,16 +75,22 @@ export default function ProductsPage() {
   );
 
 
+
   const loadProducts = async () => {
     setLoading(true);
     setError(null);
+
     try {
-      const data = await api<ListResponse>("/api/products");
-      setItems(data.items ?? []);
+      const res = await get<ListResponse>("/api/products");
+      setItems(res.items);
     } catch (err: any) {
       console.error("Failed to load products", err);
-      setError(err?.message ?? "Failed to load products");
-      setItems([]);
+      const msg =
+        err?.message ?? "Imeshindikana kupakia bidhaa. Jaribu tena.";
+      setError(msg);
+      toast.error("Imeshindikana kupakia bidhaa.", {
+        description: "Tafadhali jaribu tena muda kidogo.",
+      });
     } finally {
       setLoading(false);
     }
@@ -99,14 +100,27 @@ export default function ProductsPage() {
     void loadProducts();
   }, []);
 
+   // Auto-refresh when backend notifies that products/stock changed
+  useEffect(() => {
+    const s = socket();
+    if (!s) return;
+
+    const handler = () => {
+      void loadProducts();
+    };
+
+    s.on("products.updated", handler);
+
+    return () => {
+      s.off("products.updated", handler);
+    };
+  }, []);
+
   const handleEdit = (product: Product) => {
     setEditingId(product.id);
     setForm({
-      sku: product.sku,
       name: product.name,
       price_tzs: String(product.price_tzs ?? ""),
-      short_description: product.short_description ?? "",
-      short_description_en: product.short_description_en ?? "",
       description: product.description ?? "",
       description_en: product.description_en ?? "",
       is_installment: !!product.is_installment,
@@ -114,7 +128,10 @@ export default function ProductsPage() {
       stock_qty:
         product.stock_qty != null ? String(product.stock_qty) : "",
     });
-    setShowForm(true); // show form when editing
+    setShowForm(true);
+    toast("Unahariri bidhaa", {
+      description: product.name,
+    });
   };
 
   const handleNew = () => {
@@ -126,7 +143,7 @@ export default function ProductsPage() {
 
   const handleDelete = async (product: Product) => {
     const ok = window.confirm(
-      `Unataka kuondoa bidhaa "${product.name}"? Itakuwa inactive.`
+      `Unataka kufuta kabisa bidhaa "${product.name}"? Hatua hii haiwezi kurudishwa.`
     );
     if (!ok) return;
 
@@ -134,10 +151,20 @@ export default function ProductsPage() {
       await api(`/api/products/${product.id}`, {
         method: "DELETE",
       });
+
+      toast.success("Bidhaa imefutwa kwa mafanikio.", {
+        description: `${product.name} imeondolewa kwenye orodha.`,
+      });
+
       void loadProducts();
-    } catch (err) {
+    } catch (err: any) {
       console.error("Failed to delete product", err);
-      alert("Failed to delete product. Please try again.");
+      const msg =
+        err?.message ?? "Imeshindikana kufuta bidhaa. Jaribu tena.";
+      setError(msg);
+      toast.error("Imeshindikana kufuta bidhaa.", {
+        description: "Tafadhali jaribu tena au wasiliana na msimamizi.",
+      });
     }
   };
 
@@ -149,16 +176,24 @@ export default function ProductsPage() {
     try {
       const priceNumeric = Number(form.price_tzs);
       if (!Number.isFinite(priceNumeric) || priceNumeric <= 0) {
+        const msg = "Please enter a positive price.";
         setSaving(false);
-        setError("Please enter a positive price.");
+        setError(msg);
+        toast.error("Invalid price", {
+          description: msg,
+        });
         return;
       }
 
       const stockNumeric =
         form.stock_qty === "" ? 0 : Number(form.stock_qty);
       if (!Number.isFinite(stockNumeric) || stockNumeric < 0) {
+        const msg = "Please enter a non-negative stock quantity.";
         setSaving(false);
-        setError("Please enter a non-negative stock quantity.");
+        setError(msg);
+        toast.error("Invalid stock", {
+          description: msg,
+        });
         return;
       }
 
@@ -168,7 +203,9 @@ export default function ProductsPage() {
         stock_qty: stockNumeric,
       };
 
-      if (editingId == null) {
+      const isNew = editingId == null;
+
+      if (isNew) {
         await post<SingleResponse>("/api/products", payload);
       } else {
         await api<SingleResponse>(`/api/products/${editingId}`, {
@@ -181,15 +218,25 @@ export default function ProductsPage() {
       setSaving(false);
       setEditingId(null);
       setForm(emptyForm);
-      setShowForm(false); // hide after save
+      setShowForm(false);
       void loadProducts();
+
+      toast.success(
+        isNew
+          ? "Bidhaa imeongezwa kwa mafanikio."
+          : "Bidhaa imesasishwa kwa mafanikio."
+      );
     } catch (err: any) {
       console.error("Failed to save product", err);
+      const msg =
+        err?.message ?? "Imeshindikana kuhifadhi bidhaa. Jaribu tena.";
       setSaving(false);
-      setError(err?.message ?? "Failed to save product");
+      setError(msg);
+      toast.error("Imeshindikana kuhifadhi bidhaa.", {
+        description: "Tafadhali angalia taarifa na ujaribu tena.",
+      });
     }
   };
-
 
   return (
     <div className="flex flex-col h-full p-4 gap-4 overflow-y-auto">
@@ -220,26 +267,41 @@ export default function ProductsPage() {
           {error && <div className="text-red-600 mb-2">{error}</div>}
 
           {/* Low stock / out of stock reminders */}
-          {items.length > 0 && (
-            <div className="mb-3 space-y-1">
-              {outOfStockItems.length > 0 && (
-                <div className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-[11px] text-red-700">
-                  Baadhi ya bidhaa zimeisha stock:
-                  {" "}
-                  {outOfStockItems.map((p) => p.sku).join(", ")}
-                </div>
-              )}
-              {lowStockItems.length > 0 && (
-                <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-[11px] text-amber-700">
-                  Onyo: bidhaa zifuatazo zina stock ndogo (≤{LOW_STOCK_THRESHOLD}):
-                  {" "}
-                  {lowStockItems
-                    .map((p) => `${p.sku} (${p.stock_qty ?? 0})`)
-                    .join(", ")}
-                </div>
-              )}
-            </div>
-          )}
+{items.length > 0 && (
+  <div className="products-alert-stack">
+    {outOfStockItems.length > 0 && (
+      <div className="products-alert products-alert--danger">
+        <div className="products-alert-icon">!</div>
+        <div className="products-alert-body">
+          <div className="products-alert-title">Bidhaa zimeisha stock</div>
+          <div className="products-alert-text">
+            Bidhaa zifuatazo kwa sasa hazina stock:
+            {" "}
+            {outOfStockItems.map((p) => p.name).join(", ")}
+          </div>
+        </div>
+      </div>
+    )}
+
+    {lowStockItems.length > 0 && (
+      <div className="products-alert products-alert--warning">
+        <div className="products-alert-icon">!</div>
+        <div className="products-alert-body">
+          <div className="products-alert-title">
+            Onyo la stock ndogo
+          </div>
+          <div className="products-alert-text">
+            Bidhaa zifuatazo zina stock ndogo (≤{LOW_STOCK_THRESHOLD}):
+            {" "}
+            {lowStockItems
+              .map((p) => `${p.name} (${p.stock_qty ?? 0})`)
+              .join(", ")}
+          </div>
+        </div>
+      </div>
+    )}
+  </div>
+)}
 
           {items.length === 0 && !loading ? (
             <div className="panel-card-body--muted">Loading products…</div>
@@ -248,299 +310,267 @@ export default function ProductsPage() {
               Hakuna bidhaa zinazolingana na utafutaji.
             </div>
           ) : (
-            <table className="products-table">
-              {/* rest of table stays below */}
-              <thead>
-                <tr>
-                  <th>SKU</th>
-                  <th>Jina la bidhaa</th>
-                  <th className="text-right">Bei (TZS)</th>
-                  <th className="text-right">Stock</th> {/* NEW */}
-                  <th>Installment</th>
-                  <th>Status</th>
-                  <th className="text-right">Vitendo</th>
-                </tr>
-              </thead>
+<table className="products-table">
+  <thead>
+    <tr>
+      <th>Jina la bidhaa</th>
+      <th className="text-right">Bei (TZS)</th>
+      <th className="text-right">Stock</th>
+      <th>Installment</th>
+      <th>Status</th>
+      <th className="text-right">Vitendo</th>
+    </tr>
+  </thead>
+  <tbody>
+    {filteredItems.map((p) => (
+      <tr key={p.id}>
+        <td>
+          <div className="font-semibold">{p.name}</div>
+        </td>
+        <td className="text-right">
+          {Math.floor(p.price_tzs).toLocaleString("sw-TZ")}
+        </td>
+        <td className="text-right">
+          {p.stock_qty != null
+            ? Math.floor(p.stock_qty).toLocaleString("sw-TZ")
+            : "—"}
+        </td>
+        <td>{p.is_installment ? "Ndiyo" : "Hapana"}</td>
+        <td>
+          <span
+            className={
+              "products-status-badge " +
+              (p.is_active
+                ? "products-status--active"
+                : "products-status--inactive")
+            }
+          >
+            {p.is_active ? "Active" : "Inactive"}
+          </span>
+        </td>
+        <td className="text-right">
+          <button
+            type="button"
+            className="btn btn-xs mr-2"
+            onClick={() => handleEdit(p)}
+          >
+            Edit
+          </button>
+          <button
+            type="button"
+            className="btn btn-xs btn-danger"
+            onClick={() => handleDelete(p)}
+          >
+            Remove
+          </button>
+        </td>
+      </tr>
+    ))}
+  </tbody>
+</table>
 
-              <tbody>
-                {filteredItems.map((p) => (
-                  <tr key={p.id} className="products-row">
-                    <td>{p.sku}</td>
-                    <td>
-                      <div className="products-name">{p.name}</div>
-                      <div className="products-short">
-                        {p.short_description || "—"}
-                      </div>
-                    </td>
-                                       <td className="text-right">
-                      {Math.floor(p.price_tzs).toLocaleString("sw-TZ")}
-                    </td>
-                    <td className="text-right">
-                      {p.stock_qty != null
-                        ? Math.floor(p.stock_qty).toLocaleString("sw-TZ")
-                        : "—"}
-                    </td>
-                    <td>{p.is_installment ? "Ndiyo" : "Hapana"}</td>
-                    <td>
-                      <span
-                        className={
-                          "products-status-badge " +
-                          (p.is_active
-                            ? "products-status--active"
-                            : "products-status--inactive")
-                        }
-                      >
-                        {p.is_active ? "Active" : "Inactive"}
-                      </span>
-                    </td>
 
-                    <td className="products-actions">
-                      <button
-                        type="button"
-                        className="orders-action-button"
-                        onClick={() => handleEdit(p)}
-                      >
-                        ✏️ Edit
-                      </button>
-                      <button
-                        type="button"
-                        className="orders-action-button"
-                        onClick={() => handleDelete(p)}
-                      >
-                        🗑️ Remove
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
           )}
         </div>
       </div>
 
       {/* Form */}
       {showForm && (
-        <div className="panel-card">
-          <div className="panel-card-title flex items-center justify-between">
-            <span>
-              {editingId == null ? "Add new product" : "Edit product"}
-            </span>
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => {
-                setShowForm(false);
-                setEditingId(null);
-                setForm(emptyForm);
-              }}
-            >
-              Close
-            </button>
+        <div className="products-form-card">
+          <div className="products-form-header">
+            <div>
+              <div className="products-form-title">
+                {editingId == null ? "Add new product" : "Edit product"}
+              </div>
+              <div className="products-form-subtitle">
+                {editingId == null
+                  ? "Ongeza bidhaa mpya kwenye duka lako."
+                  : "Sasisha taarifa za bidhaa hii."}
+              </div>
+            </div>
+
+            <div className="products-form-header-right">
+              <span
+                className={
+                  "products-form-badge " +
+                  (editingId == null
+                    ? "products-form-badge--new"
+                    : "products-form-badge--edit")
+                }
+              >
+                {editingId == null ? "NEW" : "EDIT"}
+              </span>
+              <button
+                type="button"
+                className="products-form-close-btn"
+                onClick={() => {
+                  setShowForm(false);
+                  setEditingId(null);
+                  setForm(emptyForm);
+                }}
+              >
+                ✕
+              </button>
+            </div>
           </div>
-          <form
-            className="panel-card-body space-y-4 text-xs"
-            onSubmit={handleSubmit}
-          >
-          {/* Basic info */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <div className="flex flex-col gap-1">
-              <label className="font-semibold">SKU</label>
-              <input
-                type="text"
-                className="history-edit-input"
-                value={form.sku}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, sku: e.target.value.toUpperCase() }))
-                }
-                placeholder="PROMAX, KIBOKO..."
-                required
-              />
-            </div>
 
-            <div className="flex flex-col gap-1 md:col-span-2">
-              <label className="font-semibold">Product name</label>
-              <input
-                type="text"
-                className="history-edit-input"
-                value={form.name}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, name: e.target.value }))
-                }
-                required
-              />
-            </div>
-
-           <div className="flex flex-col gap-1">
-  <label className="font-semibold">Price (TZS)</label>
-  <input
-    type="number"
-    min={0}
-    step={1}
-    className="history-edit-input"
-    value={form.price_tzs}
-    onChange={(e) =>
-      setForm((f) => {
-        const raw = e.target.value;
-        // Disallow minus, keep only digits
-        const cleaned = raw.replace(/[^\d]/g, "");
-        return { ...f, price_tzs: cleaned };
-      })
-    }
-    placeholder="e.g. 140000"
-    required
-  />
-</div>
-
-            <div className="flex flex-col gap-1">
-              <label className="font-semibold">Stock quantity</label>
-              <input
-                type="number"
-                min={0}
-                step={1}
-                className="history-edit-input"
-                value={form.stock_qty}
-                onChange={(e) =>
-                  setForm((f) => {
-                    const raw = e.target.value;
-                    const cleaned = raw.replace(/[^\d]/g, "");
-                    return { ...f, stock_qty: cleaned };
-                  })
-                }
-                placeholder="e.g. 100"
-              />
-              <p className="text-[10px] text-gray-500">
-                Idadi ya vipande vilivyopo sasa (stock).
-              </p>
-            </div>
-
-
-
-            <div className="flex items-center gap-3">
-              <label className="flex items-center gap-2">
+          <form className="products-form" onSubmit={handleSubmit}>
+            {/* Top grid: name, price, stock */}
+            <div className="products-form-grid">
+              <div className="products-field products-field--wide">
+                <label className="products-label">Product name</label>
                 <input
-                  type="checkbox"
-                  checked={form.is_installment}
+                  type="text"
+                  className="products-input"
+                  value={form.name}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, name: e.target.value }))
+                  }
+                  placeholder="Mfano: Ujani Herbals Super Tea"
+                  required
+                />
+                <p className="products-help">
+                  Jina la bidhaa litakaloonekana kwa wateja na ndani ya mfumo.
+                </p>
+              </div>
+
+              <div className="products-field">
+                <label className="products-label">Price (TZS)</label>
+                <input
+                  type="text"
+                  className="products-input"
+                  value={form.price_tzs}
                   onChange={(e) =>
                     setForm((f) => ({
                       ...f,
-                      is_installment: e.target.checked,
+                      price_tzs: e.target.value.replace(/[^\d]/g, ""),
                     }))
                   }
+                  placeholder="Mfano: 30000"
+                  required
                 />
-                <span>Installment / Promax-style payments</span>
-              </label>
-            </div>
+                <p className="products-help">
+                  Bei ya rejareja kwa kila kipande.
+                </p>
+              </div>
 
-            <div className="flex items-center gap-3">
-              <label className="flex items-center gap-2">
+              <div className="products-field">
+                <label className="products-label">Stock quantity</label>
                 <input
-                  type="checkbox"
-                  checked={form.is_active}
+                  type="number"
+                  min={0}
+                  step={1}
+                  className="products-input"
+                  value={form.stock_qty}
                   onChange={(e) =>
-                    setForm((f) => ({ ...f, is_active: e.target.checked }))
+                    setForm((f) => {
+                      const raw = e.target.value;
+                      const cleaned = raw.replace(/[^\d]/g, "");
+                      return { ...f, stock_qty: cleaned };
+                    })
                   }
+                  placeholder="Mfano: 100"
                 />
-                <span>Active (visible in menu)</span>
+                <p className="products-help">
+                  Idadi ya vipande vilivyopo sasa (stock iliyo tayari kuuzwa).
+                </p>
+              </div>
+            </div>
+
+            {/* Descriptions */}
+            <div className="products-form-section">
+              <label className="products-label">
+                Maelezo kamili (Swahili)
               </label>
-            </div>
-          </div>
-
-          {/* Short descriptions */}
-          <div className="border-t border-gray-200 pt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div>
-              <div className="text-[11px] uppercase text-gray-500 mb-1">
-                maelezo mafupi · Swahili
-              </div>
-           <textarea
-  className="history-edit-input"
-  rows={2}
-  value={form.short_description}
-  onChange={(e) =>
-    setForm((f) => ({
-      ...f,
-      short_description: e.target.value, // <-- ONLY this field
-    }))
-  }
-  placeholder="Muhtasari mfupi wa bidhaa kwa Kiswahili…"
-/>
-
-            </div>
-            <div>
-              <div className="text-[11px] uppercase text-gray-500 mb-1">
-                Short description · English
-              </div>
- <textarea
-  className="history-edit-input"
-  rows={2}
-  value={form.short_description_en ?? ""}
-  onChange={(e) =>
-    setForm((f) => ({
-      ...f,
-      short_description_en: e.target.value, // <-- ONLY this field
-    }))
-  }
-  placeholder="Short English summary of the product…"
-/>
-            </div>
-          </div>
-
-          {/* Full descriptions */}
-          <div className="border-t border-gray-200 pt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div>
-              <div className="text-[11px] uppercase text-gray-500 mb-1">
-                Full description · Swahili
-              </div>
               <textarea
-                className="history-edit-input"
-                rows={4}
+                className="products-textarea"
                 value={form.description}
                 onChange={(e) =>
                   setForm((f) => ({ ...f, description: e.target.value }))
                 }
-                placeholder="Maelezo marefu ya bidhaa kwa Kiswahili. Unaweza kuandika kila pointi kwenye mstari mpya."
+                placeholder="Andika maelezo ya bidhaa kwa Kiswahili..."
+                rows={3}
               />
             </div>
-            <div>
-              <div className="text-[11px] uppercase text-gray-500 mb-1">
-                Full description · English
-              </div>
+
+            <div className="products-form-section">
+              <label className="products-label">
+                Full description (English) (optional)
+              </label>
               <textarea
-  className="history-edit-input"
-  rows={4}
-  value={form.description_en ?? ""}
-  onChange={(e) =>
-    setForm((f) => ({ ...f, description_en: e.target.value }))
-  }
-  placeholder="Long English description. You can put each bullet on its own line."
-/>
-
+                className="products-textarea"
+                value={form.description_en}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, description_en: e.target.value }))
+                }
+                placeholder="Write the product description in English (optional)..."
+                rows={3}
+              />
             </div>
-          </div>
 
-          <div className="flex justify-end gap-2 pt-2">
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={handleNew}
-              disabled={saving}
-            >
-              Clear
-            </button>
-            <button
-              type="submit"
-              className="btn btn-primary"
-              disabled={saving}
-            >
-              {saving
-                ? "Saving…"
-                : editingId == null
-                ? "Create product"
-                : "Save changes"}
-            </button>
-          </div>
-        </form>
-      </div>
+            {/* Flags + footer */}
+            <div className="products-form-footer">
+              <div className="products-form-flags">
+                <label className="products-flag">
+                  <input
+                    type="checkbox"
+                    checked={form.is_installment}
+                    onChange={(e) =>
+                      setForm((f) => ({
+                        ...f,
+                        is_installment: e.target.checked,
+                      }))
+                    }
+                  />
+                  <span>
+                    Hii bidhaa inaruhusu malipo kwa awamu (installment)
+                  </span>
+                </label>
+
+                <label className="products-flag">
+                  <input
+                    type="checkbox"
+                    checked={form.is_active}
+                    onChange={(e) =>
+                      setForm((f) => ({
+                        ...f,
+                        is_active: e.target.checked,
+                      }))
+                    }
+                  />
+                  <span>Product is active</span>
+                </label>
+              </div>
+
+              <div className="products-form-actions">
+                <button
+                  type="button"
+                  className="products-secondary-btn"
+                  onClick={() => {
+                    setShowForm(false);
+                    setEditingId(null);
+                    setForm(emptyForm);
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="products-primary-btn"
+                  disabled={saving}
+                >
+                  {saving
+                    ? "Saving..."
+                    : editingId == null
+                    ? "Save product"
+                    : "Update product"}
+                </button>
+              </div>
+            </div>
+          </form>
+        </div>
       )}
+
     </div>
   );
 }

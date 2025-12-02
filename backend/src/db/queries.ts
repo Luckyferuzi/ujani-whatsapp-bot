@@ -318,7 +318,6 @@ async function generateOrderCode(trx: any): Promise<string> {
   return `UJ-${datePart}-${Date.now().toString().slice(-6)}`;
 }
 
-
 export async function createOrderWithPayment(input: CreateOrderInput) {
   return db.transaction(async (trx) => {
     const orderCode = await generateOrderCode(trx);
@@ -353,7 +352,7 @@ export async function createOrderWithPayment(input: CreateOrderInput) {
       }));
       await trx("order_items").insert(rows);
 
-      // --- NEW: decrease product stock based on these items ---
+      // --- decrease product stock based on these items ---
       const skus = Array.from(
         new Set(
           input.items
@@ -396,10 +395,11 @@ export async function createOrderWithPayment(input: CreateOrderInput) {
             .update({ stock_qty: newStock });
         }
       }
-      // --- END NEW STOCK LOGIC ---
+      // --- END stock logic ---
     }
 
-    // 3) Create a payment row with amount_tzs = 0 (will be increased when confirming payments)
+    // 3) Create a payment row with amount_tzs = 0
+    //    (will be increased when confirming payments)
     const [payment] = await trx("payments")
       .insert({
         order_id: orderId,
@@ -410,6 +410,22 @@ export async function createOrderWithPayment(input: CreateOrderInput) {
         amount_tzs: 0,
       })
       .returning<{ id: number }[]>("id");
+
+    // 4) Create a pending income entry for this order
+    //    This will show up in the Income page as "pending"
+    //    until you approve/reject it.
+    const incomeAmount = Math.max(0, Math.floor(input.totalTzs ?? 0));
+
+    if (incomeAmount > 0) {
+      await trx("incomes").insert({
+        order_id: orderId,
+        amount_tzs: incomeAmount,
+        status: "pending",
+        source: "order",
+        description: `Auto: ${orderCode}`,
+        recorded_at: new Date(),
+      });
+    }
 
     return {
       orderId,

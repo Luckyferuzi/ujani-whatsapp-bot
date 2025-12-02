@@ -1652,3 +1652,192 @@ inboxRoutes.delete("/expenses/:id", async (req: Request, res: Response) => {
     res.status(500).json({ error: "Failed to delete expense" });
   }
 });
+
+const VALID_INCOME_STATUSES = ["pending", "approved", "rejected"] as const;
+
+// GET /api/incomes  -> list recent incomes
+inboxRoutes.get("/incomes", async (req: Request, res: Response) => {
+  try {
+    const limitRaw = req.query.limit;
+    const limit = Math.min(
+      200,
+      Math.max(
+        1,
+        Number(
+          typeof limitRaw === "string" ? limitRaw : (limitRaw ?? 50)
+        )
+      )
+    );
+
+    const statusParam =
+      typeof req.query.status === "string"
+        ? req.query.status.toLowerCase()
+        : null;
+
+    if (
+      statusParam &&
+      !VALID_INCOME_STATUSES.includes(statusParam as any)
+    ) {
+      return res.status(400).json({ error: "Invalid status filter" });
+    }
+
+    let query = db("incomes as i")
+      .leftJoin("orders as o", "i.order_id", "o.id")
+      .leftJoin("customers as c", "o.customer_id", "c.id")
+      .orderBy("i.recorded_at", "desc")
+      .limit(limit)
+      .select(
+        "i.*",
+        "o.order_code",
+        "c.name as customer_name",
+        "c.phone as customer_phone"
+      );
+
+    if (statusParam) {
+      query = query.where("i.status", statusParam);
+    }
+
+    const rows = await query;
+
+    res.json({ items: rows });
+  } catch (err) {
+    console.error("GET /api/incomes failed", err);
+    res.status(500).json({ error: "Failed to load incomes" });
+  }
+});
+
+// POST /api/incomes  -> create new income (usually manual)
+inboxRoutes.post("/incomes", async (req: Request, res: Response) => {
+  try {
+    const {
+      order_id,
+      amount_tzs,
+      status,
+      source,
+      description,
+    } = req.body ?? {};
+
+    const amount = Number(amount_tzs);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return res
+        .status(400)
+        .json({ error: "Invalid amount_tzs (must be > 0)" });
+    }
+
+    let newStatus = (status ?? "pending").toString().toLowerCase();
+    if (!VALID_INCOME_STATUSES.includes(newStatus as any)) {
+      newStatus = "pending";
+    }
+
+    const hasOrderId =
+      order_id !== undefined && order_id !== null && order_id !== "";
+    const sourceValue = hasOrderId
+      ? (source ?? "order")
+      : (source ?? "manual");
+
+    const [inserted] = await db("incomes")
+      .insert({
+        order_id: hasOrderId ? Number(order_id) : null,
+        amount_tzs: Math.round(amount),
+        status: newStatus,
+        source: String(sourceValue).slice(0, 50),
+        description:
+          description != null ? String(description).trim() : null,
+        recorded_at: new Date(),
+      })
+      .returning("*");
+
+    res.json({ income: inserted });
+  } catch (err) {
+    console.error("POST /api/incomes failed", err);
+    res.status(500).json({ error: "Failed to create income" });
+  }
+});
+
+// PATCH /api/incomes/:id  -> update income (amount, status, description)
+inboxRoutes.patch("/incomes/:id", async (req: Request, res: Response) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ error: "Invalid income id" });
+  }
+
+  try {
+    const existing = await db("incomes").where({ id }).first();
+    if (!existing) {
+      return res.status(404).json({ error: "Income not found" });
+    }
+
+    const { amount_tzs, status, description } = req.body ?? {};
+    const patch: any = {};
+
+    if (amount_tzs !== undefined) {
+      const amount = Number(amount_tzs);
+      if (!Number.isFinite(amount) || amount <= 0) {
+        return res
+          .status(400)
+          .json({ error: "Invalid amount_tzs (must be > 0)" });
+      }
+      patch.amount_tzs = Math.round(amount);
+    }
+
+    if (status !== undefined) {
+      let newStatus = String(status).toLowerCase();
+      if (!VALID_INCOME_STATUSES.includes(newStatus as any)) {
+        return res.status(400).json({ error: "Invalid status value" });
+      }
+      patch.status = newStatus;
+
+      const now = new Date();
+      if (newStatus === "approved") {
+        patch.approved_at = now;
+        patch.rejected_at = null;
+      } else if (newStatus === "rejected") {
+        patch.rejected_at = now;
+        patch.approved_at = null;
+      } else {
+        patch.approved_at = null;
+        patch.rejected_at = null;
+      }
+    }
+
+    if (description !== undefined) {
+      patch.description =
+        description != null ? String(description).trim() : null;
+    }
+
+    if (Object.keys(patch).length === 0) {
+      return res.status(400).json({ error: "No fields to update" });
+    }
+
+    patch.updated_at = new Date();
+
+    const [updated] = await db("incomes")
+      .where({ id })
+      .update(patch)
+      .returning("*");
+
+    res.json({ income: updated });
+  } catch (err) {
+    console.error("PATCH /api/incomes/:id failed", err);
+    res.status(500).json({ error: "Failed to update income" });
+  }
+});
+
+// DELETE /api/incomes/:id  -> delete income
+inboxRoutes.delete("/incomes/:id", async (req: Request, res: Response) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ error: "Invalid income id" });
+  }
+
+  try {
+    const deleted = await db("incomes").where({ id }).del();
+    if (!deleted) {
+      return res.status(404).json({ error: "Income not found" });
+    }
+    res.status(204).send();
+  } catch (err) {
+    console.error("DELETE /api/incomes/:id failed", err);
+    res.status(500).json({ error: "Failed to delete income" });
+  }
+});
