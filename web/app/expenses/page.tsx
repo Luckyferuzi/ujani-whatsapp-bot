@@ -36,12 +36,12 @@ type FormState = {
 };
 
 const CATEGORY_BADGE_CLASSES: Record<Category, string> = {
-  rider: "bg-blue-50 text-blue-700 border-blue-200",
-  rent: "bg-amber-50 text-amber-700 border-amber-200",
-  salary: "bg-emerald-50 text-emerald-700 border-emerald-200",
-  marketing: "bg-purple-50 text-purple-700 border-purple-200",
-  utilities: "bg-sky-50 text-sky-700 border-sky-200",
-  other: "bg-slate-50 text-slate-700 border-slate-300",
+  rider: "badge badge--bot",
+  rent: "badge badge--bot",
+  salary: "badge badge--bot",
+  marketing: "badge badge--bot",
+  utilities: "badge badge--bot",
+  other: "badge badge--bot",
 };
 
 export default function ExpensesPage() {
@@ -393,7 +393,7 @@ export default function ExpensesPage() {
                         <td>{e.incurred_on.slice(0, 10)}</td>
                         <td>
                           <span
-                            className={`inline-flex px-2 py-1 rounded-full text-xs border ${badge}`}
+                            className={badge}
                           >
                             {e.category}
                           </span>
@@ -403,7 +403,7 @@ export default function ExpensesPage() {
                         </td>
                         <td>
                           {e.description || (
-                            <span className="text-slate-400">(Hakuna)</span>
+                            <span className="muted">(Hakuna)</span>
                           )}
                         </td>
                         <td className="text-right space-x-2">

@@ -168,6 +168,7 @@ const dict: Dict = {
       'Oda yako {orderCode} imewasilishwa. Asante kwa kuamini Ujani Herbals 🌿.',
           'product.unavailable':
       'Pole sana, *{name}* kwa sasa haipatikani kwa sababu stock imeisha. Tutakujulisha ikirudi tena. 🙏',
+      
   },
 
   en: {

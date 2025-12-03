@@ -1481,25 +1481,25 @@ async function onSessionMessage(user: string, m: Incoming, lang: Lang) {
 /* -------------------------------------------------------------------------- */
 /*                              Details resolver                              */
 /* -------------------------------------------------------------------------- */
-
 function detailsForSku(lang: Lang, sku: string): string {
+  const code = (sku || "").toUpperCase();
   let body: string;
 
-  if (sku === "PROMAX") {
+  if (code === "PROMAX") {
     body = [
       "• " + t(lang, "product.promax.package_a"),
       "• " + t(lang, "product.promax.package_b"),
       "• " + t(lang, "product.promax.package_c"),
     ].join("\n");
-  } else if (sku === "PROMAX_A") {
+  } else if (code === "PROMAX_A") {
     body = t(lang, "product.promax.package_a");
-  } else if (sku === "PROMAX_B") {
+  } else if (code === "PROMAX_B") {
     body = t(lang, "product.promax.package_b");
-  } else if (sku === "PROMAX_C") {
+  } else if (code === "PROMAX_C") {
     body = t(lang, "product.promax.package_c");
-  } else if (sku === "KIBOKO") {
+  } else if (code === "KIBOKO") {
     body = t(lang, "product.kiboko.details");
-  } else if (sku === "FURAHA") {
+  } else if (code === "FURAHA") {
     body = t(lang, "product.furaha.details");
   } else {
     body =
@@ -1511,6 +1511,7 @@ function detailsForSku(lang: Lang, sku: string): string {
   const disclaimer = t(lang, "disclaimer.general");
   return `${body}\n\n${disclaimer}`;
 }
+
 
 function detailsSectionForSku(
   lang: Lang,

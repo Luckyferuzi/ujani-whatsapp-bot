@@ -2364,6 +2364,7 @@ body > div:first-of-type {
 .kpi-value {
   font-size: 0.9rem;
   font-weight: 600;
+  color: black;
 }
 
 /* PANELS */
