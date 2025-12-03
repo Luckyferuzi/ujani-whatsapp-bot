@@ -51,54 +51,78 @@ async function createSession(userId: number): Promise<string> {
 }
 
 /* ------------------ 1) One-time admin registration ------------------ */
-/**
- * POST /auth/bootstrap-admin
- * Body: { email, password }
- * Only works when there are NO users yet.
- */
 authRoutes.post("/bootstrap-admin", async (req, res) => {
-  const schema = z.object({
-    email: z.string().email(),
-    password: z.string().min(6),
-  });
+  try {
+    const body = req.body ?? {};
+    const rawEmail = body.email;
+    const rawPassword = body.password;
 
-  const parsed = schema.safeParse(req.body ?? {});
-  if (!parsed.success) {
-    return res.status(400).json({ error: "invalid_payload" });
-  }
+    // Basic checks instead of strict Zod
+    if (!rawEmail || !rawPassword) {
+      return res.status(400).json({
+        error: "missing_fields",
+        message: "Email na nenosiri vinahitajika.",
+      });
+    }
 
-  const { email, password } = parsed.data;
+    const email = String(rawEmail).toLowerCase().trim();
+    const password = String(rawPassword);
 
-  const row = await db("users")
-    .count<{ count: string }>({ count: "*" })
-    .first();
+    // Very light validation, so you don't get "invalid_payload" for minor issues
+    if (!email.includes("@") || !email.includes(".")) {
+      return res.status(400).json({
+        error: "invalid_email",
+        message: "Barua pepe si sahihi.",
+      });
+    }
 
-  const hasUsers = row && Number(row.count) > 0;
-  if (hasUsers) {
-    return res.status(403).json({
-      error: "admin_exists",
-      message: "Admin already exists. Use /auth/login instead.",
+    if (password.length < 4) {
+      return res.status(400).json({
+        error: "weak_password",
+        message: "Nenosiri liwe angalau herufi 4.",
+      });
+    }
+
+    // Check if there's already at least one user
+    const row = await db("users")
+      .count<{ count: string }>({ count: "*" })
+      .first();
+
+    const hasUsers = row && Number(row.count) > 0;
+    if (hasUsers) {
+      return res.status(403).json({
+        error: "admin_exists",
+        message: "Admin tayari yupo. Tumia /auth/login badala yake.",
+      });
+    }
+
+    // Create the first admin user
+    const [user] = await db("users")
+      .insert(
+        {
+          email,
+          password_hash: hashPassword(password),
+          role: "admin",
+        },
+        ["id", "email", "role"]
+      )
+      .catch((err: any) => {
+        console.error("[auth] bootstrap-admin failed", err);
+        throw err;
+      });
+
+    const token = await createSession(user.id);
+
+    return res.status(201).json({ user, token });
+  } catch (err) {
+    console.error("[auth] bootstrap-admin unexpected error", err);
+    return res.status(500).json({
+      error: "internal_error",
+      message: "Imeshindikana kusajili admin kwa sasa.",
     });
   }
-
-  const [user] = await db("users")
-    .insert(
-      {
-        email: email.toLowerCase().trim(),
-        password_hash: hashPassword(password),
-        role: "admin",
-      },
-      ["id", "email", "role"]
-    )
-    .catch((err: any) => {
-      console.error("[auth] bootstrap-admin failed", err);
-      throw err;
-    });
-
-  const token = await createSession(user.id);
-
-  return res.status(201).json({ user, token });
 });
+
 
 /* -------------------------- 2) Login (admin/staff) -------------------------- */
 /**
