@@ -778,6 +778,27 @@ async function onInteractive(user: string, id: string, lang: Lang) {
   return;
 }
 
+  /* ------------------------ Payment mode (Dar customers) ---------------------- */
+  if (id === "PAYMODE_PHONE") {
+    // Customer chose to pay by phone — show the usual payment options
+    const s = getSession(user);
+    const total = s.price ?? 0;
+
+    // Re-add the "I've paid" button + payment options
+    await sendButtonsMessageSafe(user, t(lang, "payment.done_cta"), [
+      { id: "ACTION_PAYMENT_DONE", title: t(lang, "payment.done_button") },
+    ]);
+
+    await showPaymentOptions(user, lang, total);
+    return;
+  }
+
+  if (id === "PAYMODE_COD") {
+    // Customer chose cash on delivery — no need to show payment numbers now
+    await sendText(user, t(lang, "payment.cod_confirm"));
+    // Order remains in "pending" / normal flow; agents can move to "preparing" etc.
+    return;
+  }
 
   /* -------------------------- Payment choice selected ------------------------- */
   if (N.startsWith('PAY_')) {
@@ -1069,13 +1090,19 @@ async function onFlow(user: string, step: FlowStep, m: Incoming, lang: Lang) {
       setFlow(user, 'ASK_GPS');
       return sendBotText(user, t(lang, 'flow.ask_gps'));
     }
-        case "ASK_GPS": {
+    case "ASK_GPS": {
       if (m.hasLocation && typeof m.lat === "number" && typeof m.lon === "number") {
         const km = haversineKm(KEKO.lat, KEKO.lon, m.lat, m.lon);
         const fee = feeForDarDistance(km);
         const items = pendingOrCart(user);
         const sub = items.reduce((a, it) => a + it.unitPrice * it.qty, 0);
         const total = sub + fee;
+
+        // Save basic pricing context in the session so we can reuse the total later
+        const s = getSession(user);
+        s.distanceKm = km;
+        s.price = total;
+        saveSession(user, s);
 
         await sendBotText(
           user,
@@ -1097,7 +1124,7 @@ async function onFlow(user: string, step: FlowStep, m: Incoming, lang: Lang) {
           ].join("\n")
         );
 
-        // NEW: persist order + initial payment in Neon
+        // Persist order + initial payment in DB (as before)
         try {
           const customerId = await upsertCustomerByWa(
             user,
@@ -1105,48 +1132,50 @@ async function onFlow(user: string, step: FlowStep, m: Incoming, lang: Lang) {
             contact.phone ?? user
           );
 
-                const { orderId, orderCode } = await createOrderWithPayment({
-        customerId,
-        deliveryMode: "delivery",
-        status: "pending",
-        km,
-        feeTzs: fee,
-        totalTzs: total,
-        phone: contact.phone ?? null,
-        region: contact.region ?? null,
-        lat: m.lat,
-        lon: m.lon,
-        items: items.map((it) => ({
-          sku: it.sku,
-          name: it.name,
-          qty: it.qty,
-          unitPrice: it.unitPrice,
-        })),
-      });
+          const { orderId, orderCode } = await createOrderWithPayment({
+            customerId,
+            deliveryMode: "delivery",
+            status: "pending",
+            km,
+            feeTzs: fee,
+            totalTzs: total,
+            phone: contact.phone ?? null,
+            region: contact.region ?? null,
+            lat: m.lat,
+            lon: m.lon,
+            items: items.map((it) => ({
+              sku: it.sku,
+              name: it.name,
+              qty: it.qty,
+              unitPrice: it.unitPrice,
+            })),
+          });
 
-            emit("products.updated", {
-        reason: "whatsapp_order_created",
-        order_id: orderId,
-      });
+          emit("products.updated", {
+            reason: "whatsapp_order_created",
+            order_id: orderId,
+          });
 
-
-      const codeToShow = orderCode || `UJ-${orderId}`;
-      await sendBotText(
-        user,
-        `Namba ya order yako ni: *${codeToShow}*.\nTafadhali ihifadhi kwa ajili ya ufuatiliaji.`
-      );
-
+          const codeToShow = orderCode || `UJ-${orderId}`;
+          await sendBotText(
+            user,
+            `Namba ya order yako ni: *${codeToShow}*.\nTafadhali ihifadhi kwa ajili ya ufuatiliaji.`
+          );
         } catch (err) {
           console.error("[checkout] failed to persist ASK_GPS order:", err);
-          // We still continue with payment instructions so the customer is not blocked.
+          // We still continue so the customer is not blocked.
         }
 
-        // ➕ Add the "I've paid" button right after the muhtasari
-        await sendButtonsMessageSafe(user, t(lang, "payment.done_cta"), [
-          { id: "ACTION_PAYMENT_DONE", title: t(lang, "payment.done_button") },
-        ]);
+        // 👉 NEW: ask Dar delivery customers *how* they want to pay
+        await sendButtonsMessageSafe(
+          user,
+          t(lang, "payment.mode_choose"),
+          [
+            { id: "PAYMODE_PHONE", title: t(lang, "payment.method_phone") },
+            { id: "PAYMODE_COD", title: t(lang, "payment.method_cod") },
+          ]
+        );
 
-        await showPaymentOptions(user, lang, total);
         setFlow(user, null);
         return;
       }

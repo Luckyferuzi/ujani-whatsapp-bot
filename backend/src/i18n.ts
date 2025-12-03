@@ -92,6 +92,12 @@ const dict: Dict = {
     'flow.ask_gps': 'Tafadhali tuma location yako ya WhatsApp ili tukadirie gharama ya delivery.',
 
     'flow.payment_choose': 'Chagua njia ya kulipa:',
+    // NEW: payment mode choice (for Dar customers)
+    'payment.mode_choose': 'Chagua namna ya kulipa:',
+    'payment.method_phone': 'Lipa kwa simu',
+    'payment.method_cod': 'Lipa ukipewa mzigo (Cash on delivery)',
+    'payment.cod_confirm':
+      '✅ Tumepokea oda yako. Tafadhali subiri, tutaiandaa na utalipa ukipewa mzigo.',
     'payment.selected': 'Tumia *{label}*: {value}\nBaada ya kulipa, tuma *screenshot* au *majina matatu ya mtumaji* kuthibitisha.',
     'payment.none': 'Namba za malipo hazijawekewa. Tafadhali wasiliana na mwakilishi.',
 
@@ -242,6 +248,12 @@ const dict: Dict = {
     'flow.ask_gps': 'Please *share your WhatsApp live location* so we can calculate the delivery fee.',
 
     'flow.payment_choose': 'Choose how to pay:',
+    // NEW: payment mode choice (for Dar customers)
+    'payment.mode_choose': 'Choose payment method:',
+    'payment.method_phone': 'Pay by phone',
+    'payment.method_cod': 'Cash on Delivery (COD)',
+    'payment.cod_confirm':
+      '✅ We have received your order. Please wait while we prepare it for Cash on Delivery.',
     'payment.selected': 'Use *{label}*: {value}\nAfter payment, send a *screenshot* or the *payer’s three names*.',
     'payment.none': 'Payment numbers are not configured. Please contact an agent.',
 
