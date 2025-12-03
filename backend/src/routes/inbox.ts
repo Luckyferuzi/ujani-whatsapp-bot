@@ -1321,6 +1321,8 @@ inboxRoutes.post("/products", async (req, res) => {
       short_description_en,
       description,
       description_en,
+      usage_instructions,
+      warnings,
       is_installment,
       is_active,
       stock_qty,
@@ -1354,25 +1356,42 @@ inboxRoutes.post("/products", async (req, res) => {
           sku: finalSku,
           name: String(name).trim(),
           price_tzs: price,
+
+          // Swahili short description (required in DB, default to empty string)
           short_description: short_description
             ? String(short_description).trim()
             : "",
+
+          // Optional English short description
           short_description_en: short_description_en
             ? String(short_description_en).trim()
             : null,
+
+          // Full Swahili description (required, default to empty string)
           description: description ? String(description).trim() : "",
+
+          // Optional English description
           description_en: description_en
             ? String(description_en).trim()
             : null,
+
+          // ✅ NEW: fill NOT NULL columns so DB doesn’t error
+          usage_instructions: usage_instructions
+            ? String(usage_instructions).trim()
+            : "",
+          warnings: warnings ? String(warnings).trim() : "",
+
           is_installment: !!is_installment,
           is_active: is_active !== undefined ? !!is_active : true,
+
           stock_qty: Number.isFinite(stockNum)
             ? Math.max(0, Math.floor(stockNum))
             : 0,
         },
         "*"
       );
-      emit("product.created", { product: created });
+
+    emit("product.created", { product: created });
 
     return res.status(201).json({ product: created });
   } catch (err: any) {
@@ -1383,6 +1402,7 @@ inboxRoutes.post("/products", async (req, res) => {
     return res.status(500).json({ error: "Failed to create product" });
   }
 });
+
 
 // PUT /api/products/:id  -> update existing product
 inboxRoutes.put("/products/:id", async (req, res) => {

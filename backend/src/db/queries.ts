@@ -567,3 +567,15 @@ export async function listOutstandingOrdersForCustomer(
     });
 }
 
+// UPDATE: set payment_mode for an existing order
+export async function updateOrderPaymentMode(
+  orderId: number,
+  paymentMode: "prepay" | "cod"
+): Promise<void> {
+  await db("orders")
+    .where({ id: orderId })
+    .update({
+      payment_mode: paymentMode,
+      updated_at: db.fn.now(),
+    });
+}

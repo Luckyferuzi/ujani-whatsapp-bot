@@ -95,7 +95,7 @@ const dict: Dict = {
     // NEW: payment mode choice (for Dar customers)
     'payment.mode_choose': 'Chagua namna ya kulipa:',
     'payment.method_phone': 'Lipa kwa simu',
-    'payment.method_cod': 'Lipa ukipewa mzigo (Cash on delivery)',
+    'payment.method_cod': 'Lipa ukipewa mzigo',
     'payment.cod_confirm':
       '✅ Tumepokea oda yako. Tafadhali subiri, tutaiandaa na utalipa ukipewa mzigo.',
     'payment.selected': 'Tumia *{label}*: {value}\nBaada ya kulipa, tuma *screenshot* au *majina matatu ya mtumaji* kuthibitisha.',
@@ -251,7 +251,7 @@ const dict: Dict = {
     // NEW: payment mode choice (for Dar customers)
     'payment.mode_choose': 'Choose payment method:',
     'payment.method_phone': 'Pay by phone',
-    'payment.method_cod': 'Cash on Delivery (COD)',
+    'payment.method_cod': 'Cash on Delivery',
     'payment.cod_confirm':
       '✅ We have received your order. Please wait while we prepare it for Cash on Delivery.',
     'payment.selected': 'Use *{label}*: {value}\nAfter payment, send a *screenshot* or the *payer’s three names*.',

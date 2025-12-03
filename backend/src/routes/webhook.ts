@@ -26,7 +26,8 @@ import {
   updateConversationLastUserMessageAt,
   createOrderWithPayment,
   findOrderById,
-  findLatestOrderByCustomerName
+  findLatestOrderByCustomerName,
+  updateOrderPaymentMode,
 } from "../db/queries.js";
 
 import { emit } from '../sockets.js';
@@ -780,11 +781,18 @@ async function onInteractive(user: string, id: string, lang: Lang) {
 
   /* ------------------------ Payment mode (Dar customers) ---------------------- */
   if (id === "PAYMODE_PHONE") {
-    // Customer chose to pay by phone — show the usual payment options
     const s = getSession(user);
     const total = s.price ?? 0;
+    const lastOrderId = (s as any).lastOrderId as number | undefined;
 
-    // Re-add the "I've paid" button + payment options
+    // Try to mark the order as "prepay" in DB
+    if (lastOrderId) {
+      updateOrderPaymentMode(lastOrderId, "prepay").catch((err) => {
+        console.error("[orders] failed to set payment_mode=prepay", err);
+      });
+    }
+
+    // Show the usual payment options + "Nimemaliza kulipa"
     await sendButtonsMessageSafe(user, t(lang, "payment.done_cta"), [
       { id: "ACTION_PAYMENT_DONE", title: t(lang, "payment.done_button") },
     ]);
@@ -794,9 +802,18 @@ async function onInteractive(user: string, id: string, lang: Lang) {
   }
 
   if (id === "PAYMODE_COD") {
-    // Customer chose cash on delivery — no need to show payment numbers now
+    const s = getSession(user);
+    const lastOrderId = (s as any).lastOrderId as number | undefined;
+
+    // Mark this order as COD
+    if (lastOrderId) {
+      updateOrderPaymentMode(lastOrderId, "cod").catch((err) => {
+        console.error("[orders] failed to set payment_mode=cod", err);
+      });
+    }
+
     await sendText(user, t(lang, "payment.cod_confirm"));
-    // Order remains in "pending" / normal flow; agents can move to "preparing" etc.
+    // No payment options shown now; order will be paid on delivery.
     return;
   }
 
@@ -1098,7 +1115,7 @@ async function onFlow(user: string, step: FlowStep, m: Incoming, lang: Lang) {
         const sub = items.reduce((a, it) => a + it.unitPrice * it.qty, 0);
         const total = sub + fee;
 
-        // Save basic pricing context in the session so we can reuse the total later
+        // Save distance + total in session for later use
         const s = getSession(user);
         s.distanceKm = km;
         s.price = total;
@@ -1124,7 +1141,7 @@ async function onFlow(user: string, step: FlowStep, m: Incoming, lang: Lang) {
           ].join("\n")
         );
 
-        // Persist order + initial payment in DB (as before)
+        // Persist order in DB
         try {
           const customerId = await upsertCustomerByWa(
             user,
@@ -1151,6 +1168,11 @@ async function onFlow(user: string, step: FlowStep, m: Incoming, lang: Lang) {
             })),
           });
 
+          // 🧠 remember this order in the session
+          const s2 = getSession(user);
+          (s2 as any).lastOrderId = orderId;
+          saveSession(user, s2);
+
           emit("products.updated", {
             reason: "whatsapp_order_created",
             order_id: orderId,
@@ -1166,7 +1188,7 @@ async function onFlow(user: string, step: FlowStep, m: Incoming, lang: Lang) {
           // We still continue so the customer is not blocked.
         }
 
-        // 👉 NEW: ask Dar delivery customers *how* they want to pay
+        // Ask HOW they want to pay (phone vs COD)
         await sendButtonsMessageSafe(
           user,
           t(lang, "payment.mode_choose"),
