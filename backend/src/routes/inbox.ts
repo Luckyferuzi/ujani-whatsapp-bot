@@ -1510,33 +1510,51 @@ inboxRoutes.delete("/products/:id", async (req, res) => {
 // ------------------------------- STATS --------------------------------------
 
 // GET /api/stats/overview
-// High–level numbers used on the Stats page
+// High–level numbers used on the Stats page.
+// Supports optional ?days=N to restrict to the last N days (inclusive).
 inboxRoutes.get("/stats/overview", async (req: Request, res: Response) => {
   try {
-    // Sum of APPROVED incomes
+    const raw = req.query.days;
+    let days = Number(typeof raw === "string" ? raw : raw ?? 7);
+    if (!Number.isFinite(days) || days <= 0) days = 7;
+    if (days > 365) days = 365;
+
+    // Compute "since" date: beginning of the day N-1 days ago
+    const since = new Date();
+    since.setHours(0, 0, 0, 0);
+    since.setDate(since.getDate() - (days - 1));
+
+    const sinceTimestamp = since.toISOString();          // for TIMESTAMP columns
+    const sinceDate = since.toISOString().slice(0, 10);  // for DATE columns (YYYY-MM-DD)
+
+    // Sum of APPROVED incomes within the period
     const incomeAgg = (await db("incomes")
       .where("status", "approved")
+      .andWhere("created_at", ">=", sinceTimestamp)
       .sum<{ total_revenue: string | number }>(
         "amount_tzs as total_revenue"
       )
       .first()) as { total_revenue?: string | number } | undefined;
 
-    // Sum of ALL expenses
+    // Sum of ALL expenses within the period
     const expenseAgg = (await db("expenses")
+      .where("incurred_on", ">=", sinceDate)
       .sum<{ total_expenses: string | number }>(
         "amount_tzs as total_expenses"
       )
       .first()) as { total_expenses?: string | number } | undefined;
 
-    // Completed orders = delivered
+    // Completed orders = delivered (within the period)
     const orderAgg = (await db("orders")
       .where("status", "delivered")
+      .andWhere("created_at", ">=", sinceTimestamp)
       .count<{ order_count: string | number }>("* as order_count")
       .first()) as { order_count?: string | number } | undefined;
 
-    // Delivery fees from delivered orders
+    // Delivery fees from delivered orders (within the period)
     const deliveryAgg = (await db("orders")
       .where("status", "delivered")
+      .andWhere("created_at", ">=", sinceTimestamp)
       .sum<{ total_delivery_fees: string | number }>(
         "fee_tzs as total_delivery_fees"
       )
@@ -1567,6 +1585,7 @@ inboxRoutes.get("/stats/overview", async (req: Request, res: Response) => {
     res.status(500).json({ error: "Failed to load overview stats" });
   }
 });
+
 
 // GET /api/stats/daily-incomes
 // Used for the "Profit Trend" chart – sums APPROVED incomes per day
