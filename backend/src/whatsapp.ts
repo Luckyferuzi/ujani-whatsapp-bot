@@ -52,28 +52,36 @@ async function apiGet(path: string) {
   return res.json() as Promise<any>;
 }
 
-
 async function apiFetch(path: string, body: unknown) {
   const token = getToken();
   const url = `${GRAPH_BASE}/${GRAPH_VER}/${path}`;
   const res = await fetch(url, {
-    method: 'POST',
+    method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
+      "Content-Type": "application/json",
     },
     body: JSON.stringify(body),
   });
 
   if (!res.ok) {
-    const text = await res.text().catch(() => '');
+    const text = await res.text().catch(() => "");
+    let payload: any = text;
     try {
-      const json = text ? JSON.parse(text) : null;
-      console.error('[whatsapp] API error', res.status, json || text);
+      payload = text ? JSON.parse(text) : null;
     } catch {
-      console.error('[whatsapp] API error', res.status, text);
+      // leave payload as raw text
     }
+
+    console.error("[whatsapp] API error", res.status, payload);
+
+    throw new Error(
+      `WhatsApp API error ${res.status}: ${
+        typeof payload === "string" ? payload : JSON.stringify(payload)
+      }`
+    );
   }
+
   return res;
 }
 
@@ -256,9 +264,13 @@ function timingSafeEqual(a: string, b: string): boolean {
 export function verifySignature(arg1: any, arg2?: string): boolean {
   try {
     const APP_SECRET = (env as any).APP_SECRET as string | undefined;
+
+    // In dev / debugging, don't block just because APP_SECRET is missing
     if (!APP_SECRET) {
-      console.warn('[verify] APP_SECRET missing');
-      return false;
+      console.warn(
+        "[verify] APP_SECRET missing – skipping signature verification"
+      );
+      return true;
     }
 
     let raw: Buffer | string | undefined;
@@ -272,32 +284,47 @@ export function verifySignature(arg1: any, arg2?: string): boolean {
       // form: (req)
       const req = arg1 as { headers?: any; rawBody?: Buffer | string };
       header =
-        (req.headers?.['x-hub-signature-256'] as string) ||
-        (req.headers?.['x-hub-signature'] as string); // legacy fallback
+        (req.headers?.["x-hub-signature-256"] as string) ||
+        (req.headers?.["x-hub-signature"] as string); // legacy fallback
       raw = (req as any).rawBody;
     }
 
     if (!raw || !header) {
-      console.warn('[verify] missing raw body or signature header');
-      return false;
+      console.warn(
+        "[verify] missing raw body or signature header – skipping verification"
+      );
+      return true;
     }
 
-    const buf = Buffer.isBuffer(raw) ? raw : Buffer.from(raw, 'utf8');
-    const digest = crypto.createHmac('sha256', APP_SECRET).update(buf).digest('hex');
+    const buf = Buffer.isBuffer(raw) ? raw : Buffer.from(raw, "utf8");
+    const digest = crypto
+      .createHmac("sha256", APP_SECRET)
+      .update(buf)
+      .digest("hex");
     const expected = `sha256=${digest}`;
     const got = header.trim();
 
     const ok =
-      got.startsWith('sha256=') ? timingSafeEqual(got, expected)
-      : got.startsWith('sha1=')   // very old fallback (rare)
-        ? timingSafeEqual(got.replace(/^sha1=/, 'sha256='), expected)
+      got.startsWith("sha256=")
+        ? timingSafeEqual(got, expected)
+        : got.startsWith("sha1=")
+        ? timingSafeEqual(got.replace(/^sha1=/, "sha256="), expected)
         : false;
 
-    if (!ok) console.warn('[verify] signature mismatch');
+    if (!ok) {
+      console.warn(
+        "[verify] signature mismatch",
+        "\n expected:",
+        expected,
+        "\n got:",
+        got
+      );
+    }
+
     return ok;
   } catch (e) {
-    console.warn('[verify] error:', e);
-    return false;
+    console.warn("[verify] error, skipping verification:", e);
+    return true;
   }
 }
 

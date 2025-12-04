@@ -24,6 +24,7 @@ sendRoutes.post("/send", async (req, res) => {
     if (!Number.isFinite(id)) {
       return res.status(400).json({ error: "conversationId required" });
     }
+
     if (!text || !String(text).trim()) {
       return res.status(400).json({ error: "text required" });
     }
@@ -34,12 +35,17 @@ sendRoutes.post("/send", async (req, res) => {
       .select("c.id", "c.agent_allowed", "u.wa_id")
       .first();
 
-    if (!convo) return res.status(404).json({ error: "Conversation not found" });
+    if (!convo) {
+      return res.status(404).json({ error: "Conversation not found" });
+    }
+
     if (!convo.agent_allowed) {
       return res.status(403).json({
-        error: "Agent is not allowed for this conversation (customer has not chosen Ongea na mhudumu).",
+        error:
+          "Agent is not allowed for this conversation (customer has not chosen Ongea na mhudumu).",
       });
     }
+
     if (!convo.wa_id) {
       return res
         .status(400)
@@ -48,10 +54,8 @@ sendRoutes.post("/send", async (req, res) => {
 
     const trimmed = String(text).trim();
 
-    // Send via WhatsApp
-    await sendText(convo.wa_id, trimmed).catch((e) =>
-      console.warn("sendText failed:", e)
-    );
+    // Send via WhatsApp – if this fails, throw and let the outer catch handle it
+    await sendText(convo.wa_id, trimmed);
 
     // Log outgoing message
     const [msg] = await db("messages")
@@ -78,12 +82,15 @@ sendRoutes.post("/send", async (req, res) => {
       message: msg,
     });
 
-    res.json({ ok: true, message: msg });
+    return res.json({ ok: true, message: msg });
   } catch (e: any) {
     console.error("POST /api/send failed", e);
-    res.status(500).json({ error: e?.message ?? "send failed" });
+    return res
+      .status(500)
+      .json({ error: e?.message ?? "send failed (WhatsApp error)" });
   }
 });
+
 
 /**
  * POST /api/upload-media

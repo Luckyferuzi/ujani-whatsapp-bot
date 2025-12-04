@@ -12,13 +12,14 @@ export type AuthResponse = {
   token: string;
 };
 
-async function authRequest(
-  path: string,
-  body: unknown
-): Promise<AuthResponse> {
+const TOKEN_KEY = "ujani_auth_token";
+const USER_KEY = "ujani_auth_user";
+const LAST_ACTIVITY_KEY = "ujani_auth_last_activity";
+
+async function authPost(path: string, body: unknown): Promise<AuthResponse> {
   if (!API) {
     throw new Error(
-      "NEXT_PUBLIC_API_BASE is missing. Set it in your environment, e.g. NEXT_PUBLIC_API_BASE=https://ujani-whatsapp-bot.onrender.com"
+      "NEXT_PUBLIC_API_BASE is missing. Set NEXT_PUBLIC_API_BASE in your environment."
     );
   }
 
@@ -34,44 +35,144 @@ async function authRequest(
   try {
     data = await res.json();
   } catch {
-    // ignore JSON parse errors, we'll handle below
+    // ignore JSON parse errors
   }
 
   if (!res.ok) {
     const message =
       (data && (data.error || data.message)) ||
       `Request failed (${res.status})`;
-    const err = new Error(message);
-    throw err;
+    throw new Error(message);
   }
 
   return data as AuthResponse;
 }
 
-// One-time admin setup (only works if backend allows it)
 export function bootstrapAdmin(email: string, password: string) {
-  return authRequest("/auth/bootstrap-admin", { email, password });
+  return authPost("/auth/bootstrap-admin", { email, password });
 }
 
-// Normal login for admin/staff
 export function login(email: string, password: string) {
-  return authRequest("/auth/login", { email, password });
+  return authPost("/auth/login", { email, password });
 }
 
-// Store token + user in localStorage for later use
 export function saveAuth(auth: AuthResponse) {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem("ujani_auth_token", auth.token);
-  window.localStorage.setItem("ujani_auth_user", JSON.stringify(auth.user));
+  window.localStorage.setItem(TOKEN_KEY, auth.token);
+  window.localStorage.setItem(USER_KEY, JSON.stringify(auth.user));
+  window.localStorage.setItem(LAST_ACTIVITY_KEY, String(Date.now()));
 }
 
 export function clearAuth() {
   if (typeof window === "undefined") return;
-  window.localStorage.removeItem("ujani_auth_token");
-  window.localStorage.removeItem("ujani_auth_user");
+  window.localStorage.removeItem(TOKEN_KEY);
+  window.localStorage.removeItem(USER_KEY);
+  window.localStorage.removeItem(LAST_ACTIVITY_KEY);
+}
+
+export function touchActivity() {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(LAST_ACTIVITY_KEY, String(Date.now()));
+}
+
+export function loadAuth():
+  | { token: string; user: AuthUser; lastActivity: number | null }
+  | null {
+  if (typeof window === "undefined") return null;
+
+  const token = window.localStorage.getItem(TOKEN_KEY);
+  const userRaw = window.localStorage.getItem(USER_KEY);
+  const lastRaw = window.localStorage.getItem(LAST_ACTIVITY_KEY);
+
+  if (!token || !userRaw) return null;
+
+  try {
+    const user = JSON.parse(userRaw) as AuthUser;
+    const lastActivity = lastRaw ? Number(lastRaw) : null;
+    return {
+      token,
+      user,
+      lastActivity: lastActivity && !isNaN(lastActivity) ? lastActivity : null,
+    };
+  } catch {
+    return null;
+  }
 }
 
 export function getAuthToken(): string | null {
   if (typeof window === "undefined") return null;
-  return window.localStorage.getItem("ujani_auth_token");
+  return window.localStorage.getItem(TOKEN_KEY);
+}
+
+/* ======================= Authenticated JSON helpers ======================= */
+
+function requireToken(): string {
+  const token = getAuthToken();
+  if (!token) {
+    throw new Error("Session imeisha. Tafadhali ingia tena.");
+  }
+  return token;
+}
+
+async function authedJson<T>(
+  path: string,
+  init: RequestInit
+): Promise<T> {
+  if (!API) {
+    throw new Error("NEXT_PUBLIC_API_BASE is missing.");
+  }
+  const token = requireToken();
+
+  const res = await fetch(API + path, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+      ...(init.headers || {}),
+    },
+  });
+
+  let data: any = null;
+  try {
+    data = await res.json();
+  } catch {
+    // ignore parse errors
+  }
+
+  if (!res.ok) {
+    const msg =
+      (data && (data.error || data.message)) ||
+      `Request failed (${res.status})`;
+    throw new Error(msg);
+  }
+
+  return data as T;
+}
+
+export function authGet<T>(path: string): Promise<T> {
+  return authedJson<T>(path, { method: "GET" });
+}
+
+export function authPostJson<T>(
+  path: string,
+  body: unknown
+): Promise<T> {
+  return authedJson<T>(path, {
+    method: "POST",
+    body: JSON.stringify(body ?? {}),
+  });
+}
+
+export function authPatchJson<T>(
+  path: string,
+  body: unknown
+): Promise<T> {
+  return authedJson<T>(path, {
+    method: "PATCH",
+    body: JSON.stringify(body ?? {}),
+  });
+}
+
+export function authDelete(path: string): Promise<void> {
+  return authedJson<void>(path, { method: "DELETE" });
 }

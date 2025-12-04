@@ -401,11 +401,17 @@ webhook.get('/webhook', (req: Request, res: Response) => {
   return res.sendStatus(403);
 });
 
-webhook.post('/webhook', async (req: Request, res: Response) => {
+webhook.post("/webhook", async (req: Request, res: Response) => {
   try {
-    if (!verifySignature(req)) return res.sendStatus(401);
+    console.log(
+      "[webhook] POST /webhook body:",
+      JSON.stringify(req.body, null, 2)
+    );
 
-    
+    if (!verifySignature(req)) {
+      console.warn("[webhook] verifySignature failed – returning 401");
+      return res.sendStatus(401);
+    }
 
     const entries = req.body?.entry ?? [];
     for (const entry of entries) {
