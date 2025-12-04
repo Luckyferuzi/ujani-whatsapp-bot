@@ -192,42 +192,75 @@ authRoutes.post(
   requireSession,
   requireAdmin,
   async (req, res) => {
-    const schema = z.object({
-      email: z.string().email(),
-      password: z.string().min(6),
-    });
+    try {
+      const body = req.body ?? {};
+      const rawEmail = body.email;
+      const rawPassword = body.password;
 
-    const parsed = schema.safeParse(req.body ?? {});
-    if (!parsed.success) {
-      return res.status(400).json({ error: "invalid_payload" });
-    }
+      // Basic presence checks
+      if (!rawEmail || !rawPassword) {
+        return res.status(400).json({
+          error: "missing_fields",
+          message: "Email na nenosiri vinahitajika.",
+        });
+      }
 
-    const { email, password } = parsed.data;
+      const email = String(rawEmail).toLowerCase().trim();
+      const password = String(rawPassword);
 
-    const existing = await db("users")
-      .where({ email: email.toLowerCase().trim() })
-      .first();
-    if (existing) {
-      return res.status(400).json({ error: "user_exists" });
-    }
+      // Very light email validation
+      if (!email.includes("@") || !email.includes(".")) {
+        return res.status(400).json({
+          error: "invalid_email",
+          message: "Barua pepe si sahihi.",
+        });
+      }
 
-    const [user] = await db("users")
-      .insert(
-        {
-          email: email.toLowerCase().trim(),
-          password_hash: hashPassword(password),
-          role: "staff",
-        },
-        ["id", "email", "role"]
-      )
-      .catch((err: any) => {
-        console.error("[auth] create staff failed", err);
-        throw err;
+      // Simple password rule
+      if (password.length < 4) {
+        return res.status(400).json({
+          error: "weak_password",
+          message: "Nenosiri liwe angalau herufi 4.",
+        });
+      }
+
+      // Check if user already exists
+      const existing = await db("users")
+        .where({ email })
+        .first();
+      if (existing) {
+        return res.status(400).json({
+          error: "user_exists",
+          message: "Mtumiaji mwenye barua pepe hii tayari yupo.",
+        });
+      }
+
+      // Create staff user
+      const [user] = await db("users")
+        .insert(
+          {
+            email,
+            password_hash: hashPassword(password),
+            role: "staff",
+          },
+          ["id", "email", "role"]
+        )
+        .catch((err: any) => {
+          console.error("[auth] create staff failed", err);
+          throw err;
+        });
+
+      return res.status(201).json({ user });
+    } catch (err) {
+      console.error("[auth] create staff unexpected error", err);
+      return res.status(500).json({
+        error: "internal_error",
+        message: "Imeshindikana kuongeza mfanyakazi mpya.",
       });
-
-    return res.status(201).json({ user });
+    }
   }
 );
+
 
 /* -------------------------- 5) Admin lists users -------------------------- */
 /**
