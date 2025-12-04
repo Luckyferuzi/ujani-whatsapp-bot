@@ -324,7 +324,9 @@ authRoutes.patch("/profile", requireSession, async (req, res) => {
 });
 
 // GET /auth/users/:userId/activity
-// Overall activity for a user: completed orders, incomes, expenses, last order date.
+// Overall activity summary for a user.
+// NOTE: current schema does not link orders/incomes/expenses to users,
+// so these numbers are overall system stats, not per-user.
 authRoutes.get(
   "/users/:userId/activity",
   requireSession,
@@ -345,32 +347,27 @@ authRoutes.get(
         return res.status(404).json({ error: "user_not_found" });
       }
 
-      // Adjust column names here if needed:
-      // orders.handled_by_user_id, incomes.created_by_user_id, expenses.created_by_user_id
+      // These use only existing columns:
+      // orders.status, orders.created_at
+      // incomes.id, expenses.id
 
-      // 1) how many completed orders
       const ordersAgg = await db("orders")
-        .where({ status: "delivered", handled_by_user_id: userId })
+        .where({ status: "delivered" })
         .count<{ count: string }>("id as count")
         .first();
 
-      // 2) last completed order date
       const lastOrderRow = await db("orders")
-        .where({ status: "delivered", handled_by_user_id: userId })
+        .where({ status: "delivered" })
         .max<{ last_order_at: string | null }>(
           "created_at as last_order_at"
         )
         .first();
 
-      // 3) income rows created by this user
       const incomesAgg = await db("incomes")
-        .where({ created_by_user_id: userId })
         .count<{ count: string }>("id as count")
         .first();
 
-      // 4) expense rows created by this user
       const expensesAgg = await db("expenses")
-        .where({ created_by_user_id: userId })
         .count<{ count: string }>("id as count")
         .first();
 
@@ -401,6 +398,7 @@ authRoutes.get(
     }
   }
 );
+
 
 // PATCH /auth/users/:userId
 // Update email and/or role.
