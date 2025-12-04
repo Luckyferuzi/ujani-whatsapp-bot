@@ -322,3 +322,185 @@ authRoutes.patch("/profile", requireSession, async (req, res) => {
 
   return res.json({ ok: true });
 });
+
+// GET /auth/users/:userId/activity
+// Overall activity for a user: completed orders, incomes, expenses, last order date.
+authRoutes.get(
+  "/users/:userId/activity",
+  requireSession,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const userId = Number(req.params.userId);
+      if (!Number.isFinite(userId)) {
+        return res.status(400).json({ error: "invalid_user_id" });
+      }
+
+      const user = await db("users")
+        .select("id", "email", "role", "created_at")
+        .where({ id: userId })
+        .first();
+
+      if (!user) {
+        return res.status(404).json({ error: "user_not_found" });
+      }
+
+      // Adjust column names here if needed:
+      // orders.handled_by_user_id, incomes.created_by_user_id, expenses.created_by_user_id
+
+      // 1) how many completed orders
+      const ordersAgg = await db("orders")
+        .where({ status: "delivered", handled_by_user_id: userId })
+        .count<{ count: string }>("id as count")
+        .first();
+
+      // 2) last completed order date
+      const lastOrderRow = await db("orders")
+        .where({ status: "delivered", handled_by_user_id: userId })
+        .max<{ last_order_at: string | null }>(
+          "created_at as last_order_at"
+        )
+        .first();
+
+      // 3) income rows created by this user
+      const incomesAgg = await db("incomes")
+        .where({ created_by_user_id: userId })
+        .count<{ count: string }>("id as count")
+        .first();
+
+      // 4) expense rows created by this user
+      const expensesAgg = await db("expenses")
+        .where({ created_by_user_id: userId })
+        .count<{ count: string }>("id as count")
+        .first();
+
+      const completed_orders =
+        Number(ordersAgg?.count ?? 0) || 0;
+      const incomes_recorded =
+        Number(incomesAgg?.count ?? 0) || 0;
+      const expenses_recorded =
+        Number(expensesAgg?.count ?? 0) || 0;
+      const last_order_at =
+        lastOrderRow?.last_order_at ?? null;
+
+      return res.json({
+        user,
+        stats: {
+          completed_orders,
+          incomes_recorded,
+          expenses_recorded,
+          last_order_at,
+        },
+      });
+    } catch (err) {
+      console.error("[auth] user activity failed", err);
+      return res.status(500).json({
+        error: "internal_error",
+        message: "Imeshindikana kupakua taarifa za shughuli.",
+      });
+    }
+  }
+);
+
+// PATCH /auth/users/:userId
+// Update email and/or role.
+authRoutes.patch(
+  "/users/:userId",
+  requireSession,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const userId = Number(req.params.userId);
+      if (!Number.isFinite(userId)) {
+        return res.status(400).json({ error: "invalid_user_id" });
+      }
+
+      const body = req.body ?? {};
+      const updates: any = {};
+
+      if (body.email) {
+        const email = String(body.email).toLowerCase().trim();
+        if (!email.includes("@") || !email.includes(".")) {
+          return res.status(400).json({
+            error: "invalid_email",
+            message: "Barua pepe si sahihi.",
+          });
+        }
+        updates.email = email;
+      }
+
+      if (body.role) {
+        const role = String(body.role);
+        if (role !== "admin" && role !== "staff") {
+          return res.status(400).json({ error: "invalid_role" });
+        }
+        updates.role = role;
+      }
+
+      if (Object.keys(updates).length === 0) {
+        return res.status(400).json({ error: "nothing_to_update" });
+      }
+
+      // 1) run the update (returns number of affected rows)
+      const updatedCount = await db("users")
+        .where({ id: userId })
+        .update(updates);
+
+      if (!updatedCount) {
+        return res.status(404).json({ error: "user_not_found" });
+      }
+
+      // 2) fetch the updated row
+      const updated = await db("users")
+        .select("id", "email", "role", "created_at")
+        .where({ id: userId })
+        .first();
+
+      if (!updated) {
+        return res.status(404).json({ error: "user_not_found" });
+      }
+
+      return res.json({ user: updated });
+    } catch (err) {
+      console.error("[auth] update user failed", err);
+      return res.status(500).json({
+        error: "internal_error",
+        message: "Imeshindikana kusasisha mtumiaji.",
+      });
+    }
+  }
+);
+
+
+// DELETE /auth/users/:userId
+authRoutes.delete(
+  "/users/:userId",
+  requireSession,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const userId = Number(req.params.userId);
+      if (!Number.isFinite(userId)) {
+        return res.status(400).json({ error: "invalid_user_id" });
+      }
+
+      // Optional: prevent deleting yourself or last admin, if you want.
+      // For now we just delete.
+      const deleted = await db("users")
+        .where({ id: userId })
+        .del();
+
+      if (!deleted) {
+        return res.status(404).json({ error: "user_not_found" });
+      }
+
+      return res.json({ ok: true });
+    } catch (err) {
+      console.error("[auth] delete user failed", err);
+      return res.status(500).json({
+        error: "internal_error",
+        message: "Imeshindikana kufuta mtumiaji.",
+      });
+    }
+  }
+);
