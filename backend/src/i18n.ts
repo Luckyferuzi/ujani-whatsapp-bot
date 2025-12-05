@@ -111,6 +111,12 @@ const dict: Dict = {
     'cart.summary_total': 'Jumla ya bidhaa: *{total} TZS*',
     'cart.empty': 'Kikapu chako kipo tupu.',
     'cart.choose_action': 'Endelea na hatua:',
+    'cart.ask_quantity':
+      'Umechagua *{title}* (bei {price} kwa moja).\n\nTafadhali andika idadi unayotaka, mfano: 2',
+    'cart.ask_quantity_invalid':
+      'Tafadhali andika idadi kwa namba, mfano: 2',
+    'cart.added_with_qty':
+      '✅ Umeongeza *{title}* ×{qty} kwenye kikapu.',
     'payment.done_cta': 'Ukishalipa, bonyeza kitufe hapa chini kuthibitisha.',
     'payment.done_button': 'Nimemaliza kulipa',
     'payment.confirm_with_remaining':
@@ -267,6 +273,12 @@ const dict: Dict = {
     'cart.summary_total': 'Items subtotal: *{total} TZS*',
     'cart.empty': 'Your cart is empty.',
     'cart.choose_action': 'Continue with:',
+    'cart.ask_quantity':
+      'You selected *{title}* (price {price} each).\n\nPlease type the quantity you want, e.g., 2',
+    'cart.ask_quantity_invalid':
+      'Please type a numeric quantity, e.g., 2',
+    'cart.added_with_qty':
+      '✅ You added *{title}* ×{qty} to your cart.',
 
     'checkout.summary_header': '📦 Order Summary',
     'checkout.summary_name': 'Name: {name}',

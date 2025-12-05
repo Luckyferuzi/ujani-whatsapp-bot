@@ -35,6 +35,7 @@ import db from '../db/knex.js';
 
 export const webhook = Router();
 
+
 /**
  * Send a text message from the bot and ALSO log it as an outbound message
  * so that it appears in the Inbox thread.
@@ -356,6 +357,7 @@ export type CartItem = { sku: string; name: string; qty: number; unitPrice: numb
 const USER_LANG = new Map<string, Lang>();
 const CART = new Map<string, CartItem[]>();
 const PENDING = new Map<string, CartItem | null>();
+const PENDING_QTY = new Map<string, { sku: string; name: string; unitPrice: number }>();
 
 // New granular flow (we keep Session.state minimal)
 type FlowStep =
@@ -546,25 +548,51 @@ if (!bodyForDb && interactiveId) {
           // --- end DB persistence + realtime ---
           
           // 1) handle interactive first
-                   // 1) handle interactive first
+          // 1) handle interactive first
           if (interactiveId) {
             await onInteractive(from, interactiveId, lang);
             continue;
           }
 
-          // 2) start menu on greetings if idle
-          const activeFlow = FLOW.get(from);
-const txt = (text || "").trim().toLowerCase();
+          // 2) if we are waiting for a quantity for a product, handle that first
+          const rawText = (text || "").trim();
+          if (rawText && PENDING_QTY.has(from)) {
+            const pending = PENDING_QTY.get(from)!;
+            const qty = Number.parseInt(rawText, 10);
 
-// 0) Reset / start over command – works at any time
-if (txt === "anza upya" || txt === "reset" || txt === "start over") {
-  resetSession(from);
-  FLOW.delete(from);
-  CONTACT.delete(from);
-  await sendBotText(from, t(lang, "flow.reset_done"));
-  await showMainMenu(from, lang);
-  continue;
-}
+            if (!Number.isFinite(qty) || qty <= 0) {
+              await sendText(from, t(lang, "cart.ask_quantity_invalid"));
+              continue;
+            }
+
+            const item: CartItem = {
+              sku: pending.sku,
+              name: pending.name,
+              qty,
+              unitPrice: pending.unitPrice,
+            };
+
+            addToCart(from, item);
+            PENDING_QTY.delete(from);
+
+            await sendText(
+              from,
+              t(lang, "cart.added_with_qty", {
+                title: item.name,
+                qty: String(item.qty),
+              })
+            );
+
+            // Show updated cart summary (already formats "title ×qty — price")
+            await showCart(from, lang);
+
+            continue;
+          }
+
+          // 3) start menu on greetings if idle (existing logic)
+          const activeFlow = FLOW.get(from);
+          const txt = rawText.toLowerCase();
+
 
 // 1) start menu on greetings if idle
 if ((!s || s.state === "IDLE") && !activeFlow) {
@@ -989,25 +1017,36 @@ if (id === 'ACTION_TALK_TO_AGENT') {
       return;
     }
 
-    // Normal ADD / BUY logic (unchanged)
-    const item: CartItem = {
-      sku: prod.sku,
-      name: prod.name,
-      qty: 1,
-      unitPrice: prod.price,
-    };
-
+    // ---------------- NEW: ADD asks for quantity first ----------------
     if (mode === "ADD") {
-      addToCart(user, item);
-      await sendText(user, t(lang, "cart.added", { title: item.name }));
-      return sendButtonsMessageSafe(user, t(lang, "cart.choose_action"), [
-        { id: "ACTION_CHECKOUT", title: t(lang, "menu.checkout") },
-        { id: "ACTION_VIEW_CART", title: t(lang, "menu.view_cart") },
-        { id: "ACTION_BACK", title: t(lang, "menu.back_to_menu") },
-      ]);
+      // Remember which product we are adding for this user
+      PENDING_QTY.set(user, {
+        sku: prod.sku,
+        name: prod.name,
+        unitPrice: prod.price,
+      });
+
+      // Ask the user for quantity
+      await sendText(
+        user,
+        t(lang, "cart.ask_quantity", {
+          title: prod.name,
+          price: fmtTZS(prod.price),
+        })
+      );
+      // We do NOT add to cart yet; we wait for the next text reply
+      return;
     }
 
+    // BUY logic stays the same
     if (mode === "BUY") {
+      const item: CartItem = {
+        sku: prod.sku,
+        name: prod.name,
+        qty: 1,
+        unitPrice: prod.price,
+      };
+
       setPending(user, item);
       setFlow(user, "ASK_IF_DAR"); // start with inside/outside Dar
       CONTACT.set(user, {});
@@ -1018,6 +1057,7 @@ if (id === 'ACTION_TALK_TO_AGENT') {
       return;
     }
   }
+
 
   if (id === 'ACTION_PAYMENT_DONE') {
   const s = getSession(user);
