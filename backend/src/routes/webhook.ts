@@ -1111,7 +1111,10 @@ if (id === 'ACTION_TALK_TO_AGENT') {
 
     const { order } = found;
     const code = (order.order_code as string | null) ?? `UJ-${order.id}`;
-    const statusText = getOrderStatusLabel(lang, order.status as string | null);
+    const statusText = getOrderStatusLabel(
+      lang,
+      order.status as string | null
+    );
 
     // Load products in this order
     const items = await db("order_items")
@@ -1147,13 +1150,13 @@ if (id === 'ACTION_TALK_TO_AGENT') {
       t(lang, "orders.detail_created_at", { date: createdAt })
     );
 
-    // 1) Send the detailed order summary (admin-style message)
+    // 1) Send the detailed order summary
     await sendText(user, lines.join("\n"));
 
     // 2) Build buttons depending on status
     const buttons: Button[] = [];
 
-    // If still pending → allow cancel + modify
+    // If order is still pending → allow modify + cancel
     if ((order.status as string | null) === "pending") {
       buttons.push(
         {
@@ -1167,13 +1170,13 @@ if (id === 'ACTION_TALK_TO_AGENT') {
       );
     }
 
-    // Always include "Return to menu"
+    // In all cases add "Return to menu"
     buttons.push({
       id: "ACTION_BACK",
       title: t(lang, "menu.back_to_menu"),
     });
 
-    // Use the same helper that logs menus for the admin UI
+    // Use the existing helper so the admin UI also sees this menu
     await sendButtonsMessageSafe(
       user,
       t(lang, "cart.choose_action"),
