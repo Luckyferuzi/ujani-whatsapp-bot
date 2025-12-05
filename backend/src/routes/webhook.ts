@@ -965,7 +965,7 @@ if (id === 'ACTION_TALK_TO_AGENT') {
   }
 
   if (id === "ACTION_TRACK_BY_NAME") {
-    // New behavior: show a list of this customer's orders ("Angalia oda")
+    // Show a list of this customer's orders ("Kufuatilia oda")
     const orders = await getOrdersForWhatsappUser(user, 20);
 
     if (!orders.length) {
@@ -977,9 +977,12 @@ if (id === 'ACTION_TALK_TO_AGENT') {
       const statusText = getOrderStatusLabel(lang, o.status);
       // Very simple date: YYYY-MM-DD
       const date = o.createdAt ? o.createdAt.slice(0, 10) : "";
+      const code = o.code || `UJ-${o.id}`;
       return {
+        // This is what will be clicked in the next step:
         id: `ORDER_DETAIL_${o.id}`,
-        title: o.code,
+        // Show both code + numeric id so customer "clicks the ID":
+        title: `${code} (#${o.id})`,
         description: `${statusText} • ${date}`,
       };
     });
@@ -1092,7 +1095,7 @@ if (id === 'ACTION_TALK_TO_AGENT') {
       return;
     }
 
-      if (id.startsWith("ORDER_DETAIL_")) {
+  if (id.startsWith("ORDER_DETAIL_")) {
     const rawId = id.substring("ORDER_DETAIL_".length);
     const orderId = Number(rawId);
     if (!Number.isFinite(orderId)) {
@@ -1144,28 +1147,42 @@ if (id === 'ACTION_TALK_TO_AGENT') {
       t(lang, "orders.detail_created_at", { date: createdAt })
     );
 
+    // 1) Send the detailed order summary (admin-style message)
     await sendText(user, lines.join("\n"));
 
-    // Only pending orders can be cancelled/modified
+    // 2) Build buttons depending on status
+    const buttons: Button[] = [];
+
+    // If still pending → allow cancel + modify
     if ((order.status as string | null) === "pending") {
-      await sendButtonsMessage(user, t(lang, "orders.list_header"), [
+      buttons.push(
         {
           id: `ORDER_CANCEL_${order.id}`,
-          title: lang === "sw"
-            ? "Ghairi oda"
-            : "Cancel order",
+          title: lang === "sw" ? "Ghairi oda" : "Cancel order",
         },
         {
           id: `ORDER_MODIFY_${order.id}`,
-          title: lang === "sw"
-            ? "Badili oda"
-            : "Modify order",
-        },
-      ]);
+          title: lang === "sw" ? "Badili oda" : "Modify order",
+        }
+      );
     }
+
+    // Always include "Return to menu"
+    buttons.push({
+      id: "ACTION_BACK",
+      title: t(lang, "menu.back_to_menu"),
+    });
+
+    // Use the same helper that logs menus for the admin UI
+    await sendButtonsMessageSafe(
+      user,
+      t(lang, "cart.choose_action"),
+      buttons
+    );
 
     return;
   }
+
 
     if (id.startsWith("ORDER_CANCEL_")) {
     const rawId = id.substring("ORDER_CANCEL_".length);
