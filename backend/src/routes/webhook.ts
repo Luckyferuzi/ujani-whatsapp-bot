@@ -1099,13 +1099,13 @@ if (id === 'ACTION_TALK_TO_AGENT') {
     const rawId = id.substring("ORDER_DETAIL_".length);
     const orderId = Number(rawId);
     if (!Number.isFinite(orderId)) {
-      await sendText(user, t(lang, "orders.none"));
+      await sendBotText(user, t(lang, "orders.none"));
       return;
     }
 
     const found = await findOrderById(orderId);
     if (!found || !found.order) {
-      await sendText(user, t(lang, "orders.none"));
+      await sendBotText(user, t(lang, "orders.none"));
       return;
     }
 
@@ -1150,13 +1150,13 @@ if (id === 'ACTION_TALK_TO_AGENT') {
       t(lang, "orders.detail_created_at", { date: createdAt })
     );
 
-    // 1) Send the detailed order summary
-    await sendText(user, lines.join("\n"));
+    // 🔹 Send & LOG the order details so admin sees them
+    await sendBotText(user, lines.join("\n"));
 
-    // 2) Build buttons depending on status
+    // 🔹 Build buttons based on status
     const buttons: Button[] = [];
 
-    // If order is still pending → allow modify + cancel
+    // If order is still pending → show Modify + Cancel
     if ((order.status as string | null) === "pending") {
       buttons.push(
         {
@@ -1170,13 +1170,13 @@ if (id === 'ACTION_TALK_TO_AGENT') {
       );
     }
 
-    // In all cases add "Return to menu"
+    // Always add "Rudi kwenye menyu / Back to menu"
     buttons.push({
       id: "ACTION_BACK",
       title: t(lang, "menu.back_to_menu"),
     });
 
-    // Use the existing helper so the admin UI also sees this menu
+    // 🔹 Send buttons AND log them for the admin UI
     await sendButtonsMessageSafe(
       user,
       t(lang, "cart.choose_action"),
@@ -1185,7 +1185,6 @@ if (id === 'ACTION_TALK_TO_AGENT') {
 
     return;
   }
-
 
     if (id.startsWith("ORDER_CANCEL_")) {
     const rawId = id.substring("ORDER_CANCEL_".length);
