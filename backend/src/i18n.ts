@@ -196,7 +196,7 @@ const dict: Dict = {
     'order.preparing_message':
       'Oda yako {orderCode} ipo kwenye hatua ya maandalizi ya bidhaa. Tutakutaarifu ikishatoka kwa mpeleka mzigo.',
    'order.out_for_delivery_message':
-  'Oda yako {code} imekabidhiwa mpeleka mzigo na iko njiani kufika. Namba ya mpeleka mzigo ni {deliveryAgentPhone}. Tafadhali mpigie au mtumie message kwa mawasiliano zaidi',
+  'Oda yako {orderCode} imekabidhiwa mpeleka mzigo na iko njiani kufika. Namba ya mpeleka mzigo ni {deliveryAgentPhone}. Tafadhali mpigie au mtumie message kwa mawasiliano zaidi',
     'order.delivered_message':
       'Oda yako {orderCode} imewasilishwa. Asante kwa kuamini Ujani Herbals 🌿.',
           'product.unavailable':
