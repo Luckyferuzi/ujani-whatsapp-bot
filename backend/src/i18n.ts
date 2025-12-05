@@ -195,7 +195,7 @@ const dict: Dict = {
     'track.line_agent_phone': '• Namba ya mpeleka mzigo: *{{agentPhone}}*',
     'order.preparing_message':
       'Oda yako {orderCode} ipo kwenye hatua ya maandalizi ya bidhaa. Tutakutaarifu ikishatoka kwa mpeleka mzigo.',
-   'order.out_for_delivery':
+   'order.out_for_delivery_message':
   'Oda yako {code} imekabidhiwa mpeleka mzigo na iko njiani kufika. Namba ya mpeleka mzigo ni {deliveryAgentPhone}. Tafadhali mpigie au mtumie message kwa mawasiliano zaidi',
     'order.delivered_message':
       'Oda yako {orderCode} imewasilishwa. Asante kwa kuamini Ujani Herbals 🌿.',
@@ -385,7 +385,7 @@ const dict: Dict = {
       '• Order total: *{total} TZS*; paid so far: *{paid} TZS*; remaining balance: *{remaining} TZS*.',
     'order.preparing_message':
       'Your order {orderCode} is now being prepared. We will notify you once it is handed over to the delivery rider.',
-    'order.out_for_delivery':'Your order {code} has been handed over to the delivery rider and is on the way. The rider\'s phonumber is {deliveryAgentPhone}. Please call or text them for further communication',
+    'order.out_for_delivery_message':'Your order {code} has been handed over to the delivery rider and is on the way. The rider\'s phonumber is {deliveryAgentPhone}. Please call or text them for further communication',
     'order.delivered_message':
       'Your order {orderCode} has been delivered. Thank you for choosing Ujani Herbals 🌿.',
           'product.unavailable':
