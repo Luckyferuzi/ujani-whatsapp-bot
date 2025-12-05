@@ -1107,13 +1107,14 @@ inboxRoutes.post("/orders/:id/status", async (req, res) => {
           const orderCode =
             orderRow.order_code || `UJ-${orderRow.order_id}`;
 
-          const msg = t(lang, templateKey, {
-            orderCode,
-            agentPhone:
-              orderRow.delivery_agent_phone ||
-              delivery_agent_phone ||
-              "",
-          });
+const msg = t(lang, templateKey, {
+  orderCode,
+  deliveryAgentPhone:
+    orderRow.delivery_agent_phone ||
+    delivery_agent_phone ||
+    "",
+});
+
 
           try {
             await sendText(orderRow.wa_id, msg);
