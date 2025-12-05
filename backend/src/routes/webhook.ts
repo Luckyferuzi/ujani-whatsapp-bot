@@ -22,18 +22,21 @@ import {
   upsertCustomerByWa,
   getOrCreateConversation,
   insertInboundMessage,
-  insertOutboundMessage,          // 👈 add this
+  insertOutboundMessage,
   updateConversationLastUserMessageAt,
   createOrderWithPayment,
   findOrderById,
   findLatestOrderByCustomerName,
   updateOrderPaymentMode,
+  getOrdersForCustomer,
 } from "../db/queries.js";
+
 
 import { emit } from '../sockets.js';
 import db from '../db/knex.js';
 
 export const webhook = Router();
+
 
 
 /**
@@ -347,6 +350,45 @@ function paymentChoiceById(id: string) {
   }
   return null;
 }
+
+function getOrderStatusLabel(lang: Lang, rawStatus: string | null | undefined): string {
+  const status = rawStatus || "pending";
+  const key = `orders.status.${status}`;
+  return t(lang, key);
+}
+
+type OrderSummaryForBot = {
+  id: number;
+  code: string;
+  status: string;
+  totalAmount: number;
+  createdAt: string;
+};
+
+/**
+ * Load recent orders for this WhatsApp user (by wa_id).
+ * Uses the same customer table as the rest of the bot.
+ */
+async function getOrdersForWhatsappUser(
+  user: string,
+  limit = 10
+): Promise<OrderSummaryForBot[]> {
+  const customer = await db("customers").where({ wa_id: user }).first();
+  if (!customer) return [];
+
+  const rows = await getOrdersForCustomer(customer.id as number, limit);
+
+  return rows.map((row: any) => ({
+    id: row.id,
+    code: row.order_code ?? `UJ-${row.id}`,
+    status: row.status ?? "pending",
+    totalAmount: Number(row.total_amount ?? 0),
+    createdAt: (row.created_at as any)?.toISOString
+      ? (row.created_at as Date).toISOString()
+      : String(row.created_at ?? ""),
+  }));
+}
+
 
 /* -------------------------------------------------------------------------- */
 /*                              In-memory state                               */
@@ -922,15 +964,48 @@ if (id === 'ACTION_TALK_TO_AGENT') {
     return showMainMenu(user, lang);
   }
 
-  if (id === 'ACTION_TRACK_BY_NAME') {
-    setFlow(user, 'TRACK_ASK_NAME');
-    return sendText(user, t(lang, 'track.ask_name'));
+  if (id === "ACTION_TRACK_BY_NAME") {
+    // New behavior: show a list of this customer's orders ("Angalia oda")
+    const orders = await getOrdersForWhatsappUser(user, 20);
+
+    if (!orders.length) {
+      await sendText(user, t(lang, "orders.none"));
+      return;
+    }
+
+    const rows = orders.map((o) => {
+      const statusText = getOrderStatusLabel(lang, o.status);
+      // Very simple date: YYYY-MM-DD
+      const date = o.createdAt ? o.createdAt.slice(0, 10) : "";
+      return {
+        id: `ORDER_DETAIL_${o.id}`,
+        title: o.code,
+        description: `${statusText} • ${date}`,
+      };
+    });
+
+    await sendListMessageSafe({
+      to: user,
+      header: t(lang, "orders.list_header"),
+      body: t(lang, "orders.list_body"),
+      footer: "",
+      buttonText: t(lang, "generic.choose"),
+      sections: [
+        {
+          title: t(lang, "orders.list_section"),
+          rows,
+        },
+      ],
+    });
+
+    return;
   }
+
 
   if (id === "ACTION_FAQ") {
   await sendText(user, t(lang, "faq.intro"));
   await sendText(user, t(lang, "faq.list"));
-  return;
+  return showMainMenu(user, lang);;
 }
 
 
@@ -1016,6 +1091,163 @@ if (id === 'ACTION_TALK_TO_AGENT') {
       ]);
       return;
     }
+
+      if (id.startsWith("ORDER_DETAIL_")) {
+    const rawId = id.substring("ORDER_DETAIL_".length);
+    const orderId = Number(rawId);
+    if (!Number.isFinite(orderId)) {
+      await sendText(user, t(lang, "orders.none"));
+      return;
+    }
+
+    const found = await findOrderById(orderId);
+    if (!found || !found.order) {
+      await sendText(user, t(lang, "orders.none"));
+      return;
+    }
+
+    const { order } = found;
+    const code = (order.order_code as string | null) ?? `UJ-${order.id}`;
+    const statusText = getOrderStatusLabel(lang, order.status as string | null);
+
+    // Load products in this order
+    const items = await db("order_items")
+      .where({ order_id: order.id })
+      .select("name", "qty");
+
+    const lines: string[] = [];
+    lines.push(t(lang, "orders.detail_header", { code }));
+
+    if (items.length > 0) {
+      lines.push(t(lang, "orders.detail_items_header"));
+      for (const it of items) {
+        lines.push(
+          t(lang, "orders.detail_line", {
+            title: String(it.name ?? ""),
+            qty: String(it.qty ?? 0),
+          })
+        );
+      }
+    } else {
+      lines.push(t(lang, "orders.detail_no_items"));
+    }
+
+    const createdRaw = order.created_at as any;
+    const createdAt =
+      createdRaw instanceof Date
+        ? createdRaw.toISOString().slice(0, 10)
+        : String(createdRaw ?? "").slice(0, 10);
+
+    lines.push(
+      "",
+      t(lang, "orders.detail_status", { status: statusText }),
+      t(lang, "orders.detail_created_at", { date: createdAt })
+    );
+
+    await sendText(user, lines.join("\n"));
+
+    // Only pending orders can be cancelled/modified
+    if ((order.status as string | null) === "pending") {
+      await sendButtonsMessage(user, t(lang, "orders.list_header"), [
+        {
+          id: `ORDER_CANCEL_${order.id}`,
+          title: lang === "sw"
+            ? "Ghairi oda"
+            : "Cancel order",
+        },
+        {
+          id: `ORDER_MODIFY_${order.id}`,
+          title: lang === "sw"
+            ? "Badili oda"
+            : "Modify order",
+        },
+      ]);
+    }
+
+    return;
+  }
+
+    if (id.startsWith("ORDER_CANCEL_")) {
+    const rawId = id.substring("ORDER_CANCEL_".length);
+    const orderId = Number(rawId);
+    if (!Number.isFinite(orderId)) {
+      await sendText(user, t(lang, "orders.none"));
+      return;
+    }
+
+    const found = await findOrderById(orderId);
+    if (!found || !found.order) {
+      await sendText(user, t(lang, "orders.none"));
+      return;
+    }
+
+    const { order } = found;
+    const code = (order.order_code as string | null) ?? `UJ-${order.id}`;
+
+    if ((order.status as string | null) !== "pending") {
+      await sendText(
+        user,
+        t(lang, "orders.cancel_not_pending", { code })
+      );
+      return;
+    }
+
+    await db("orders")
+      .where({ id: orderId })
+      .update({
+        status: "cancelled",
+        updated_at: new Date(),
+      });
+
+    // Notify web UI / dashboards
+    emit("orders.updated", { order_id: orderId, status: "cancelled" });
+
+    await sendText(user, t(lang, "orders.cancel_success", { code }));
+    return;
+  }
+
+  if (id.startsWith("ORDER_MODIFY_")) {
+    const rawId = id.substring("ORDER_MODIFY_".length);
+    const orderId = Number(rawId);
+    if (!Number.isFinite(orderId)) {
+      await sendText(user, t(lang, "orders.none"));
+      return;
+    }
+
+    const found = await findOrderById(orderId);
+    if (!found || !found.order) {
+      await sendText(user, t(lang, "orders.none"));
+      return;
+    }
+
+    const { order } = found;
+    const code = (order.order_code as string | null) ?? `UJ-${order.id}`;
+
+    // Tell the customer what's happening
+    await sendText(
+      user,
+      t(lang, "orders.modify_info", { code })
+    );
+
+    // Reuse the existing "talk to agent" logic:
+    const customerId = await upsertCustomerByWa(user, undefined, user);
+    const conversationId = await getOrCreateConversation(customerId);
+
+    await db("conversations")
+      .where({ id: conversationId })
+      .update({ agent_allowed: true });
+
+    emit("conversation.updated", {
+      id: conversationId,
+      agent_allowed: true,
+    });
+
+    // Reuse existing agent intro message
+    await sendText(user, t(lang, "agent.reply"));
+
+    return;
+  }
+
 
     // ---------------- NEW: ADD asks for quantity first ----------------
     if (mode === "ADD") {

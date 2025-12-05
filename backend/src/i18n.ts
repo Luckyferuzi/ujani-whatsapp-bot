@@ -20,6 +20,33 @@ const dict: Dict = {
     'menu.more_details': 'Maelezo zaidi',
     'menu.back_to_menu': 'Rudi kwenye menyu',
     'menu.choose_variant': 'Chagua Kipakeji',
+    
+        /* ===== Orders list & details (WhatsApp) ===== */
+    'orders.none':
+      'Huna oda yoyote iliyohifadhiwa kwa namba hii ya WhatsApp.',
+    'orders.list_header': 'Angalia oda zako',
+    'orders.list_body': 'Chagua oda unayotaka kuangalia hapa chini.',
+    'orders.list_section': 'Oda zako',
+    'orders.detail_header': 'Maelezo ya oda {code}:',
+    'orders.detail_items_header': 'Bidhaa katika oda hii:',
+    'orders.detail_no_items': 'Hatukupata taarifa za bidhaa kwa oda hii.',
+    'orders.detail_line': '• {title} ×{qty}',
+    'orders.detail_status': 'Hali ya oda: {status}',
+    'orders.detail_created_at': 'Imewekwa tarehe: {date}',
+
+    'orders.cancel_success':
+      'Oda {code} imeghairishwa. Kama tayari umefanya malipo, tafadhali wasiliana na mhudumu kwa maelezo zaidi.',
+    'orders.cancel_not_pending':
+      'Oda {code} haiwezi kughairishwa kwa sababu haipo tena kwenye hatua ya kusubiri.',
+    'orders.modify_info':
+      'Umechagua kubadilisha oda {code}. Tutakuunganisha na mhudumu kwa msaada zaidi.',
+
+    'orders.status.pending': 'Haijathibitishwa (inasubiri maandalizi)',
+    'orders.status.preparing': 'Inaandaliwa',
+    'orders.status.out_for_delivery': 'Iko njiani kufika',
+    'orders.status.delivered': 'Imewasili',
+    'orders.status.cancelled': 'Imeghairishwa',
+
 
     /* ===== Product details (Swahili) ===== */
     'product.kiboko.details': [
@@ -193,6 +220,33 @@ const dict: Dict = {
     'menu.back_to_menu': 'Back to menu',
     'menu.choose_variant': 'Choose Variant',
 
+        /* ===== Orders list & details (WhatsApp) ===== */
+    'orders.none':
+      "You don't have any orders saved for this WhatsApp number.",
+    'orders.list_header': 'View your orders',
+    'orders.list_body': 'Choose the order you want to view below.',
+    'orders.list_section': 'Your orders',
+    'orders.detail_header': 'Details for order {code}:',
+    'orders.detail_items_header': 'Items in this order:',
+    'orders.detail_no_items': 'No items found for this order.',
+    'orders.detail_line': '• {title} ×{qty}',
+    'orders.detail_status': 'Order status: {status}',
+    'orders.detail_created_at': 'Placed on: {date}',
+
+    'orders.cancel_success':
+      'Order {code} has been cancelled. If you already paid, please contact an agent for more details.',
+    'orders.cancel_not_pending':
+      'Order {code} can no longer be cancelled because it is not pending.',
+    'orders.modify_info':
+      'You chose to modify order {code}. We will connect you to an agent for further help.',
+
+    'orders.status.pending': 'Pending (awaiting processing)',
+    'orders.status.preparing': 'Being prepared',
+    'orders.status.out_for_delivery': 'Out for delivery',
+    'orders.status.delivered': 'Delivered',
+    'orders.status.cancelled': 'Cancelled',
+
+
     'product.kiboko.details': [
       '• *Ujani Kiboko* (topical) safely supports size/length gains.',
       '• Strengthens erectile muscles and firmness.',
@@ -331,8 +385,7 @@ const dict: Dict = {
       '• Order total: *{total} TZS*; paid so far: *{paid} TZS*; remaining balance: *{remaining} TZS*.',
     'order.preparing_message':
       'Your order {orderCode} is now being prepared. We will notify you once it is handed over to the delivery rider.',
-    'order.out_for_delivery':
-  'Your order {code} has been handed over to the delivery rider and is on the way. The rider\'s phone number is {agentPhone}. Please call or text them for further communication',
+    'order.out_for_delivery':'Your order {code} has been handed over to the delivery rider and is on the way. The rider\'s phonumber is {agentPhone}. Please call or text them for further communication',
     'order.delivered_message':
       'Your order {orderCode} has been delivered. Thank you for choosing Ujani Herbals 🌿.',
           'product.unavailable':
