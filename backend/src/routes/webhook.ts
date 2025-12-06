@@ -1203,13 +1203,13 @@ if (id === 'ACTION_TALK_TO_AGENT') {
     const orderId = Number(rawId);
 
     if (!Number.isFinite(orderId)) {
-      await sendBotText(user, t(lang, "orders.none"));
+      await sendText(user, t(lang, "orders.none"));
       return;
     }
 
     const found = await findOrderById(orderId);
     if (!found || !found.order) {
-      await sendBotText(user, t(lang, "orders.none"));
+      await sendText(user, t(lang, "orders.none"));
       return;
     }
 
@@ -1255,7 +1255,7 @@ if (id === 'ACTION_TALK_TO_AGENT') {
     );
 
     // 1) Send + log order details so admin sees them
-    await sendBotText(user, lines.join("\n"));
+    await sendText(user, lines.join("\n"));
 
     // 2) Build buttons based on status
     const buttons: Button[] = [];
