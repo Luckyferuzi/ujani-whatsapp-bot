@@ -591,14 +591,32 @@ if (!bodyForDb && interactiveId) {
           
           // 1) handle interactive first
           // 1) handle interactive first
+          // 1) handle interactive first
           if (interactiveId) {
             await onInteractive(from, interactiveId, lang);
             continue;
           }
 
-          // 2) if we are waiting for a quantity for a product, handle that first
+          // 2) Extract the raw text (for list selections etc.)
           const rawText = (text || "").trim();
+
+          // If the text looks like an order line with "(#<id>)", show order details.
+          // This is a fallback so that even if the interactive payload is weird,
+          // selecting an order from "Angalia oda zako" still works.
+          if (rawText) {
+            const match = rawText.match(/#(\d+)\)/);
+            if (match) {
+              const orderId = Number(match[1]);
+              if (Number.isFinite(orderId)) {
+                await showOrderDetailsAndActions(from, orderId, lang);
+                continue;
+              }
+            }
+          }
+
+          // 3) if we are waiting for a quantity for a product, handle that first
           if (rawText && PENDING_QTY.has(from)) {
+
             const pending = PENDING_QTY.get(from)!;
             const qty = Number.parseInt(rawText, 10);
 
@@ -742,6 +760,91 @@ async function showProductActions(user: string, sku: string, lang: Lang) {
     { id: `DETAILS_${prod.sku}`, title: t(lang, "menu.more_details") },
   ];
   await sendButtonsMessageSafe(user, t(lang, "menu.actions_section"), buttons);
+}
+
+async function showOrderDetailsAndActions(
+  user: string,
+  orderId: number,
+  lang: Lang
+) {
+  const found = await findOrderById(orderId);
+  if (!found || !found.order) {
+    await sendBotText(user, t(lang, "orders.none"));
+    return;
+  }
+
+  const { order } = found;
+  const code = (order.order_code as string | null) ?? `UJ-${order.id}`;
+  const statusText = getOrderStatusLabel(
+    lang,
+    order.status as string | null
+  );
+
+  // Load products in this order
+  const items = await db("order_items")
+    .where({ order_id: order.id })
+    .select("name", "qty");
+
+  const lines: string[] = [];
+  lines.push(t(lang, "orders.detail_header", { code }));
+
+  if (items.length > 0) {
+    lines.push(t(lang, "orders.detail_items_header"));
+    for (const it of items) {
+      lines.push(
+        t(lang, "orders.detail_line", {
+          title: String(it.name ?? ""),
+          qty: String(it.qty ?? 0),
+        })
+      );
+    }
+  } else {
+    lines.push(t(lang, "orders.detail_no_items"));
+  }
+
+  const createdRaw = order.created_at as any;
+  const createdAt =
+    createdRaw instanceof Date
+      ? createdRaw.toISOString().slice(0, 10)
+      : String(createdRaw ?? "").slice(0, 10);
+
+  lines.push(
+    "",
+    t(lang, "orders.detail_status", { status: statusText }),
+    t(lang, "orders.detail_created_at", { date: createdAt })
+  );
+
+  // 🔹 Send & log the details so admin sees them
+  await sendBotText(user, lines.join("\n"));
+
+  // 🔹 Build buttons based on status
+  const buttons: Button[] = [];
+
+  // Pending → allow modify + cancel
+  if ((order.status as string | null) === "pending") {
+    buttons.push(
+      {
+        id: `ORDER_CANCEL_${order.id}`,
+        title: lang === "sw" ? "Ghairi oda" : "Cancel order",
+      },
+      {
+        id: `ORDER_MODIFY_${order.id}`,
+        title: lang === "sw" ? "Badili oda" : "Modify order",
+      }
+    );
+  }
+
+  // Always allow back to menu
+  buttons.push({
+    id: "ACTION_BACK",
+    title: t(lang, "menu.back_to_menu"),
+  });
+
+  await sendButtonsMessageSafe(
+    user,
+    t(lang, "cart.choose_action"),
+    buttons
+  );
 }
 
 
@@ -1104,88 +1207,10 @@ if (id.startsWith("ORDER_DETAIL_")) {
     return;
   }
 
-  const found = await findOrderById(orderId);
-  if (!found || !found.order) {
-    await sendBotText(user, t(lang, "orders.none"));
-    return;
-  }
-
-  const { order } = found;
-  const code = (order.order_code as string | null) ?? `UJ-${order.id}`;
-  const statusText = getOrderStatusLabel(
-    lang,
-    order.status as string | null
-  );
-
-  // Load products in this order
-  const items = await db("order_items")
-    .where({ order_id: order.id })
-    .select("name", "qty");
-
-  const lines: string[] = [];
-  lines.push(t(lang, "orders.detail_header", { code }));
-
-  if (items.length > 0) {
-    lines.push(t(lang, "orders.detail_items_header"));
-    for (const it of items) {
-      lines.push(
-        t(lang, "orders.detail_line", {
-          title: String(it.name ?? ""),
-          qty: String(it.qty ?? 0),
-        })
-      );
-    }
-  } else {
-    lines.push(t(lang, "orders.detail_no_items"));
-  }
-
-  const createdRaw = order.created_at as any;
-  const createdAt =
-    createdRaw instanceof Date
-      ? createdRaw.toISOString().slice(0, 10)
-      : String(createdRaw ?? "").slice(0, 10);
-
-  lines.push(
-    "",
-    t(lang, "orders.detail_status", { status: statusText }),
-    t(lang, "orders.detail_created_at", { date: createdAt })
-  );
-
-  // 🔹 Send & log the order details (admin will see this)
-  await sendBotText(user, lines.join("\n"));
-
-  // 🔹 Build buttons depending on status
-  const buttons: Button[] = [];
-
-  // If still pending → allow modify + cancel
-  if ((order.status as string | null) === "pending") {
-    buttons.push(
-      {
-        id: `ORDER_CANCEL_${order.id}`,
-        title: lang === "sw" ? "Ghairi oda" : "Cancel order",
-      },
-      {
-        id: `ORDER_MODIFY_${order.id}`,
-        title: lang === "sw" ? "Badili oda" : "Modify order",
-      }
-    );
-  }
-
-  // Always include "Rudi kwenye menyu / Back to menu"
-  buttons.push({
-    id: "ACTION_BACK",
-    title: t(lang, "menu.back_to_menu"),
-  });
-
-  // 🔹 Send buttons & log them as a menu in admin inbox
-  await sendButtonsMessageSafe(
-    user,
-    t(lang, "cart.choose_action"),
-    buttons
-  );
-
+  await showOrderDetailsAndActions(user, orderId, lang);
   return;
 }
+
 
 
     if (id.startsWith("ORDER_CANCEL_")) {
