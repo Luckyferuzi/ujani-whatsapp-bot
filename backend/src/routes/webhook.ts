@@ -1316,12 +1316,72 @@ if (id === 'ACTION_TALK_TO_AGENT') {
       return;
     }
 
-    await db("orders")
-      .where({ id: orderId })
-      .update({
-        status: "cancelled",
-        updated_at: new Date(),
-      });
+await db.transaction(async (trx) => {
+  // 1) Update order status
+  await trx("orders")
+    .where({ id: orderId })
+    .update({
+      status: "cancelled",
+      updated_at: new Date(),
+    });
+
+  // 2) Refund stock in the same way as the admin route
+  const items = await trx("order_items")
+    .where({ order_id: orderId })
+    .select<{
+      product_id: number | null;
+      qty: number;
+    }[]>("product_id", "qty");
+
+  const qtyByProduct = new Map<number, number>();
+
+  for (const item of items) {
+    if (!item.product_id) continue;
+    const pid = item.product_id;
+    const qty = Number(item.qty) || 0;
+    if (qty <= 0) continue;
+
+    const existing = qtyByProduct.get(pid) || 0;
+    qtyByProduct.set(pid, existing + qty);
+  }
+
+  const productIds = Array.from(qtyByProduct.keys());
+
+  if (productIds.length > 0) {
+    const productRows = await trx("products")
+      .whereIn("id", productIds)
+      .select<{ id: number; stock_qty: number | null }[]>(
+        "id",
+        "stock_qty"
+      );
+
+    for (const product of productRows) {
+      const pid = product.id;
+      const currentStock = Number(product.stock_qty ?? 0);
+      const delta = qtyByProduct.get(pid) || 0;
+
+      const newStock = currentStock + delta; // refund all quantities
+      await trx("products")
+        .where({ id: pid })
+        .update({ stock_qty: newStock });
+    }
+  }
+
+  // 3) Emit events after the transaction
+  emit("orders.updated", {
+    reason: "cancelled_from_whatsapp",
+    order_id: orderId,
+  });
+
+  if (productIds.length > 0) {
+    emit("products.updated", {
+      reason: "order_cancelled_from_whatsapp",
+      order_id: orderId,
+      product_ids: productIds,
+    });
+  }
+});
+
 
     // Notify web UI / dashboards
     emit("orders.updated", { order_id: orderId, status: "cancelled" });

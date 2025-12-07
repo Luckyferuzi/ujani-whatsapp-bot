@@ -1003,54 +1003,59 @@ inboxRoutes.post("/orders/:id/status", async (req, res) => {
       await trx("orders").where({ id }).update(update);
 
       // 2) Adjust stock ONLY when moving into or out of "preparing"
-      if (isEnteringPreparing || isCancellingFromPreparing) {
-        // Get all items for this order (must have product_id to adjust stock)
-        const items = await trx("order_items")
-          .where({ order_id: id })
-          .select<{
-            product_id: number | null;
-            qty: number;
-          }[]>("product_id", "qty");
+      const isCancellingNow = prevStatus !== "cancelled" && newStatus === "cancelled";
 
-        const qtyByProduct = new Map<number, number>();
+// 2) Adjust stock when reserving or cancelling
+// - entering "preparing"  => decrease stock (reserve)
+// - any transition into "cancelled" => increase stock (refund)
+if (isEnteringPreparing || isCancellingNow) {
+  const items = await trx("order_items")
+    .where({ order_id: id })
+    .select<{
+      product_id: number | null;
+      qty: number;
+    }[]>("product_id", "qty");
 
-        for (const item of items) {
-          if (!item.product_id) continue;
+  const qtyByProduct = new Map<number, number>();
 
-          const pid = item.product_id;
-          const qty = Number(item.qty) || 0;
-          if (qty <= 0) continue;
+  for (const item of items) {
+    if (!item.product_id) continue;
 
-          const existing = qtyByProduct.get(pid) || 0;
-          qtyByProduct.set(pid, existing + qty);
-        }
+    const pid = item.product_id;
+    const qty = Number(item.qty) || 0;
+    if (qty <= 0) continue;
 
-        const productIds = Array.from(qtyByProduct.keys());
-        affectedProductIds = productIds;
+    const existing = qtyByProduct.get(pid) || 0;
+    qtyByProduct.set(pid, existing + qty);
+  }
 
-        if (productIds.length > 0) {
-          const productRows = await trx("products")
-            .whereIn("id", productIds)
-            .select<{
-              id: number;
-              stock_qty: number | null;
-            }[]>("id", "stock_qty");
+  const productIds = Array.from(qtyByProduct.keys());
+  affectedProductIds = productIds;
 
-          for (const product of productRows) {
-            const pid = product.id;
-            const currentStock = Number(product.stock_qty ?? 0);
-            const delta = qtyByProduct.get(pid) || 0;
+  if (productIds.length > 0) {
+    const productRows = await trx("products")
+      .whereIn("id", productIds)
+      .select<{ id: number; stock_qty: number | null }[]>(
+        "id",
+        "stock_qty"
+      );
 
-            const newStock = isEnteringPreparing
-              ? Math.max(0, currentStock - delta) // reserve
-              : currentStock + delta; // refund
+    for (const product of productRows) {
+      const pid = product.id;
+      const currentStock = Number(product.stock_qty ?? 0);
+      const delta = qtyByProduct.get(pid) || 0;
 
-            await trx("products")
-              .where({ id: pid })
-              .update({ stock_qty: newStock });
-          }
-        }
-      }
+      const newStock = isEnteringPreparing
+        ? Math.max(0, currentStock - delta) // reserve stock
+        : currentStock + delta;             // refund on cancel
+
+      await trx("products")
+        .where({ id: pid })
+        .update({ stock_qty: newStock });
+    }
+  }
+}
+
 
       const updated = await trx("orders").where({ id }).first("*");
       return updated;
