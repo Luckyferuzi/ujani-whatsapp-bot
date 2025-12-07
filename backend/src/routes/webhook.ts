@@ -296,7 +296,7 @@ async function showPaymentOptions(user: string, lang: Lang, total: number) {
   const opts = getPaymentOptions();
 
   if (!opts.length) {
-    await sendText(user, t(lang, 'payment.none'));
+    await sendBotText(user, t(lang, 'payment.none'));
     return;
   }
 
@@ -305,7 +305,7 @@ async function showPaymentOptions(user: string, lang: Lang, total: number) {
     t(lang, 'flow.payment_choose'),
     ...opts.map(o => `• *${o.label}*: ${o.value}`),
   ];
-  await sendText(user, lines.join('\n'));
+  await sendBotText(user, lines.join('\n'));
 
   // Selectable list
   await sendListMessageSafe({
@@ -624,7 +624,7 @@ if (!bodyForDb && interactiveId) {
             const qty = Number.parseInt(rawText, 10);
 
             if (!Number.isFinite(qty) || qty <= 0) {
-              await sendText(from, t(lang, "cart.ask_quantity_invalid"));
+              await sendBotText(from, t(lang, "cart.ask_quantity_invalid"));
               continue;
             }
 
@@ -638,7 +638,7 @@ if (!bodyForDb && interactiveId) {
             addToCart(from, item);
             PENDING_QTY.delete(from);
 
-            await sendText(
+            await sendBotText(
               from,
               t(lang, "cart.added_with_qty", {
                 title: item.name,
@@ -747,11 +747,11 @@ async function showProductActions(user: string, sku: string, lang: Lang) {
 
   // If we know stock and it's empty -> tell customer it's unavailable
   if (typeof prod.stockQty === "number" && prod.stockQty <= 0) {
-    await sendText(user, t(lang, "product.unavailable", { name: prod.name }));
+    await sendBotText(user, t(lang, "product.unavailable", { name: prod.name }));
     return;
   }
 
-  await sendText(user, `*${prod.name}* — ${fmtTZS(prod.price)} TZS`);
+  await sendBotText(user, `*${prod.name}* — ${fmtTZS(prod.price)} TZS`);
   const hasVariants = !!(prod.children && prod.children.length);
 
   const buttons: Button[] = [
@@ -900,7 +900,7 @@ async function onInteractive(user: string, id: string, lang: Lang) {
 
     emit('conversation.updated', { id: conversationId, agent_allowed: true });
 
-    await sendText(user, t(lang, 'agent.reply'));
+    await sendBotText(user, t(lang, 'agent.reply'));
 
     await sendButtonsMessage(
       user,
@@ -943,19 +943,19 @@ async function onInteractive(user: string, id: string, lang: Lang) {
   if (N.startsWith('DAR_OUTSIDE')) {
     setFlow(user, 'ASK_NAME_OUT');
     CONTACT.set(user, {});
-    await sendText(user, t(lang, 'flow.ask_name'));
+    await sendBotText(user, t(lang, 'flow.ask_name'));
     return;
   }
   if (N.startsWith('IN_DAR_DELIVERY')) {
     setFlow(user, 'ASK_NAME_IN');
     CONTACT.set(user, {});
-    await sendText(user, t(lang, 'flow.ask_name'));
+    await sendBotText(user, t(lang, 'flow.ask_name'));
     return;
   }
   if (N.startsWith('IN_DAR_PICKUP')) {
   // ✅ New behavior: ONLY send the pickup message; no name/phone/muhtasari
   setFlow(user, null);
-  await sendText(user, (lang === 'sw'
+  await sendBotText(user, (lang === 'sw'
     ? 'Tupo Keko Modern Furniture, mkabala na Omax Bar. Wasiliana nasi kwa maelezo zaidi.'
     : 'We are at Keko Modern Furniture, opposite Omax Bar. Contact us for more details.'
   ));
@@ -995,7 +995,7 @@ async function onInteractive(user: string, id: string, lang: Lang) {
       });
     }
 
-    await sendText(user, t(lang, "payment.cod_confirm"));
+    await sendBotText(user, t(lang, "payment.cod_confirm"));
     // No payment options shown now; order will be paid on delivery.
     return;
   }
@@ -1004,14 +1004,14 @@ async function onInteractive(user: string, id: string, lang: Lang) {
   if (N.startsWith('PAY_')) {
     const choice = paymentChoiceById(id);
     if (choice) {
-      await sendText(user, t(lang, 'payment.selected', { label: choice.label, value: choice.value }));
+      await sendBotText(user, t(lang, 'payment.selected', { label: choice.label, value: choice.value }));
       const s = getSession(user);
       s.state = 'WAIT_PROOF';
       saveSession(user, s);
-      await sendText(user, t(lang, 'proof.ask'));
+      await sendBotText(user, t(lang, 'proof.ask'));
       return;
     }
-    await sendText(user, t(lang, 'payment.none'));
+    await sendBotText(user, t(lang, 'payment.none'));
     return;
   }
 
@@ -1047,7 +1047,7 @@ if (id === 'ACTION_TALK_TO_AGENT') {
 
   emit('conversation.updated', { id: conversationId, agent_allowed: true });
 
-  await sendText(user, t(lang, 'agent.reply'));
+  await sendBotText(user, t(lang, 'agent.reply'));
 }
 
   // --- NEW: customer goes back from agent to bot ---
@@ -1062,7 +1062,7 @@ if (id === 'ACTION_TALK_TO_AGENT') {
 
     emit('conversation.updated', { id: conversationId, agent_allowed: false });
 
-    await sendText(
+    await sendBotText(
       user,
       'Umerudi kwa bot 🤖. Tutaendelea na menyu ya kawaida ya oda.'
     );
@@ -1076,7 +1076,7 @@ if (id === 'ACTION_TALK_TO_AGENT') {
     const orders = await getOrdersForWhatsappUser(user, 20);
 
     if (!orders.length) {
-      await sendText(user, t(lang, "orders.none"));
+      await sendBotText(user, t(lang, "orders.none"));
       return;
     }
 
@@ -1116,13 +1116,13 @@ if (id === 'ACTION_TALK_TO_AGENT') {
     const orderId = Number(rawId);
     console.log("[onInteractive] ORDER_DETAIL branch", { id, rawId, orderId });
     if (!Number.isFinite(orderId)) {
-      await sendText(user, t(lang, "orders.none"));
+      await sendBotText(user, t(lang, "orders.none"));
       return;
     }
 
     const found = await findOrderById(orderId);
     if (!found || !found.order) {
-      await sendText(user, t(lang, "orders.none"));
+      await sendBotText(user, t(lang, "orders.none"));
       return;
     }
 
@@ -1186,7 +1186,8 @@ if (id === 'ACTION_TALK_TO_AGENT') {
     );
 
     // 1) Send + log order details so admin sees them
-    await sendText(user, lines.join("\n"));
+      await sendBotText(user, lines.join("\n"));
+
 
     // 2) Decide which actions to show based on status
     const buttons: { id: string; title: string }[] = [];
@@ -1238,13 +1239,13 @@ if (id === 'ACTION_TALK_TO_AGENT') {
     const rawId = id.substring("ORDER_PAY_".length);
     const orderId = Number(rawId);
     if (!Number.isFinite(orderId)) {
-      await sendText(user, t(lang, "orders.none"));
+      await sendBotText(user, t(lang, "orders.none"));
       return;
     }
 
     const found = await findOrderById(orderId);
     if (!found || !found.order) {
-      await sendText(user, t(lang, "orders.none"));
+      await sendBotText(user, t(lang, "orders.none"));
       return;
     }
 
@@ -1254,7 +1255,7 @@ if (id === 'ACTION_TALK_TO_AGENT') {
 
     // Only pending orders can be paid from here
     if (statusRaw !== "pending") {
-      await sendText(
+      await sendBotText(
         user,
         t(lang, "orders.pay_not_pending", { code })
       );
@@ -1266,7 +1267,7 @@ if (id === 'ACTION_TALK_TO_AGENT') {
     const remainingTzs = Math.max(totalTzs - paidTzs, 0);
 
     if (!remainingTzs || remainingTzs <= 0) {
-      await sendText(
+      await sendBotText(
         user,
         t(lang, "orders.pay_nothing_due", { code })
       );
@@ -1279,7 +1280,7 @@ if (id === 'ACTION_TALK_TO_AGENT') {
     saveSession(user, s);
 
     // Tell the user which order they're paying for
-    await sendText(
+    await sendBotText(
       user,
       t(lang, "orders.pay_header", { code })
     );
@@ -1294,13 +1295,13 @@ if (id === 'ACTION_TALK_TO_AGENT') {
     const rawId = id.substring("ORDER_CANCEL_".length);
     const orderId = Number(rawId);
     if (!Number.isFinite(orderId)) {
-      await sendText(user, t(lang, "orders.none"));
+      await sendBotText(user, t(lang, "orders.none"));
       return;
     }
 
     const found = await findOrderById(orderId);
     if (!found || !found.order) {
-      await sendText(user, t(lang, "orders.none"));
+      await sendBotText(user, t(lang, "orders.none"));
       return;
     }
 
@@ -1308,7 +1309,7 @@ if (id === 'ACTION_TALK_TO_AGENT') {
     const code = (order.order_code as string | null) ?? `UJ-${order.id}`;
 
     if ((order.status as string | null) !== "pending") {
-      await sendText(
+      await sendBotText(
         user,
         t(lang, "orders.cancel_not_pending", { code })
       );
@@ -1325,7 +1326,7 @@ if (id === 'ACTION_TALK_TO_AGENT') {
     // Notify web UI / dashboards
     emit("orders.updated", { order_id: orderId, status: "cancelled" });
 
-    await sendText(user, t(lang, "orders.cancel_success", { code }));
+    await sendBotText(user, t(lang, "orders.cancel_success", { code }));
     return;
   }
 
@@ -1333,13 +1334,13 @@ if (id === 'ACTION_TALK_TO_AGENT') {
     const rawId = id.substring("ORDER_MODIFY_".length);
     const orderId = Number(rawId);
     if (!Number.isFinite(orderId)) {
-      await sendText(user, t(lang, "orders.none"));
+      await sendBotText(user, t(lang, "orders.none"));
       return;
     }
 
     const found = await findOrderById(orderId);
     if (!found || !found.order) {
-      await sendText(user, t(lang, "orders.none"));
+      await sendBotText(user, t(lang, "orders.none"));
       return;
     }
 
@@ -1347,7 +1348,7 @@ if (id === 'ACTION_TALK_TO_AGENT') {
     const code = (order.order_code as string | null) ?? `UJ-${order.id}`;
 
     // Tell the customer what's happening
-    await sendText(
+    await sendBotText(
       user,
       t(lang, "orders.modify_info", { code })
     );
@@ -1366,7 +1367,7 @@ if (id === 'ACTION_TALK_TO_AGENT') {
     });
 
     // Reuse existing agent intro message
-    await sendText(user, t(lang, "agent.reply"));
+    await sendBotText(user, t(lang, "agent.reply"));
 
     return;
   }
@@ -1375,13 +1376,13 @@ if (id === 'ACTION_TALK_TO_AGENT') {
     const rawId = id.substring("ORDER_DELETE_".length);
     const orderId = Number(rawId);
     if (!Number.isFinite(orderId)) {
-      await sendText(user, t(lang, "orders.none"));
+      await sendBotText(user, t(lang, "orders.none"));
       return;
     }
 
     const found = await findOrderById(orderId);
     if (!found || !found.order) {
-      await sendText(user, t(lang, "orders.none"));
+      await sendBotText(user, t(lang, "orders.none"));
       return;
     }
 
@@ -1391,7 +1392,7 @@ if (id === 'ACTION_TALK_TO_AGENT') {
 
     // Only non-pending orders can be deleted from the customer's view
     if (statusRaw === "pending") {
-      await sendText(
+      await sendBotText(
         user,
         t(lang, "orders.delete_not_allowed_pending", { code })
       );
@@ -1405,7 +1406,7 @@ if (id === 'ACTION_TALK_TO_AGENT') {
         updated_at: new Date(),
       });
 
-    await sendText(
+    await sendBotText(
       user,
       t(lang, "orders.delete_success", { code })
     );
@@ -1415,8 +1416,8 @@ if (id === 'ACTION_TALK_TO_AGENT') {
 
 
   if (id === "ACTION_FAQ") {
-  await sendText(user, t(lang, "faq.intro"));
-  await sendText(user, t(lang, "faq.list"));
+  await sendBotText(user, t(lang, "faq.intro"));
+  await sendBotText(user, t(lang, "faq.list"));
   return showMainMenu(user, lang);;
 }
 
@@ -1461,7 +1462,7 @@ if (id === 'ACTION_TALK_TO_AGENT') {
         : "Important warnings";
 
     const txt = detailsSectionForSku(lang, sku, section);
-    await sendText(user, `ℹ️ *${prod.name}* — ${label}\n\n${txt}`);
+    await sendBotText(user, `ℹ️ *${prod.name}* — ${label}\n\n${txt}`);
 
     // After showing the chosen details, show normal product actions again
     return showProductActions(user, sku, lang);
@@ -1514,7 +1515,7 @@ if (id === 'ACTION_TALK_TO_AGENT') {
       });
 
       // Ask the user for quantity
-      await sendText(
+      await sendBotText(
         user,
         t(lang, "cart.ask_quantity", {
           title: prod.name,
@@ -1550,7 +1551,7 @@ if (id === 'ACTION_TALK_TO_AGENT') {
   const s = getSession(user);
   s.state = 'WAIT_PROOF';
   saveSession(user, s);
-  await sendText(user, t(lang, 'proof.ask'));
+  await sendBotText(user, t(lang, 'proof.ask'));
   return;
 }
 
@@ -1563,7 +1564,7 @@ async function sendProductDetailsOptions(
 ) {
   const product = await getProductBySkuAsync(productSku);
   if (!product) {
-    await sendText(toWaId, t(lang, "errors.product_not_found"));
+    await sendBotText(toWaId, t(lang, "errors.product_not_found"));
     return;
   }
 
@@ -1754,8 +1755,8 @@ async function onFlow(user: string, step: FlowStep, m: Incoming, lang: Lang) {
       const sub = items.reduce((a, it) => a + it.unitPrice * it.qty, 0);
       const total = sub;
 
-      await sendText(user, (lang === 'sw' ? PICKUP_INFO_SW : PICKUP_INFO_EN));
-      await sendText(user, [
+      await sendBotText(user, (lang === 'sw' ? PICKUP_INFO_SW : PICKUP_INFO_EN));
+      await sendBotText(user, [
         t(lang, 'checkout.summary_header'),
         t(lang, 'checkout.summary_name', { name: contact.name || '' }),
         t(lang, 'checkout.summary_phone', { phone: contact.phone || '' }),
@@ -1789,7 +1790,7 @@ async function onFlow(user: string, step: FlowStep, m: Incoming, lang: Lang) {
       const sub = items.reduce((a, it) => a + it.unitPrice * it.qty, 0);
       const total = sub + OUTSIDE_DAR_FEE;
 
-      await sendText(
+      await sendBotText(
         user,
         [
           t(lang, "checkout.summary_header"),
