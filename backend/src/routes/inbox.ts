@@ -979,7 +979,7 @@ inboxRoutes.post("/orders/:id/status", async (req, res) => {
       return res.status(404).json({ error: "Order not found" });
     }
 
-    const prevStatus = existingOrder.status ?? "pending";
+    const prevStatus = (existingOrder.status as string | null) ?? "pending";
 
     const isEnteringPreparing =
       prevStatus !== "preparing" && newStatus === "preparing";
@@ -1000,15 +1000,11 @@ inboxRoutes.post("/orders/:id/status", async (req, res) => {
       }
 
       // 1) Update the order row
-      await trx("orders").where({ id }).update(update);
+// 1) Update the order row
+await trx("orders").where({ id }).update(update);
 
-      // 2) Adjust stock ONLY when moving into or out of "preparing"
-      const isCancellingNow = prevStatus !== "cancelled" && newStatus === "cancelled";
-
-// 2) Adjust stock when reserving or cancelling
-// - entering "preparing"  => decrease stock (reserve)
-// - any transition into "cancelled" => increase stock (refund)
-if (isEnteringPreparing || isCancellingNow) {
+// 2) Adjust stock ONLY when moving into or out of "preparing"
+if (isEnteringPreparing || isCancellingFromPreparing) {
   const items = await trx("order_items")
     .where({ order_id: id })
     .select<{
@@ -1046,8 +1042,8 @@ if (isEnteringPreparing || isCancellingNow) {
       const delta = qtyByProduct.get(pid) || 0;
 
       const newStock = isEnteringPreparing
-        ? Math.max(0, currentStock - delta) // reserve stock
-        : currentStock + delta;             // refund on cancel
+        ? Math.max(0, currentStock - delta) // reserve when entering preparing
+        : currentStock + delta;             // refund when cancelling from preparing
 
       await trx("products")
         .where({ id: pid })

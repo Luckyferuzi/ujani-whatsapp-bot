@@ -1291,104 +1291,124 @@ if (id === 'ACTION_TALK_TO_AGENT') {
     return;
   }
 
-    if (id.startsWith("ORDER_CANCEL_")) {
-    const rawId = id.substring("ORDER_CANCEL_".length);
-    const orderId = Number(rawId);
-    if (!Number.isFinite(orderId)) {
-      await sendBotText(user, t(lang, "orders.none"));
-      return;
-    }
+if (id.startsWith("ORDER_CANCEL_")) {
+  const rawId = id.substring("ORDER_CANCEL_".length);
+  const orderId = Number(rawId);
 
-    const found = await findOrderById(orderId);
-    if (!found || !found.order) {
-      await sendBotText(user, t(lang, "orders.none"));
-      return;
-    }
-
-    const { order } = found;
-    const code = (order.order_code as string | null) ?? `UJ-${order.id}`;
-
-    if ((order.status as string | null) !== "pending") {
-      await sendBotText(
-        user,
-        t(lang, "orders.cancel_not_pending", { code })
-      );
-      return;
-    }
-
-await db.transaction(async (trx) => {
-  // 1) Update order status
-  await trx("orders")
-    .where({ id: orderId })
-    .update({
-      status: "cancelled",
-      updated_at: new Date(),
-    });
-
-  // 2) Refund stock in the same way as the admin route
-  const items = await trx("order_items")
-    .where({ order_id: orderId })
-    .select<{
-      product_id: number | null;
-      qty: number;
-    }[]>("product_id", "qty");
-
-  const qtyByProduct = new Map<number, number>();
-
-  for (const item of items) {
-    if (!item.product_id) continue;
-    const pid = item.product_id;
-    const qty = Number(item.qty) || 0;
-    if (qty <= 0) continue;
-
-    const existing = qtyByProduct.get(pid) || 0;
-    qtyByProduct.set(pid, existing + qty);
-  }
-
-  const productIds = Array.from(qtyByProduct.keys());
-
-  if (productIds.length > 0) {
-    const productRows = await trx("products")
-      .whereIn("id", productIds)
-      .select<{ id: number; stock_qty: number | null }[]>(
-        "id",
-        "stock_qty"
-      );
-
-    for (const product of productRows) {
-      const pid = product.id;
-      const currentStock = Number(product.stock_qty ?? 0);
-      const delta = qtyByProduct.get(pid) || 0;
-
-      const newStock = currentStock + delta; // refund all quantities
-      await trx("products")
-        .where({ id: pid })
-        .update({ stock_qty: newStock });
-    }
-  }
-
-  // 3) Emit events after the transaction
-  emit("orders.updated", {
-    reason: "cancelled_from_whatsapp",
-    order_id: orderId,
-  });
-
-  if (productIds.length > 0) {
-    emit("products.updated", {
-      reason: "order_cancelled_from_whatsapp",
-      order_id: orderId,
-      product_ids: productIds,
-    });
-  }
-});
-
-
-    // Notify web UI / dashboards
-    emit("orders.updated", { order_id: orderId, status: "cancelled" });
-
-    await sendBotText(user, t(lang, "orders.cancel_success", { code }));
+  if (!Number.isFinite(orderId)) {
+    await sendBotText(user, t(lang, "orders.none"));
     return;
   }
+
+  const found = await findOrderById(orderId);
+  if (!found || !found.order) {
+    await sendBotText(user, t(lang, "orders.none"));
+    return;
+  }
+
+  const { order } = found;
+  const prevStatus = (order.status as string | null) ?? "pending";
+  const code = (order.order_code as string | null) ?? `UJ-${order.id}`;
+
+  // Optional: only allow cancelling from pending or preparing
+  if (prevStatus !== "pending" && prevStatus !== "preparing") {
+    await sendBotText(
+      user,
+      t(lang, "orders.cancel_not_allowed", { code })
+    );
+    return;
+  }
+
+  // If it was "preparing", cancel AND refund stock
+  if (prevStatus === "preparing") {
+    await db.transaction(async (trx) => {
+      // 1) Update order status
+      await trx("orders")
+        .where({ id: orderId })
+        .update({
+          status: "cancelled",
+          updated_at: new Date(),
+        });
+
+      // 2) Refund stock like /orders/:id/status does
+      const items = await trx("order_items")
+        .where({ order_id: orderId })
+        .select<{
+          product_id: number | null;
+          qty: number;
+        }[]>("product_id", "qty");
+
+      const qtyByProduct = new Map<number, number>();
+
+      for (const item of items) {
+        if (!item.product_id) continue;
+        const pid = item.product_id;
+        const qty = Number(item.qty) || 0;
+        if (qty <= 0) continue;
+
+        const existing = qtyByProduct.get(pid) || 0;
+        qtyByProduct.set(pid, existing + qty);
+      }
+
+      const productIds = Array.from(qtyByProduct.keys());
+
+      if (productIds.length > 0) {
+        const productRows = await trx("products")
+          .whereIn("id", productIds)
+          .select<{ id: number; stock_qty: number | null }[]>(
+            "id",
+            "stock_qty"
+          );
+
+        for (const product of productRows) {
+          const pid = product.id;
+          const currentStock = Number(product.stock_qty ?? 0);
+          const delta = qtyByProduct.get(pid) || 0;
+
+          const newStock = currentStock + delta; // refund all reserved qty
+          await trx("products")
+            .where({ id: pid })
+            .update({ stock_qty: newStock });
+        }
+      }
+
+      // Emit events after DB changes
+      emit("orders.updated", {
+        reason: "cancelled_from_whatsapp",
+        order_id: orderId,
+      });
+
+      if (productIds.length > 0) {
+        emit("products.updated", {
+          reason: "order_cancelled_from_whatsapp",
+          order_id: orderId,
+          product_ids: productIds,
+        });
+      }
+    });
+  } else {
+    // prevStatus === "pending" (no stock reserved yet) -> just cancel
+    await db("orders")
+      .where({ id: orderId })
+      .update({
+        status: "cancelled",
+        updated_at: new Date(),
+      });
+
+    emit("orders.updated", {
+      reason: "cancelled_from_whatsapp",
+      order_id: orderId,
+    });
+  }
+
+  await sendBotText(
+    user,
+    t(lang, "orders.cancel_success", { code })
+  );
+
+  return;
+}
+
 
   if (id.startsWith("ORDER_MODIFY_")) {
     const rawId = id.substring("ORDER_MODIFY_".length);
