@@ -1213,12 +1213,10 @@ if (id === 'ACTION_TALK_TO_AGENT') {
       return;
     }
 
-    const { order } = found;
+    const { order, payment } = found;
     const code = (order.order_code as string | null) ?? `UJ-${order.id}`;
-    const statusText = getOrderStatusLabel(
-      lang,
-      order.status as string | null
-    );
+    const statusRaw = (order.status as string | null) ?? "pending";
+    const statusText = getOrderStatusLabel(lang, statusRaw);
 
     // Load products in this order
     const items = await db("order_items")
@@ -1242,6 +1240,26 @@ if (id === 'ACTION_TALK_TO_AGENT') {
       lines.push(t(lang, "orders.detail_no_items"));
     }
 
+    // ===== Payment amounts: total / paid / remaining (for installments too) =====
+    const totalTzs = Number((order as any).total_tzs ?? 0);
+    const paidTzs = Number((payment as any)?.amount_tzs ?? 0);
+    const remainingTzs = Math.max(totalTzs - paidTzs, 0);
+
+    const totalStr = totalTzs ? totalTzs.toLocaleString("sw-TZ") : "0";
+    const paidStr = paidTzs ? paidTzs.toLocaleString("sw-TZ") : "0";
+    const remainingStr = remainingTzs
+      ? remainingTzs.toLocaleString("sw-TZ")
+      : "0";
+
+    lines.push(
+      "",
+      t(lang, "track.line_payment_amounts", {
+        total: totalStr,
+        paid: paidStr,
+        remaining: remainingStr,
+      })
+    );
+
     const createdRaw = order.created_at as any;
     const createdAt =
       createdRaw instanceof Date
@@ -1257,35 +1275,104 @@ if (id === 'ACTION_TALK_TO_AGENT') {
     // 1) Send + log order details so admin sees them
     await sendText(user, lines.join("\n"));
 
-    // 2) Build buttons based on status
-    const buttons: Button[] = [];
+    // 2) Decide which actions to show based on status
+    const buttons: { id: string; title: string }[] = [];
 
-    // If still pending → allow modify + cancel
-    if ((order.status as string | null) === "pending") {
+    if (statusRaw === "pending") {
+      // Pending: 4 actions (we add 3 here, plus Return below)
       buttons.push(
         {
-          id: `ORDER_CANCEL_${order.id}`,
-          title: lang === "sw" ? "Ghairi oda" : "Cancel order",
+          // 1) Pay now
+          id: `ORDER_PAY_${order.id}`,
+          title: lang === "sw" ? "Lipa sasa" : "Pay now",
         },
         {
+          // 2) Modify order
           id: `ORDER_MODIFY_${order.id}`,
           title: lang === "sw" ? "Badili oda" : "Modify order",
+        },
+        {
+          // 3) Cancel order
+          id: `ORDER_CANCEL_${order.id}`,
+          title: lang === "sw" ? "Ghairi oda" : "Cancel order",
         }
       );
+    } else {
+      // NOT pending: 2 actions (Delete + Return below)
+      buttons.push({
+        id: `ORDER_DELETE_${order.id}`,
+        title: lang === "sw" ? "Futa oda" : "Delete order",
+      });
     }
 
-    // Always allow returning to menu
+    // 3) Always allow returning to main menu
     buttons.push({
       id: "ACTION_BACK",
       title: t(lang, "menu.back_to_menu"),
     });
 
-    // 3) Send + log the buttons menu
+    // 4) Send + log the buttons menu
     await sendButtonsMessageSafe(
       user,
       t(lang, "cart.choose_action"),
       buttons
     );
+
+    return;
+  }
+
+    if (id.startsWith("ORDER_PAY_")) {
+    const rawId = id.substring("ORDER_PAY_".length);
+    const orderId = Number(rawId);
+    if (!Number.isFinite(orderId)) {
+      await sendText(user, t(lang, "orders.none"));
+      return;
+    }
+
+    const found = await findOrderById(orderId);
+    if (!found || !found.order) {
+      await sendText(user, t(lang, "orders.none"));
+      return;
+    }
+
+    const { order, payment } = found;
+    const code = (order.order_code as string | null) ?? `UJ-${order.id}`;
+    const statusRaw = (order.status as string | null) ?? "pending";
+
+    // Only pending orders can be paid from here
+    if (statusRaw !== "pending") {
+      await sendText(
+        user,
+        t(lang, "orders.pay_not_pending", { code })
+      );
+      return;
+    }
+
+    const totalTzs = Number((order as any).total_tzs ?? 0);
+    const paidTzs = Number((payment as any)?.amount_tzs ?? 0);
+    const remainingTzs = Math.max(totalTzs - paidTzs, 0);
+
+    if (!remainingTzs || remainingTzs <= 0) {
+      await sendText(
+        user,
+        t(lang, "orders.pay_nothing_due", { code })
+      );
+      return;
+    }
+
+    // Remember this order as the "current order being paid"
+    const s = getSession(user);
+    (s as any).lastOrderId = order.id;
+    saveSession(user, s);
+
+    // Tell the user which order they're paying for
+    await sendText(
+      user,
+      t(lang, "orders.pay_header", { code })
+    );
+
+    // Reuse existing payment options flow (manual proof)
+    await showPaymentOptions(user, lang, remainingTzs);
 
     return;
   }
@@ -1371,7 +1458,48 @@ if (id === 'ACTION_TALK_TO_AGENT') {
     return;
   }
 
+    if (id.startsWith("ORDER_DELETE_")) {
+    const rawId = id.substring("ORDER_DELETE_".length);
+    const orderId = Number(rawId);
+    if (!Number.isFinite(orderId)) {
+      await sendText(user, t(lang, "orders.none"));
+      return;
+    }
 
+    const found = await findOrderById(orderId);
+    if (!found || !found.order) {
+      await sendText(user, t(lang, "orders.none"));
+      return;
+    }
+
+    const { order } = found;
+    const code = (order.order_code as string | null) ?? `UJ-${order.id}`;
+    const statusRaw = (order.status as string | null) ?? "pending";
+
+    // Only non-pending orders can be deleted from the customer's view
+    if (statusRaw === "pending") {
+      await sendText(
+        user,
+        t(lang, "orders.delete_not_allowed_pending", { code })
+      );
+      return;
+    }
+
+    await db("orders")
+      .where({ id: orderId })
+      .update({
+        deleted_at: new Date(),
+        updated_at: new Date(),
+      });
+
+    await sendText(
+      user,
+      t(lang, "orders.delete_success", { code })
+    );
+
+    return;
+  }
+  
     // ---------------- NEW: ADD asks for quantity first ----------------
     if (mode === "ADD") {
       // Remember which product we are adding for this user

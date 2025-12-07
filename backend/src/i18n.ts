@@ -33,6 +33,16 @@ const dict: Dict = {
     'orders.detail_line': '• {title} ×{qty}',
     'orders.detail_status': 'Hali ya oda: {status}',
     'orders.detail_created_at': 'Imewekwa tarehe: {date}',
+        'orders.pay_not_pending':
+      'Oda {code} si ya kusubiri malipo tena. Huna haja ya kulipa tena.',
+    'orders.pay_nothing_due':
+      'Oda {code} haina kiasi kilichobaki kulipwa.',
+    'orders.pay_header':
+      'Unaenda kulipa oda {code}. Tafadhali chagua njia ya malipo na ulipie kiasi kilichobaki.',
+    'orders.delete_not_allowed_pending':
+      'Huwezi kufuta oda {code} kwa sababu bado haijakamilika. Tafadhali lipa, badili au ghairi kwanza.',
+    'orders.delete_success':
+      'Oda {code} imeondolewa kwenye orodha yako ya oda. Asante.',
 
     'orders.cancel_success':
       'Oda {code} imeghairishwa. Kama tayari umefanya malipo, tafadhali wasiliana na mhudumu kwa maelezo zaidi.',
@@ -232,6 +242,17 @@ const dict: Dict = {
     'orders.detail_line': '• {title} ×{qty}',
     'orders.detail_status': 'Order status: {status}',
     'orders.detail_created_at': 'Placed on: {date}',
+        'orders.pay_not_pending':
+      'Order {code} is no longer in a pending payment state. There is nothing more to pay.',
+    'orders.pay_nothing_due':
+      'Order {code} has no remaining balance to pay.',
+    'orders.pay_header':
+      'You are about to pay for order {code}. Please choose a payment method and pay the remaining amount.',
+    'orders.delete_not_allowed_pending':
+      'You cannot delete order {code} because it is still in progress. Please pay, modify or cancel it first.',
+    'orders.delete_success':
+      'Order {code} has been removed from your order list.',
+
 
     'orders.cancel_success':
       'Order {code} has been cancelled. If you already paid, please contact an agent for more details.',
