@@ -203,6 +203,8 @@ const dict: Dict = {
     'track.line_status_payment': '• Hali ya malipo: *{{paymentStatus}}*',
     'track.line_status_order': '• Hali ya oda: *{{orderStatus}}*',
     'track.line_agent_phone': '• Namba ya mpeleka mzigo: *{{agentPhone}}*',
+        'track.line_payment_amounts':
+      'Jumla ya oda: {total} TZS\nUliolipa hadi sasa: {paid} TZS\nIliyobaki kulipwa: {remaining} TZS.',
     'order.preparing_message':
       'Oda yako {orderCode} ipo kwenye hatua ya maandalizi ya bidhaa. Tutakutaarifu ikishatoka kwa mpeleka mzigo.',
    'order.out_for_delivery_message':
