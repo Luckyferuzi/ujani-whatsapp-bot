@@ -1820,6 +1820,8 @@ async function onFlow(user: string, step: FlowStep, m: Incoming, lang: Lang) {
         t(lang, 'checkout.summary_header'),
         t(lang, 'checkout.summary_name', { name: contact.name || '' }),
         t(lang, 'checkout.summary_phone', { phone: contact.phone || '' }),
+        t(lang, "checkout.summary_delivery_fee", {
+          fee: fmtTZS(OUTSIDE_DAR_FEE)}),
         t(lang, 'checkout.summary_total', { total: fmtTZS(total) }),
       ].join('\n'));
 
@@ -1857,6 +1859,7 @@ async function onFlow(user: string, step: FlowStep, m: Incoming, lang: Lang) {
           t(lang, "checkout.summary_name", { name: contact.name || "" }),
           t(lang, "checkout.summary_phone", { phone: contact.phone || "" }),
           t(lang, "checkout.summary_region", { region: contact.region || "" }),
+          t(lang, "checkout.summary_delivery_fee", {fee: fmtTZS(OUTSIDE_DAR_FEE) }),
           t(lang, "checkout.summary_total", { total: fmtTZS(total) }),
         ].join("\n")
       );
@@ -2057,16 +2060,33 @@ async function onSessionMessage(user: string, m: Incoming, lang: Lang) {
       return sendBotText(user, t(lang, "proof.ask"));
     }
     case "WAIT_PROOF": {
-      // Accept proof as 2+ names OR (media handled by infra)
-      const words = txt.split(/\s+/).filter(Boolean);
-      if (words.length >= 2) {
+      // Accept proof as 2 or 3 names (space-separated),
+      // media proof is handled elsewhere in the media handler.
+      const words = txt
+        .split(/\s+/)
+        .map((w) => w.trim())
+        .filter(Boolean);
+
+      const count = words.length;
+
+      // Debug log (optional, helps if something goes wrong again)
+      console.log("[WAIT_PROOF] names =", words, "count =", count);
+
+      if (count >= 2 && count <= 3) {
+        // 2 or 3 names is OK
         clearCart(user);
         setPending(user, null);
         resetSession(user);
-        return sendBotText(user, t(lang, "proof.ok_names", { names: txt }));
+        return sendBotText(
+          user,
+          t(lang, "proof.ok_names", { names: txt })
+        );
       }
+
+      // Anything else (1 name or 4+ words) -> ask again
       return sendBotText(user, t(lang, "proof.invalid"));
     }
+
   }
 
   return showMainMenu(user, lang);
