@@ -500,12 +500,15 @@ if (type === "interactive") {
 }
 
 if (interactiveId) {
-  console.log(
-    "[webhook] interactive id:",
-    interactiveId,
-    "title:",
-    interactiveTitle
-  );
+  console.log("[webhook] calling onInteractive with", interactiveId, "for", from);
+
+  try {
+    await onInteractive(from, interactiveId, lang);
+  } catch (err) {
+    console.error("[webhook] onInteractive error", interactiveId, err);
+  }
+
+  continue;
 }
 
 
@@ -883,6 +886,7 @@ const PICKUP_INFO_EN = 'We are at Keko Modern Furniture, opposite Omax Bar. Cont
 
 async function onInteractive(user: string, id: string, lang: Lang) {
   const N = normId(id);
+  console.log("[onInteractive] id =", id, "normalized =", N);
     // --- Agent handover actions (talk to agent / back to bot) ---
   if (id === 'ACTION_BACK') return showMainMenu(user, lang);
 
@@ -1107,101 +1111,10 @@ if (id === 'ACTION_TALK_TO_AGENT') {
     return;
   }
 
-
-  if (id === "ACTION_FAQ") {
-  await sendText(user, t(lang, "faq.intro"));
-  await sendText(user, t(lang, "faq.list"));
-  return showMainMenu(user, lang);;
-}
-
-
-  /* ------------------------------ Product flows ------------------------------ */
-/* ------------------------------ Product flows ------------------------------ */
-  if (id.startsWith("PRODUCT_")) {
-    const sku = id.replace("PRODUCT_", "");
-    if (sku === "PROMAX") return showVariants(user, "PROMAX", lang);
-    return showProductActions(user, sku, lang);
-  }
-
-  if (id.startsWith("VARIANTS_")) {
-    const parentSku = id.replace("VARIANTS_", "");
-    return showVariants(user, parentSku, lang);
-  }
-
-  // Second-level product details (ABOUT / USAGE / WARN)
-  if (id.startsWith("DETAILS2_")) {
-    // ID pattern: DETAILS2_<SKU>_<SECTION>
-    const parts = id.split("_"); // ["DETAILS2", "<SKU>", "<SECTION>"]
-    const sku = parts[1];
-    const section = parts[2] as "ABOUT" | "USAGE" | "WARN";
-
-    if (!sku || !section) return;
-
-    // Use async resolver (DB-backed + fallback) – no getProductBySku here
-    const prod = await resolveProductForSkuAsync(sku);
-    if (!prod) return;
-
-    const label =
-      section === "ABOUT"
-        ? lang === "sw"
-          ? "Kuhusu bidhaa"
-          : "About product"
-        : section === "USAGE"
-        ? lang === "sw"
-          ? "Jinsi ya kutumia"
-          : "How to use"
-        : lang === "sw"
-        ? "Tahadhari muhimu"
-        : "Important warnings";
-
-    const txt = detailsSectionForSku(lang, sku, section);
-    await sendText(user, `ℹ️ *${prod.name}* — ${label}\n\n${txt}`);
-
-    // After showing the chosen details, show normal product actions again
-    return showProductActions(user, sku, lang);
-  }
-
-  // Add / Buy / Details (first click on "Maelezo zaidi")
-  if (
-    id.startsWith("ADD_") ||
-    id.startsWith("BUY_") ||
-    id.startsWith("DETAILS_")
-  ) {
-    const mode = id.split("_")[0]; // ADD | BUY | DETAILS
-    const sku = id.substring(mode.length + 1);
-
-    // Async product resolve (DB-backed + static fallback)
-    const prod = await resolveProductForSkuAsync(sku);
-    if (!prod) return;
-
-    // First-level "Maelezo zaidi" -> show 3 options
-    if (mode === "DETAILS") {
-      const baseLabel =
-        lang === "sw"
-          ? "Chagua maelezo unayotaka:"
-          : "Choose which information you want:";
-
-      await sendButtonsMessageSafe(user, `${baseLabel} *${prod.name}*`, [
-        {
-          id: `DETAILS2_${sku}_ABOUT`,
-          title: lang === "sw" ? "Kuhusu bidhaa" : "About product",
-        },
-        {
-          id: `DETAILS2_${sku}_USAGE`,
-          title: lang === "sw" ? "Jinsi ya kutumia" : "How to use",
-        },
-        {
-          id: `DETAILS2_${sku}_WARN`,
-          title: lang === "sw" ? "Tahadhari muhimu" : "Important warnings",
-        },
-      ]);
-      return;
-    }
-
-  if (id.startsWith("ORDER_DETAIL_")) {
+    if (id.startsWith("ORDER_DETAIL_")) {
     const rawId = id.substring("ORDER_DETAIL_".length);
     const orderId = Number(rawId);
-
+    console.log("[onInteractive] ORDER_DETAIL branch", { id, rawId, orderId });
     if (!Number.isFinite(orderId)) {
       await sendText(user, t(lang, "orders.none"));
       return;
@@ -1499,7 +1412,98 @@ if (id === 'ACTION_TALK_TO_AGENT') {
 
     return;
   }
-  
+
+
+  if (id === "ACTION_FAQ") {
+  await sendText(user, t(lang, "faq.intro"));
+  await sendText(user, t(lang, "faq.list"));
+  return showMainMenu(user, lang);;
+}
+
+
+  /* ------------------------------ Product flows ------------------------------ */
+/* ------------------------------ Product flows ------------------------------ */
+  if (id.startsWith("PRODUCT_")) {
+    const sku = id.replace("PRODUCT_", "");
+    if (sku === "PROMAX") return showVariants(user, "PROMAX", lang);
+    return showProductActions(user, sku, lang);
+  }
+
+  if (id.startsWith("VARIANTS_")) {
+    const parentSku = id.replace("VARIANTS_", "");
+    return showVariants(user, parentSku, lang);
+  }
+
+  // Second-level product details (ABOUT / USAGE / WARN)
+  if (id.startsWith("DETAILS2_")) {
+    // ID pattern: DETAILS2_<SKU>_<SECTION>
+    const parts = id.split("_"); // ["DETAILS2", "<SKU>", "<SECTION>"]
+    const sku = parts[1];
+    const section = parts[2] as "ABOUT" | "USAGE" | "WARN";
+
+    if (!sku || !section) return;
+
+    // Use async resolver (DB-backed + fallback) – no getProductBySku here
+    const prod = await resolveProductForSkuAsync(sku);
+    if (!prod) return;
+
+    const label =
+      section === "ABOUT"
+        ? lang === "sw"
+          ? "Kuhusu bidhaa"
+          : "About product"
+        : section === "USAGE"
+        ? lang === "sw"
+          ? "Jinsi ya kutumia"
+          : "How to use"
+        : lang === "sw"
+        ? "Tahadhari muhimu"
+        : "Important warnings";
+
+    const txt = detailsSectionForSku(lang, sku, section);
+    await sendText(user, `ℹ️ *${prod.name}* — ${label}\n\n${txt}`);
+
+    // After showing the chosen details, show normal product actions again
+    return showProductActions(user, sku, lang);
+  }
+
+  // Add / Buy / Details (first click on "Maelezo zaidi")
+  if (
+    id.startsWith("ADD_") ||
+    id.startsWith("BUY_") ||
+    id.startsWith("DETAILS_")
+  ) {
+    const mode = id.split("_")[0]; // ADD | BUY | DETAILS
+    const sku = id.substring(mode.length + 1);
+
+    // Async product resolve (DB-backed + static fallback)
+    const prod = await resolveProductForSkuAsync(sku);
+    if (!prod) return;
+
+    // First-level "Maelezo zaidi" -> show 3 options
+    if (mode === "DETAILS") {
+      const baseLabel =
+        lang === "sw"
+          ? "Chagua maelezo unayotaka:"
+          : "Choose which information you want:";
+
+      await sendButtonsMessageSafe(user, `${baseLabel} *${prod.name}*`, [
+        {
+          id: `DETAILS2_${sku}_ABOUT`,
+          title: lang === "sw" ? "Kuhusu bidhaa" : "About product",
+        },
+        {
+          id: `DETAILS2_${sku}_USAGE`,
+          title: lang === "sw" ? "Jinsi ya kutumia" : "How to use",
+        },
+        {
+          id: `DETAILS2_${sku}_WARN`,
+          title: lang === "sw" ? "Tahadhari muhimu" : "Important warnings",
+        },
+      ]);
+      return;
+    }
+
     // ---------------- NEW: ADD asks for quantity first ----------------
     if (mode === "ADD") {
       // Remember which product we are adding for this user
