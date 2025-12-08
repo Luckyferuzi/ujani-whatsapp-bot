@@ -1117,14 +1117,23 @@ inboxRoutes.post("/orders/:id/status", async (req, res) => {
           const orderCode =
             (updatedOrder as any).order_code || `UJ-${updatedOrder.id}`;
 
-          let msg: string | null = null;
-          if (newStatus === "preparing") {
-            msg = t(lang, "order.preparing_message", { orderCode });
-          } else if (newStatus === "out_for_delivery") {
-            msg = t(lang, "order.out_for_delivery_message", { orderCode });
-          } else if (newStatus === "delivered") {
-            msg = t(lang, "order.delivered_message", { orderCode });
-          }
+let msg: string | null = null;
+
+if (newStatus === "preparing") {
+  msg = t(lang, "order.preparing_message", { orderCode });
+} else if (newStatus === "out_for_delivery") {
+  const riderPhone =
+    (delivery_agent_phone && delivery_agent_phone.trim()) ||
+    ((updatedOrder as any).delivery_agent_phone?.trim?.() ?? "");
+
+  msg = t(lang, "order.out_for_delivery_message", {
+    orderCode,
+    deliveryAgentPhone: riderPhone, // 👈 matches {deliveryAgentPhone} in i18n
+  });
+} else if (newStatus === "delivered") {
+  msg = t(lang, "order.delivered_message", { orderCode });
+}
+
           // you can add a cancelled message if you have it:
           // else if (newStatus === "cancelled") {
           //   msg = t(lang, "order.cancelled_message", { orderCode });
