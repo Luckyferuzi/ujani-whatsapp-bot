@@ -352,50 +352,6 @@ export async function createOrderWithPayment(input: CreateOrderInput) {
       }));
       await trx("order_items").insert(rows);
 
-      // --- decrease product stock based on these items ---
-      const skus = Array.from(
-        new Set(
-          input.items
-            .map((it) => it.sku)
-            .filter((sku) => typeof sku === "string" && sku.trim().length > 0)
-        )
-      );
-
-      if (skus.length > 0) {
-        // Get current stock for all involved products
-        const productRows = await trx("products")
-          .whereIn("sku", skus)
-          .select("id", "sku", "stock_qty");
-
-        type StockInfo = { current: number; delta: number };
-
-        const stockByProductId = new Map<number, StockInfo>();
-
-        for (const item of input.items) {
-          const product = productRows.find((p: any) => p.sku === item.sku);
-          if (!product) continue;
-
-          const pid = product.id as number;
-          const current = Number(product.stock_qty ?? 0);
-          const delta = Number(item.qty ?? 0) || 0;
-
-          const existing = stockByProductId.get(pid);
-          if (!existing) {
-            stockByProductId.set(pid, { current, delta });
-          } else {
-            existing.delta += delta;
-          }
-        }
-
-        // Apply the stock changes (never go below 0)
-        for (const [productId, info] of stockByProductId) {
-          const newStock = Math.max(0, info.current - info.delta);
-          await trx("products")
-            .where({ id: productId })
-            .update({ stock_qty: newStock });
-        }
-      }
-      // --- END stock logic ---
     }
 
     // 3) Create a payment row with amount_tzs = 0
