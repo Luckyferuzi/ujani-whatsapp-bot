@@ -322,12 +322,12 @@ export async function createOrderWithPayment(input: CreateOrderInput) {
   return db.transaction(async (trx) => {
     const orderCode = await generateOrderCode(trx);
 
-    // 1) Insert the order
+    // 1) Insert the order (status defaults to "pending")
     const [order] = await trx("orders")
       .insert({
         customer_id: input.customerId,
-        status: input.status ?? "pending",
-        delivery_mode: input.deliveryMode,
+        status: input.status ?? "pending", // pending | verifying | paid | failed
+        delivery_mode: input.deliveryMode, // pickup | delivery
         km: input.km ?? null,
         fee_tzs: input.feeTzs,
         total_tzs: input.totalTzs,
@@ -341,7 +341,7 @@ export async function createOrderWithPayment(input: CreateOrderInput) {
 
     const orderId = order.id;
 
-    // 2) Insert order_items and prepare stock updates
+    // 2) Insert order_items (but DO NOT touch product stock here)
     if (input.items && input.items.length) {
       const rows = input.items.map((it) => ({
         order_id: orderId,
@@ -350,12 +350,11 @@ export async function createOrderWithPayment(input: CreateOrderInput) {
         qty: it.qty,
         unit_price_tzs: it.unitPrice,
       }));
-      await trx("order_items").insert(rows);
 
+      await trx("order_items").insert(rows);
     }
 
-    // 3) Create a payment row with amount_tzs = 0
-    //    (will be increased when confirming payments)
+    // 3) Create initial payment row (status "awaiting")
     const [payment] = await trx("payments")
       .insert({
         order_id: orderId,
@@ -368,8 +367,7 @@ export async function createOrderWithPayment(input: CreateOrderInput) {
       .returning<{ id: number }[]>("id");
 
     // 4) Create a pending income entry for this order
-    //    This will show up in the Income page as "pending"
-    //    until you approve/reject it.
+    //    This shows on Income page as "pending" until approved/rejected.
     const incomeAmount = Math.max(0, Math.floor(input.totalTzs ?? 0));
 
     if (incomeAmount > 0) {
@@ -390,7 +388,6 @@ export async function createOrderWithPayment(input: CreateOrderInput) {
     };
   });
 }
-
 
 export async function createManualOrderFromSkus(input: {
   customerId: number;
