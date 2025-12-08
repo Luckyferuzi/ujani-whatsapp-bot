@@ -946,7 +946,6 @@ inboxRoutes.post("/orders/:id/status", async (req, res) => {
     return res.status(400).json({ error: "Invalid order id" });
   }
 
-  // Validate body with zod schema so we only accept known statuses
   const parsed = updateOrderStatusSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
     return res.status(400).json({ error: "Invalid status payload" });
@@ -954,7 +953,6 @@ inboxRoutes.post("/orders/:id/status", async (req, res) => {
 
   const { status: newStatus, delivery_agent_phone } = parsed.data;
 
-  // If going out for delivery, we require a rider phone number
   if (
     newStatus === "out_for_delivery" &&
     (!delivery_agent_phone || !delivery_agent_phone.trim())
@@ -967,7 +965,6 @@ inboxRoutes.post("/orders/:id/status", async (req, res) => {
   let affectedProductIds: number[] = [];
 
   try {
-    // Fetch current order (to know previous status)
     const existingOrder = await db("orders")
       .where({ id })
       .first<{
@@ -979,11 +976,11 @@ inboxRoutes.post("/orders/:id/status", async (req, res) => {
       return res.status(404).json({ error: "Order not found" });
     }
 
-    const prevStatus = existingOrder.status ?? "pending";
+    const prevStatus = (existingOrder.status as string | null) ?? "pending";
 
     // We ONLY touch stock around "preparing":
-    // - entering "preparing"  => reserve stock (decrease)
-    // - leaving  "preparing" to "cancelled" => refund stock (increase)
+    // - entering  "preparing"  => reserve stock (decrease)
+    // - leaving   "preparing" to "cancelled" => refund stock (increase)
     const isEnteringPreparing =
       prevStatus !== "preparing" && newStatus === "preparing";
     const isCancellingFromPreparing =
@@ -1007,25 +1004,57 @@ inboxRoutes.post("/orders/:id/status", async (req, res) => {
 
       // 2) Adjust stock ONLY when moving into or out of "preparing"
       if (isEnteringPreparing || isCancellingFromPreparing) {
-        // Get all items for this order (must have product_id to adjust stock)
+        // Fetch items with product_id; fall back by sku if needed
         const items = await trx("order_items")
           .where({ order_id: id })
           .select<{
             product_id: number | null;
+            sku: string | null;
             qty: number;
-          }[]>("product_id", "qty");
+          }[]>("product_id", "sku", "qty");
 
+        // Collect needed product IDs
         const qtyByProduct = new Map<number, number>();
+        const skusToResolve = new Set<string>();
 
         for (const item of items) {
-          if (!item.product_id) continue;
+          if (item.product_id) {
+            const pid = item.product_id;
+            const qty = Number(item.qty) || 0;
+            if (qty <= 0) continue;
+            const existing = qtyByProduct.get(pid) || 0;
+            qtyByProduct.set(pid, existing + qty);
+          } else if (item.sku && item.sku.trim()) {
+            skusToResolve.add(item.sku.trim());
+          }
+        }
 
-          const pid = item.product_id;
-          const qty = Number(item.qty) || 0;
-          if (qty <= 0) continue;
+        // If some items had no product_id, resolve via sku -> product.id
+        if (skusToResolve.size > 0) {
+          const skuList = Array.from(skusToResolve);
+          const productsBySku = await trx("products")
+            .whereIn("sku", skuList)
+            .select<{ id: number; sku: string }[]>("id", "sku");
 
-          const existing = qtyByProduct.get(pid) || 0;
-          qtyByProduct.set(pid, existing + qty);
+          const idBySku = new Map<string, number>();
+          for (const p of productsBySku) {
+            if (!p.sku) continue;
+            idBySku.set(p.sku, p.id);
+          }
+
+          for (const item of items) {
+            if (item.product_id) continue;
+            if (!item.sku) continue;
+            const sku = item.sku.trim();
+            const pid = idBySku.get(sku);
+            if (!pid) continue;
+
+            const qty = Number(item.qty) || 0;
+            if (qty <= 0) continue;
+
+            const existing = qtyByProduct.get(pid) || 0;
+            qtyByProduct.set(pid, existing + qty);
+          }
         }
 
         const productIds = Array.from(qtyByProduct.keys());
@@ -1034,10 +1063,10 @@ inboxRoutes.post("/orders/:id/status", async (req, res) => {
         if (productIds.length > 0) {
           const productRows = await trx("products")
             .whereIn("id", productIds)
-            .select<{
-              id: number;
-              stock_qty: number | null;
-            }[]>("id", "stock_qty");
+            .select<{ id: number; stock_qty: number | null }[]>(
+              "id",
+              "stock_qty"
+            );
 
           for (const product of productRows) {
             const pid = product.id;
@@ -1045,8 +1074,8 @@ inboxRoutes.post("/orders/:id/status", async (req, res) => {
             const delta = qtyByProduct.get(pid) || 0;
 
             const newStock = isEnteringPreparing
-              ? Math.max(0, currentStock - delta) // reserve when entering preparing
-              : currentStock + delta;             // refund when cancelling from preparing
+              ? Math.max(0, currentStock - delta) // reserve on entering preparing
+              : currentStock + delta;             // refund on cancelling from preparing
 
             await trx("products")
               .where({ id: pid })
@@ -1085,7 +1114,6 @@ inboxRoutes.post("/orders/:id/status", async (req, res) => {
 });
 
 
-
 // DELETE /api/orders/:id
 // Soft-delete the order (sets deleted_at)
 // DELETE /api/orders/:id  -> soft delete (set deleted_at)
@@ -1107,7 +1135,6 @@ inboxRoutes.delete("/orders/:id", async (req, res) => {
     return res.status(500).json({ error: "internal_error" });
   }
 });
-
 
 // PATCH /api/orders/:id  -> edit basic order fields
 inboxRoutes.patch("/orders/:id", async (req, res) => {

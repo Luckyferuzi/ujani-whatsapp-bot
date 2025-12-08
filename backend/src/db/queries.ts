@@ -320,13 +320,34 @@ async function generateOrderCode(trx: any): Promise<string> {
 
 export async function createOrderWithPayment(input: CreateOrderInput) {
   return db.transaction(async (trx) => {
+    // 0) Resolve products by SKU so we can store product_id on order_items
+    const skus = Array.from(
+      new Set(
+        (input.items ?? [])
+          .map((it) => it.sku)
+          .filter((sku): sku is string => typeof sku === "string" && sku.trim().length > 0)
+      )
+    );
+
+    const productBySku = new Map<string, { id: number }>();
+    if (skus.length > 0) {
+      const productRows = await trx("products")
+        .whereIn("sku", skus)
+        .select<{ id: number; sku: string }[]>("id", "sku");
+
+      for (const p of productRows) {
+        if (!p.sku) continue;
+        productBySku.set(p.sku, { id: p.id });
+      }
+    }
+
+    // 1) Generate order code and insert the order (status starts as pending or given)
     const orderCode = await generateOrderCode(trx);
 
-    // 1) Insert the order (status defaults to "pending")
     const [order] = await trx("orders")
       .insert({
         customer_id: input.customerId,
-        status: input.status ?? "pending", // pending | verifying | paid | failed
+        status: input.status ?? "pending", // default pending
         delivery_mode: input.deliveryMode, // pickup | delivery
         km: input.km ?? null,
         fee_tzs: input.feeTzs,
@@ -341,17 +362,21 @@ export async function createOrderWithPayment(input: CreateOrderInput) {
 
     const orderId = order.id;
 
-    // 2) Insert order_items (but DO NOT touch product stock here)
-    if (input.items && input.items.length) {
-      const rows = input.items.map((it) => ({
-        order_id: orderId,
-        sku: it.sku,
-        name: it.name,
-        qty: it.qty,
-        unit_price_tzs: it.unitPrice,
-      }));
+    // 2) Insert order_items (linking to product_id where possible, but NO stock change here)
+    if (input.items && input.items.length > 0) {
+      const itemRows = input.items.map((it) => {
+        const prod = it.sku ? productBySku.get(it.sku) : undefined;
+        return {
+          order_id: orderId,
+          product_id: prod ? prod.id : null,
+          sku: it.sku,
+          name: it.name,
+          qty: it.qty,
+          unit_price_tzs: it.unitPrice,
+        };
+      });
 
-      await trx("order_items").insert(rows);
+      await trx("order_items").insert(itemRows);
     }
 
     // 3) Create initial payment row (status "awaiting")
@@ -366,10 +391,8 @@ export async function createOrderWithPayment(input: CreateOrderInput) {
       })
       .returning<{ id: number }[]>("id");
 
-    // 4) Create a pending income entry for this order
-    //    This shows on Income page as "pending" until approved/rejected.
+    // 4) Create an income row as "pending" so it shows in Income page
     const incomeAmount = Math.max(0, Math.floor(input.totalTzs ?? 0));
-
     if (incomeAmount > 0) {
       await trx("incomes").insert({
         order_id: orderId,
@@ -388,6 +411,7 @@ export async function createOrderWithPayment(input: CreateOrderInput) {
     };
   });
 }
+
 
 export async function createManualOrderFromSkus(input: {
   customerId: number;
