@@ -3,7 +3,7 @@ import e, { Router, type Request, type Response } from "express";
 import db from "../db/knex.js";
 import { sendText, downloadMedia } from "../whatsapp.js";
 import { emit } from "../sockets.js";
-import { getOrdersForCustomer, listOutstandingOrdersForCustomer, createOrderWithPayment, createManualOrderFromSkus } from "../db/queries.js";
+import { getOrdersForCustomer, listOutstandingOrdersForCustomer, createOrderWithPayment, createManualOrderFromSkus, insertOutboundMessage } from "../db/queries.js";
 import { t, Lang } from "../i18n.js";
 import { z } from "zod";
 
@@ -953,7 +953,6 @@ inboxRoutes.post("/orders/:id/status", async (req, res) => {
 
   const { status: newStatus, delivery_agent_phone } = parsed.data;
 
-  // Require rider phone only for out_for_delivery
   if (
     newStatus === "out_for_delivery" &&
     (!delivery_agent_phone || !delivery_agent_phone.trim())
@@ -979,9 +978,6 @@ inboxRoutes.post("/orders/:id/status", async (req, res) => {
 
     const prevStatus = (existingOrder.status as string | null) ?? "pending";
 
-    // We ONLY touch stock around "preparing":
-    // - entering  "preparing"  => reserve stock (decrease)
-    // - leaving   "preparing" to "cancelled" => refund stock (increase)
     const isEnteringPreparing =
       prevStatus !== "preparing" && newStatus === "preparing";
     const isCancellingFromPreparing =
@@ -1005,7 +1001,6 @@ inboxRoutes.post("/orders/:id/status", async (req, res) => {
 
       // 2) Adjust stock ONLY when moving into or out of "preparing"
       if (isEnteringPreparing || isCancellingFromPreparing) {
-        // Fetch items with product_id; fall back by sku if needed
         const items = await trx("order_items")
           .where({ order_id: id })
           .select<{
@@ -1014,7 +1009,6 @@ inboxRoutes.post("/orders/:id/status", async (req, res) => {
             qty: number;
           }[]>("product_id", "sku", "qty");
 
-        // Collect needed product IDs
         const qtyByProduct = new Map<number, number>();
         const skusToResolve = new Set<string>();
 
@@ -1030,7 +1024,6 @@ inboxRoutes.post("/orders/:id/status", async (req, res) => {
           }
         }
 
-        // If some items had no product_id, resolve via sku -> product.id
         if (skusToResolve.size > 0) {
           const skuList = Array.from(skusToResolve);
           const productsBySku = await trx("products")
@@ -1075,8 +1068,8 @@ inboxRoutes.post("/orders/:id/status", async (req, res) => {
             const delta = qtyByProduct.get(pid) || 0;
 
             const newStock = isEnteringPreparing
-              ? Math.max(0, currentStock - delta) // reserve on entering preparing
-              : currentStock + delta; // refund on cancelling from preparing
+              ? Math.max(0, currentStock - delta)
+              : currentStock + delta;
 
             await trx("products")
               .where({ id: pid })
@@ -1089,7 +1082,6 @@ inboxRoutes.post("/orders/:id/status", async (req, res) => {
       return updated;
     });
 
-    // Notify web clients that products might have changed stock
     if (affectedProductIds.length > 0) {
       emit("products.updated", {
         reason: "order_status_changed",
@@ -1098,12 +1090,74 @@ inboxRoutes.post("/orders/:id/status", async (req, res) => {
       });
     }
 
-    // Always notify that the order itself changed
     emit("orders.updated", {
       reason: "status_changed",
       order_id: id,
       status: newStatus,
     });
+
+    // 🔽 🔽 🔽 NEW PART: send WhatsApp + log message 🔽 🔽 🔽
+    try {
+      if (updatedOrder && updatedOrder.customer_id) {
+        const customer = await db("customers")
+          .where({ id: updatedOrder.customer_id })
+          .first<{
+            id: number;
+            wa_id: string | null;
+            lang: string | null;
+          }>();
+
+        const waId = customer?.wa_id ?? null;
+        if (waId) {
+          const lang: Lang =
+            customer?.lang === "en" || customer?.lang === "sw"
+              ? (customer.lang as Lang)
+              : "sw";
+
+          const orderCode =
+            (updatedOrder as any).order_code || `UJ-${updatedOrder.id}`;
+
+          let msg: string | null = null;
+          if (newStatus === "preparing") {
+            msg = t(lang, "order.preparing_message", { orderCode });
+          } else if (newStatus === "out_for_delivery") {
+            msg = t(lang, "order.out_for_delivery_message", { orderCode });
+          } else if (newStatus === "delivered") {
+            msg = t(lang, "order.delivered_message", { orderCode });
+          }
+          // you can add a cancelled message if you have it:
+          // else if (newStatus === "cancelled") {
+          //   msg = t(lang, "order.cancelled_message", { orderCode });
+          // }
+
+          if (msg) {
+            // 1) send to WhatsApp
+            await sendText(waId, msg);
+
+            // 2) log to messages + emit to inbox UI
+            const convo = await db("conversations")
+              .where({ customer_id: updatedOrder.customer_id })
+              .orderBy("created_at", "desc")
+              .first<{ id: number }>();
+
+            if (convo) {
+              const inserted = await insertOutboundMessage(convo.id, "text", msg);
+
+              emit("message.created", {
+                conversation_id: convo.id,
+                message: inserted,
+              });
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.warn(
+        "[POST /api/orders/:id/status] failed to send/log status message",
+        err
+      );
+    }
+    // 🔼 🔼 🔼 END NEW PART 🔼 🔼 🔼
 
     return res.json({ ok: true, order: updatedOrder });
   } catch (err: any) {
