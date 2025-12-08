@@ -1,11 +1,53 @@
 // src/menu.ts
 // Product catalog + menu builders (aligned to original flow & i18n keys)
 
-import { listActiveProducts, findProductBySku } from "./db/queries.js";
+import { listActiveProducts, findProductBySku, ProductRow } from "./db/queries.js";
 
 function formatTZS(amount: number): string {
   return `${Math.round(amount).toLocaleString('sw-TZ')} TZS`;
 }
+
+// Apply active discount (if any) from product_discounts to a ProductRow
+function applyDiscount(row: ProductRow): { price: number; short: string } {
+  const basePrice = row.price_tzs;
+  let price = basePrice;
+  let short = row.short_description;
+
+  const discountType = row.discount_type;
+  const discountAmount = row.discount_amount ?? 0;
+  const discountIsActive = row.discount_is_active ?? false;
+
+  if (discountIsActive && discountType && discountAmount > 0) {
+    let discounted = basePrice;
+
+    if (discountType === "percentage") {
+      discounted = Math.round((basePrice * (100 - discountAmount)) / 100);
+    } else {
+      // "fixed" = amount TZS off
+      discounted = Math.max(0, basePrice - discountAmount);
+    }
+
+    price = discounted;
+
+    const saved = basePrice - discounted;
+    const percent =
+      discountType === "percentage"
+        ? discountAmount
+        : basePrice > 0
+        ? Math.round((saved / basePrice) * 100)
+        : 0;
+
+    // e.g. "108,000 TZS (was 120,000 TZS, ~10% off)"
+    short = `${formatTZS(discounted)} (was ${formatTZS(basePrice)}${
+      percent ? `, ~${percent}% off` : ""
+    })`;
+  } else {
+    short = row.short_description || `${formatTZS(basePrice)}`;
+  }
+
+  return { price, short };
+}
+
 
 // Action IDs are referenced by the webhook; keep them stable.
 export type ActionId =
@@ -103,14 +145,19 @@ export async function loadTopLevelProducts(): Promise<Product[]> {
     return PRODUCTS;
   }
 
-  return rows.map((row) => ({
-    sku: row.sku,
-    name: row.name,
-    price: row.price_tzs,
-    short: row.short_description,
-    // if you had variants (PROMAX_A/B/C) they can still be in PRODUCTS for now
-  }));
+  return rows.map((row) => {
+    const { price, short } = applyDiscount(row as ProductRow);
+
+    return {
+      sku: row.sku,
+      name: row.name,
+      price,
+      short,
+      stockQty: row.stock_qty ?? undefined, // keep stock for DB-backed products
+    };
+  });
 }
+
 
 /**
  * Find a product by SKU using DB first, then static fallback.
@@ -120,11 +167,13 @@ export async function getProductBySkuAsync(
 ): Promise<Product | undefined> {
   const row = await findProductBySku(sku);
   if (row) {
+    const { price, short } = applyDiscount(row as ProductRow);
+
     return {
       sku: row.sku,
       name: row.name,
-      price: row.price_tzs,
-      short: row.short_description,
+      price,
+      short,
       stockQty: row.stock_qty ?? undefined, // <-- DB stock
     };
   }

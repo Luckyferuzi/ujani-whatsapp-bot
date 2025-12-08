@@ -16,25 +16,70 @@ export interface ProductRow {
   is_installment: boolean;
   is_active: boolean;
   stock_qty?: number; // <-- from products.stock_qty (may be undefined on old rows)
+
+  // Optional discount fields from product_discounts (if present)
+  discount_type?: "percentage" | "fixed" | null;
+  discount_amount?: number | null;   // 10 (10%) or 5000 (TZS off)
+  discount_name?: string | null;
+  discount_is_active?: boolean | null;
 }
 
-
 export async function listActiveProducts(): Promise<ProductRow[]> {
-  const rows = await db<ProductRow>("products")
-    .where({ is_active: true })
-    .orderBy("name", "asc");
-  return rows;
+  const rows = await db("products as p")
+    .leftJoin("product_discounts as d", "d.product_id", "p.id")
+    .where("p.is_active", true)
+    .select([
+      "p.id",
+      "p.sku",
+      "p.name",
+      "p.price_tzs",
+      "p.short_description",
+      "p.description",
+      "p.usage_instructions",
+      "p.warnings",
+      "p.is_installment",
+      "p.is_active",
+      "p.stock_qty",
+      "d.type as discount_type",
+      "d.amount as discount_amount",
+      "d.name as discount_name",
+      "d.is_active as discount_is_active",
+    ])
+    .orderBy("p.name", "asc");
+
+  return rows as ProductRow[];
 }
 
 export async function findProductBySku(
   sku: string
 ): Promise<ProductRow | null> {
   if (!sku) return null;
-  const row = await db<ProductRow>("products")
-    .whereRaw("LOWER(sku) = LOWER(?)", [sku])
+
+  const row = await db("products as p")
+    .leftJoin("product_discounts as d", "d.product_id", "p.id")
+    .whereRaw("LOWER(p.sku) = LOWER(?)", [sku])
+    .select([
+      "p.id",
+      "p.sku",
+      "p.name",
+      "p.price_tzs",
+      "p.short_description",
+      "p.description",
+      "p.usage_instructions",
+      "p.warnings",
+      "p.is_installment",
+      "p.is_active",
+      "p.stock_qty",
+      "d.type as discount_type",
+      "d.amount as discount_amount",
+      "d.name as discount_name",
+      "d.is_active as discount_is_active",
+    ])
     .first();
-  return row ?? null;
+
+  return (row as ProductRow) ?? null;
 }
+
 
 export async function findProductById(
   id: number
