@@ -953,6 +953,7 @@ inboxRoutes.post("/orders/:id/status", async (req, res) => {
 
   const { status: newStatus, delivery_agent_phone } = parsed.data;
 
+  // Require rider phone only for out_for_delivery
   if (
     newStatus === "out_for_delivery" &&
     (!delivery_agent_phone || !delivery_agent_phone.trim())
@@ -1075,7 +1076,7 @@ inboxRoutes.post("/orders/:id/status", async (req, res) => {
 
             const newStock = isEnteringPreparing
               ? Math.max(0, currentStock - delta) // reserve on entering preparing
-              : currentStock + delta;             // refund on cancelling from preparing
+              : currentStock + delta; // refund on cancelling from preparing
 
             await trx("products")
               .where({ id: pid })
