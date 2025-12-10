@@ -80,7 +80,6 @@ export async function findProductBySku(
   return (row as ProductRow) ?? null;
 }
 
-
 export async function findProductById(
   id: number
 ): Promise<ProductRow | null> {

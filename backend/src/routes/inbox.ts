@@ -1273,22 +1273,27 @@ inboxRoutes.get(
 // GET /api/products  -> list all products for admin
 inboxRoutes.get("/products", async (req, res) => {
   try {
-    const rows = await db("products")
-      .orderBy("created_at", "desc")
+    const rows = await db("products as p")
+      .leftJoin("product_discounts as d", "d.product_id", "p.id")
+      .orderBy("p.created_at", "desc")
       .select(
-        "id",
-        "sku",
-        "name",
-        "price_tzs",
-        "stock_qty",
-        "short_description",
-        "short_description_en",
-        "description",
-        "description_en",
-        "is_installment",
-        "is_active",
-        "stock_qty",   // <-- include stock
-        "created_at"
+        "p.id",
+        "p.sku",
+        "p.name",
+        "p.price_tzs",
+        "p.stock_qty",
+        "p.short_description",
+        "p.short_description_en",
+        "p.description",
+        "p.description_en",
+        "p.is_installment",
+        "p.is_active",
+        "p.stock_qty",
+        "p.created_at",
+        "d.type as discount_type",
+        "d.amount as discount_amount",
+        "d.name as discount_name",
+        "d.is_active as discount_is_active"
       );
 
     return res.json({ items: rows });
@@ -1298,7 +1303,6 @@ inboxRoutes.get("/products", async (req, res) => {
   }
 });
 
-
 // GET /api/products/:id  -> single product (for editing)
 inboxRoutes.get("/products/:id", async (req, res) => {
   const id = Number(req.params.id);
@@ -1307,7 +1311,30 @@ inboxRoutes.get("/products/:id", async (req, res) => {
   }
 
   try {
-    const product = await db("products").where({ id }).first();
+    const product = await db("products as p")
+      .leftJoin("product_discounts as d", "d.product_id", "p.id")
+      .where("p.id", id)
+      .select(
+        "p.id",
+        "p.sku",
+        "p.name",
+        "p.price_tzs",
+        "p.stock_qty",
+        "p.short_description",
+        "p.short_description_en",
+        "p.description",
+        "p.description_en",
+        "p.is_installment",
+        "p.is_active",
+        "p.stock_qty",
+        "p.created_at",
+        "d.type as discount_type",
+        "d.amount as discount_amount",
+        "d.name as discount_name",
+        "d.is_active as discount_is_active"
+      )
+      .first();
+
     if (!product) {
       return res.status(404).json({ error: "Product not found" });
     }
@@ -1334,6 +1361,7 @@ function generateSkuFromName(rawName: string | undefined): string {
   return `${base || "product"}-${rand}${ts}`.toUpperCase();
 }
 
+// POST /api/products  -> create new product
 inboxRoutes.post("/products", async (req, res) => {
   try {
     const {
@@ -1349,6 +1377,10 @@ inboxRoutes.post("/products", async (req, res) => {
       is_installment,
       is_active,
       stock_qty,
+      discount_type,
+      discount_amount,
+      discount_name,
+      discount_is_active,
     } = req.body ?? {};
 
     if (!name || price_tzs == null) {
@@ -1398,7 +1430,7 @@ inboxRoutes.post("/products", async (req, res) => {
             ? String(description_en).trim()
             : null,
 
-          // ✅ NEW: fill NOT NULL columns so DB doesn’t error
+          // NOT NULL columns so DB doesn’t error
           usage_instructions: usage_instructions
             ? String(usage_instructions).trim()
             : "",
@@ -1414,6 +1446,26 @@ inboxRoutes.post("/products", async (req, res) => {
         "*"
       );
 
+    // Optional: create discount row
+    const hasDiscountType =
+      typeof discount_type === "string" && discount_type.trim() !== "";
+    const discountAmountNum = Number(discount_amount);
+    const hasDiscountAmount =
+      Number.isFinite(discountAmountNum) && discountAmountNum > 0;
+
+    if (hasDiscountType && hasDiscountAmount) {
+      await db("product_discounts").insert({
+        product_id: created.id,
+        name:
+          discount_name && String(discount_name).trim().length > 0
+            ? String(discount_name).trim()
+            : "Offer",
+        type: discount_type,
+        amount: Math.floor(discountAmountNum),
+        is_active: !!discount_is_active,
+      });
+    }
+
     emit("product.created", { product: created });
 
     return res.status(201).json({ product: created });
@@ -1425,7 +1477,6 @@ inboxRoutes.post("/products", async (req, res) => {
     return res.status(500).json({ error: "Failed to create product" });
   }
 });
-
 
 // PUT /api/products/:id  -> update existing product
 inboxRoutes.put("/products/:id", async (req, res) => {
@@ -1446,6 +1497,10 @@ inboxRoutes.put("/products/:id", async (req, res) => {
       is_installment,
       is_active,
       stock_qty,
+      discount_type,
+      discount_amount,
+      discount_name,
+      discount_is_active,
     } = req.body ?? {};
 
     const patch: Record<string, any> = {};
@@ -1467,7 +1522,8 @@ inboxRoutes.put("/products/:id", async (req, res) => {
         : null;
     if (is_installment !== undefined)
       patch.is_installment = !!is_installment;
-    if (is_active !== undefined) patch.is_active = !!is_active;
+    if (is_active !== undefined)
+      patch.is_active = !!is_active;
 
     if (stock_qty !== undefined) {
       const stockNum = Number(stock_qty);
@@ -1479,7 +1535,14 @@ inboxRoutes.put("/products/:id", async (req, res) => {
       patch.stock_qty = Math.floor(stockNum);
     }
 
-    if (Object.keys(patch).length === 0) {
+    // if we are only changing discount, allow empty product patch
+    if (
+      Object.keys(patch).length === 0 &&
+      discount_type === undefined &&
+      discount_amount === undefined &&
+      discount_name === undefined &&
+      discount_is_active === undefined
+    ) {
       return res.status(400).json({ error: "No fields to update" });
     }
 
@@ -1492,6 +1555,43 @@ inboxRoutes.put("/products/:id", async (req, res) => {
 
     if (!updated) {
       return res.status(404).json({ error: "Product not found" });
+    }
+
+    // Upsert / clear discount row
+    const hasDiscountType =
+      typeof discount_type === "string" && discount_type.trim() !== "";
+    const discountAmountNum = Number(discount_amount);
+    const hasDiscountAmount =
+      Number.isFinite(discountAmountNum) && discountAmountNum > 0;
+
+    if (hasDiscountType && hasDiscountAmount) {
+      const discountPatch: any = {
+        name:
+          discount_name && String(discount_name).trim().length > 0
+            ? String(discount_name).trim()
+            : "Offer",
+        type: discount_type,
+        amount: Math.floor(discountAmountNum),
+        is_active: !!discount_is_active,
+      };
+
+      const existing = await db("product_discounts")
+        .where({ product_id: id })
+        .first();
+
+      if (existing) {
+        await db("product_discounts")
+          .where({ product_id: id })
+          .update(discountPatch);
+      } else {
+        await db("product_discounts").insert({
+          product_id: id,
+          ...discountPatch,
+        });
+      }
+    } else {
+      // No discount configured -> remove any existing discount row
+      await db("product_discounts").where({ product_id: id }).del();
     }
 
     emit("product.updated", { product: updated });
