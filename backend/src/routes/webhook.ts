@@ -31,14 +31,10 @@ import {
   getOrdersForCustomer,
 } from "../db/queries.js";
 
-
 import { emit } from '../sockets.js';
 import db from '../db/knex.js';
 
 export const webhook = Router();
-
-
-
 /**
  * Send a text message from the bot and ALSO log it as an outbound message
  * so that it appears in the Inbox thread.
@@ -63,8 +59,6 @@ async function sendBotText(user: string, body: string) {
     console.error("[webhook] failed to log bot message:", err);
   }
 }
-
-
 /* -------------------------------------------------------------------------- */
 /*                    WhatsApp list/button safety wrappers                    */
 /* -------------------------------------------------------------------------- */
@@ -1558,7 +1552,19 @@ if (id.startsWith("ORDER_CANCEL_")) {
         : "Important warnings";
 
     const txt = detailsSectionForSku(lang, sku, section);
-    await sendBotText(user, `ℹ️ *${prod.name}* — ${label}\n\n${txt}`);
+
+    // Build base message
+    let message = `ℹ️ *${prod.name}* — ${label}\n\n${txt}`;
+
+    // If this product looks like it has an offer (short text mentions "offer"),
+    // add a limited-time note.
+    if (prod.short && /offer/i.test(prod.short.toString())) {
+      message +=
+        "\n\nOfa hii ni ya muda maalum, bei inaweza kurudi ya kawaida muda wowote.";
+    }
+
+    await sendBotText(user, message);
+
 
     // After showing the chosen details, show normal product actions again
     return showProductActions(user, sku, lang);
