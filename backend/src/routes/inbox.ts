@@ -2123,3 +2123,79 @@ inboxRoutes.delete("/incomes/:id", async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * POST /api/customers/broadcast
+ * Body: { message: string }
+ *
+ * Sends a text message to all customers that have a WhatsApp wa_id.
+ * NOTE: For users outside the 24h service window you should use
+ * WhatsApp marketing templates in production.
+ */
+inboxRoutes.post(
+  "/customers/broadcast",
+  async (req: Request, res: Response) => {
+    try {
+      const raw = (req.body?.message ?? "").toString().trim();
+      if (!raw) {
+        return res
+          .status(400)
+          .json({ error: "message is required" });
+      }
+
+      const customers = await db("customers")
+        .whereNotNull("wa_id")
+        .select("id", "wa_id");
+
+      let sent = 0;
+      let failed = 0;
+
+      for (const row of customers as any[]) {
+        const waId = row.wa_id as string | null;
+        if (!waId) continue;
+
+        try {
+          // 1) Send the message via WhatsApp
+          await sendText(waId, raw);
+          sent++;
+
+          // 2) Attach to latest conversation if it exists
+          const convo = await db("conversations")
+            .where({ customer_id: row.id })
+            .orderBy("created_at", "desc")
+            .first();
+
+          if (convo) {
+            const [msgRow] = await db("messages")
+              .insert({
+                conversation_id: convo.id,
+                direction: "out",
+                type: "text",
+                body: raw,
+                status: "sent",
+              })
+              .returning("*");
+
+            req.app.get("io")?.emit("message.created", {
+              conversation_id: convo.id,
+              message: msgRow,
+            });
+          }
+        } catch (err) {
+          failed++;
+          console.warn(
+            "[broadcast] failed to send to",
+            waId,
+            err
+          );
+        }
+      }
+
+      return res.json({ ok: true, sent, failed });
+    } catch (err: any) {
+      console.error("POST /customers/broadcast failed", err);
+      return res.status(500).json({
+        error: err?.message ?? "Failed to send broadcast",
+      });
+    }
+  }
+);

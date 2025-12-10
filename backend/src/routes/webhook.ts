@@ -469,13 +469,26 @@ webhook.post("/webhook", async (req: Request, res: Response) => {
 
     const entries = req.body?.entry ?? [];
     for (const entry of entries) {
-      const changes = entry?.changes ?? [];
-      for (const ch of changes) {
-        const messages = ch?.value?.messages ?? [];
-        for (const msg of messages) {
-          const from = msg?.from as string;
-          const mid = msg?.id as string | undefined;
-          if (!from) continue;
+const changes = entry?.changes ?? [];
+for (const ch of changes) {
+  const messages = ch?.value?.messages ?? [];
+  const contacts = ch?.value?.contacts ?? [];
+
+  for (const msg of messages) {
+    const from = msg?.from as string;
+    const mid = msg?.id as string | undefined;
+    if (!from) continue;
+
+    // Try to get WhatsApp profile name for this sender
+    const matchingContact = contacts.find(
+      (c: any) => c.wa_id === from
+    );
+    const profileName: string | undefined =
+      (matchingContact?.profile?.name as string | undefined) ??
+      (contacts[0]?.profile?.name as string | undefined);
+
+    // ...
+
           //if (mid) await markAsRead(mid).catch(() => {});
 
           const lang = getLang(from);
@@ -530,9 +543,14 @@ if (interactiveId) {
           // --- DB persistence + realtime for every inbound message ---
                   // --- DB persistence + realtime ---
 // --- DB persistence + realtime for every inbound message ---
+// --- DB persistence + realtime for every inbound message ---
 try {
-  // 1) Ensure customer + conversation exist
-  const customerId = await upsertCustomerByWa(from, undefined, from);
+  // 1) Ensure customer + conversation exist (use WhatsApp profile name if available)
+  const customerId = await upsertCustomerByWa(
+    from,
+    profileName,
+    from
+  );
   const conversationId = await getOrCreateConversation(customerId);
 // 2) Pick a body to store (text, user's choice label, location coords, or media)
 let bodyForDb: string | null = text ?? null;
@@ -1778,15 +1796,16 @@ async function onFlow(user: string, step: FlowStep, m: Incoming, lang: Lang) {
         );
 
         // Persist order in DB
-        try {
-          const customerId = await upsertCustomerByWa(
-            user,
-            contact.name,
-            contact.phone ?? user
-          );
+// NEW: persist order + initial payment in Neon
+try {
+  const customerId = await upsertCustomerByWa(
+    user,
+    undefined,               // do not override WhatsApp profile name
+    contact.phone ?? user    // still store phone if provided
+  );
 
-          const { orderId, orderCode } = await createOrderWithPayment({
-            customerId,
+  const { orderId, orderCode } = await createOrderWithPayment({
+    customerId,
             deliveryMode: "delivery",
             status: "pending",
             km,
