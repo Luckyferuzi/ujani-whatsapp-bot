@@ -154,18 +154,36 @@ export async function loadTopLevelProducts(): Promise<Product[]> {
   }
 
   return rows.map((row) => {
-    const { price, short } = applyDiscount(row as ProductRow);
+    const p = row as ProductRow;
+    const { price, short } = applyDiscount(p);
+
+    const discountAmount =
+      typeof p.discount_amount === "number" && p.discount_amount > 0
+        ? p.discount_amount
+        : 0;
+
+    const hasOffer =
+      !!p.discount_is_active && !!p.discount_type && discountAmount > 0;
+
+    const offerLabelRaw = (p.discount_name || "").trim();
+    const offerTag = offerLabelRaw
+      ? `${offerLabelRaw} offer`
+      : "Offer";
+
+    // This is what appears as the WhatsApp list title
+    const displayName = hasOffer
+      ? `${p.name} – ${offerTag}`
+      : p.name;
 
     return {
-      sku: row.sku,
-      name: row.name,
+      sku: p.sku,
+      name: displayName,
       price,
       short,
-      stockQty: row.stock_qty ?? undefined, // keep stock for DB-backed products
+      stockQty: p.stock_qty ?? undefined,
     };
   });
 }
-
 
 /**
  * Find a product by SKU using DB first, then static fallback.
@@ -175,14 +193,32 @@ export async function getProductBySkuAsync(
 ): Promise<Product | undefined> {
   const row = await findProductBySku(sku);
   if (row) {
-    const { price, short } = applyDiscount(row as ProductRow);
+    const p = row as ProductRow;
+    const { price, short } = applyDiscount(p);
+
+    const discountAmount =
+      typeof p.discount_amount === "number" && p.discount_amount > 0
+        ? p.discount_amount
+        : 0;
+
+    const hasOffer =
+      !!p.discount_is_active && !!p.discount_type && discountAmount > 0;
+
+    const offerLabelRaw = (p.discount_name || "").trim();
+    const offerTag = offerLabelRaw
+      ? `${offerLabelRaw} offer`
+      : "Offer";
+
+    const displayName = hasOffer
+      ? `${p.name} – ${offerTag}`
+      : p.name;
 
     return {
-      sku: row.sku,
-      name: row.name,
+      sku: p.sku,
+      name: displayName,
       price,
       short,
-      stockQty: row.stock_qty ?? undefined, // <-- DB stock
+      stockQty: p.stock_qty ?? undefined,
     };
   }
   // fallback to static (no stock info, treated as unlimited)
