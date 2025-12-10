@@ -110,15 +110,32 @@ function clampRow(titleIn: string, descIn?: string) {
 async function sendListMessageSafe(p: SafeListPayload) {
   const rawSections = p.sections || [];
 
-  const sections = rawSections
-    .map((sec) => ({
-      title: (sec.title || "").slice(0, MAX_SECTION_TITLE) || "—",
-      rows: (sec.rows || []).slice(0, MAX_LIST_ROWS).map((r) => {
-        const { title, description } = clampRow(r.title, r.description);
-        return { id: r.id, title, description };
-      }),
-    }))
-    .filter((sec) => (sec.rows?.length ?? 0) > 0);
+  // WhatsApp limit: max 10 rows TOTAL across all sections
+  let remaining = MAX_LIST_ROWS;
+  const sections: SafeListSection[] = [];
+
+  for (const sec of rawSections) {
+    if (!sec) continue;
+    if (remaining <= 0) break;
+
+    const title =
+      (sec.title || "").slice(0, MAX_SECTION_TITLE) || "—";
+    const rawRows = sec.rows || [];
+    if (!rawRows.length) continue;
+
+    const rows: SafeListRow[] = rawRows.slice(0, remaining).map((r) => {
+      const { title: rowTitle, description } = clampRow(
+        r.title,
+        r.description
+      );
+      return { id: r.id, title: rowTitle, description };
+    });
+
+    if (rows.length) {
+      sections.push({ title, rows });
+      remaining -= rows.length;
+    }
+  }
 
   // If no rows, just behave as a normal bot text message (and log it)
   if (!sections.length) {
@@ -135,7 +152,7 @@ async function sendListMessageSafe(p: SafeListPayload) {
     sections,
   } as any);
 
-  // 2) Build a JSON payload that the web UI can render as buttons
+  // 2) Build a JSON payload that the web UI can render as a summary
   const summaryPayload = {
     kind: "menu",
     subtype: "list",
@@ -168,7 +185,6 @@ async function sendListMessageSafe(p: SafeListPayload) {
     console.error("[webhook] failed to log list menu:", err);
   }
 }
-
 
 type Button = { id: string; title: string };
 
