@@ -37,15 +37,15 @@ function applyDiscount(row: ProductRow): { price: number; short: string } {
         ? Math.round((saved / basePrice) * 100)
         : 0;
 
-    const baseStr = formatTZS(basePrice);
-    const discStr = formatTZS(discounted);
+const baseStr = formatTZS(basePrice);
+const discStr = formatTZS(discounted);
+const label = (row.discount_name || "").trim();
 
-    // WhatsApp formatting:
-    // *bold* for new price, ~strikethrough~ for old price
-    // Example: *90,000 TZS* ~100,000 TZS~ (10% off)
-    short = `*${discStr}* ~${baseStr}~${
-      percent ? ` (${percent}% off)` : " (offer)"
-    }`;
+// WhatsApp formatting: *90,000 TZS* ~100,000 TZS~ (10% off – Weekend Offer)
+short = `*${discStr}* ~${baseStr}~${
+  percent ? ` (${percent}% off` : " (offer"
+}${label ? ` – ${label} offer)` : ")"}`;
+
   } else {
     short =
       row.short_description && row.short_description.trim().length > 0
