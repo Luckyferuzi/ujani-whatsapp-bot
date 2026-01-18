@@ -214,6 +214,15 @@ const dict: Dict = {
       'Oda yako {orderCode} imewasilishwa. Asante kwa kuamini Ujani Herbals 🌿.',
           'product.unavailable':
       'Pole sana, *{name}* kwa sasa haipatikani kwa sababu stock imeisha. Tutakujulisha ikirudi tena. 🙏',
+      // Restock (out-of-stock follow-up)
+'restock.ask': 'Je, unataka tukujulishe *{name}* ikirudi kwenye stock?',
+'restock.btn_yes': 'Ndiyo',
+'restock.btn_no': 'Hapana',
+'restock.subscribed': 'Sawa. Tutakujulisha *{name}* ikirudi kwenye stock.',
+'restock.declined': 'Sawa. Hatutakutumia taarifa ya bidhaa hii.',
+'restock.available':
+  '*{name}* imerudi kwenye stock. Jibu *MENU* kuona bidhaa na kuagiza.',
+
       
   },
 
@@ -415,7 +424,13 @@ const dict: Dict = {
       'Your order {orderCode} has been delivered. Thank you for choosing Ujani Herbals 🌿.',
           'product.unavailable':
       'We’re very sorry, *{name}* is currently unavailable due to being out of stock. We will notify you when it is back. 🙏',
-      
+      'restock.ask': 'Would you like us to notify you when *{name}* is back in stock?',
+'restock.btn_yes': 'Yes',
+'restock.btn_no': 'No',
+'restock.subscribed': 'Okay. We will notify you when *{name}* is back in stock.',
+'restock.declined': 'Okay. We will not send you notifications for this product.',
+'restock.available':
+  '*{name}* is back in stock. Reply *MENU* to view products and order.',
 
   },
 };

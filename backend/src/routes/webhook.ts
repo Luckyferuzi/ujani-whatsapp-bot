@@ -774,10 +774,33 @@ async function showProductActions(user: string, sku: string, lang: Lang) {
   if (!prod) return;
 
   // If we know stock and it's empty -> tell customer it's unavailable
-  if (typeof prod.stockQty === "number" && prod.stockQty <= 0) {
-    await sendBotText(user, t(lang, "product.unavailable", { name: prod.name }));
-    return;
+if (typeof prod.stockQty === "number" && prod.stockQty <= 0) {
+  await sendBotText(user, t(lang, "product.unavailable", { name: prod.name }));
+
+  // Follow-up: ask whether the customer wants a back-in-stock notification.
+  // We only create subscriptions for DB-backed products (stockQty is known).
+  try {
+    const row = await db("products")
+      .whereRaw("LOWER(sku) = LOWER(?)", [prod.sku])
+      .select<{ id: number }[]>("id")
+      .first();
+
+    if (row?.id) {
+      await sendButtonsMessageSafe(
+        user,
+        t(lang, "restock.ask", { name: prod.name }),
+        [
+          { id: `RESTOCK_YES:${row.id}`, title: t(lang, "restock.btn_yes") },
+          { id: `RESTOCK_NO:${row.id}`, title: t(lang, "restock.btn_no") },
+        ]
+      );
+    }
+  } catch (e) {
+    console.warn("[restock] failed to send restock prompt", e);
   }
+
+  return;
+}
 
   await sendBotText(user, `*${prod.name}* — ${fmtTZS(prod.price)} TZS`);
   const hasVariants = !!(prod.children && prod.children.length);
@@ -915,6 +938,57 @@ const PICKUP_INFO_EN = 'We are at Keko Modern Furniture, opposite Omax Bar. Cont
 async function onInteractive(user: string, id: string, lang: Lang) {
   const N = normId(id);
   console.log("[onInteractive] id =", id, "normalized =", N);
+  /* --------------------------- Restock subscription -------------------------- */
+// Button IDs are created as: RESTOCK_YES:<productId>  or  RESTOCK_NO:<productId>
+if (N.startsWith("RESTOCK_YES:") || N.startsWith("RESTOCK_NO:")) {
+  const isYes = N.startsWith("RESTOCK_YES:");
+  const parts = N.split(":");
+  const productId = Number(parts[1]);
+
+  if (!Number.isFinite(productId) || productId <= 0) {
+    await sendBotText(
+      user,
+      lang === "sw"
+        ? "Ombi halijafanikiwa. Tafadhali jaribu tena."
+        : "Request failed. Please try again."
+    );
+    return;
+  }
+
+  const customerId = await upsertCustomerByWa(user, undefined, user);
+
+  // Upsert (customer_id, product_id)
+  await db("restock_subscriptions")
+    .insert({
+      customer_id: customerId,
+      product_id: productId,
+      status: isYes ? "subscribed" : "declined",
+      lang,
+      created_at: db.fn.now(),
+      updated_at: db.fn.now(),
+    })
+    .onConflict(["customer_id", "product_id"])
+    .merge({
+      status: isYes ? "subscribed" : "declined",
+      lang,
+      updated_at: db.fn.now(),
+    });
+
+  const product = await db("products")
+    .where({ id: productId })
+    .select<{ name: string | null }[]>("name")
+    .first();
+  const name = String(product?.name ?? "").trim() || "Bidhaa";
+
+  if (isYes) {
+    await sendBotText(user, t(lang, "restock.subscribed", { name }));
+  } else {
+    await sendBotText(user, t(lang, "restock.declined"));
+  }
+
+  return;
+}
+
     // --- Agent handover actions (talk to agent / back to bot) ---
   if (id === 'ACTION_BACK') return showMainMenu(user, lang);
 

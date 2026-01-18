@@ -97,6 +97,77 @@ function formatTzs(amount: number): string {
 }
 
 /**
+ * When a product comes back in stock, notify customers who opted in while it was out-of-stock.
+ *
+ * Trigger: products.stock_qty transitions from <= 0 to > 0.
+ */
+async function notifyRestockSubscribers(
+  req: Request,
+  product: { id: number; name: string }
+) {
+  const rows = await db("restock_subscriptions as rs")
+    .join("customers as c", "c.id", "rs.customer_id")
+    .where("rs.product_id", product.id)
+    .where("rs.status", "subscribed")
+    .whereNotNull("c.wa_id")
+    .select(
+      "rs.id as sub_id",
+      "rs.customer_id",
+      "rs.lang as sub_lang",
+      "c.wa_id",
+      "c.lang as customer_lang"
+    );
+
+  if (!rows.length) return;
+
+  for (const r of rows as any[]) {
+    const waId = r.wa_id as string | null;
+    if (!waId) continue;
+
+    const lang: Lang =
+      r.sub_lang === "en" || r.sub_lang === "sw"
+        ? (r.sub_lang as Lang)
+        : r.customer_lang === "en" || r.customer_lang === "sw"
+        ? (r.customer_lang as Lang)
+        : "sw";
+
+    const msg = t(lang, "restock.available", { name: product.name });
+
+    try {
+      // 1) Send WhatsApp message
+      await sendText(waId, msg);
+
+      // 2) Log it to the latest conversation (for the admin inbox)
+      const convo = await db("conversations")
+        .where({ customer_id: r.customer_id })
+        .orderBy("created_at", "desc")
+        .first();
+
+      if (convo) {
+        const inserted = await insertOutboundMessage(convo.id, "text", msg);
+        req.app.get("io")?.emit("message.created", {
+          conversation_id: convo.id,
+          message: inserted,
+        });
+      }
+
+      // 3) Mark subscription as notified (one-time notification)
+      await db("restock_subscriptions")
+        .where({ id: r.sub_id })
+        .update({ status: "notified", updated_at: db.fn.now() });
+    } catch (err) {
+      console.warn(
+        "[restock] failed to notify",
+        { waId, productId: product.id },
+        err
+      );
+      // Keep status=subscribed so it can retry next time (or manually).
+    }
+  }
+}
+
+
+/**
  * GET /api/conversations
  * Left pane list (like WhatsApp)
  */
@@ -963,6 +1034,7 @@ inboxRoutes.post("/orders/:id/status", async (req, res) => {
   }
 
   let affectedProductIds: number[] = [];
+  let restockedProductIds: number[] = [];
 
   try {
     const existingOrder = await db("orders")
@@ -1070,7 +1142,10 @@ inboxRoutes.post("/orders/:id/status", async (req, res) => {
             const newStock = isEnteringPreparing
               ? Math.max(0, currentStock - delta)
               : currentStock + delta;
-
+              // If stock crosses from <=0 to >0, it is effectively "back in stock".
+if (currentStock <= 0 && newStock > 0) {
+  restockedProductIds.push(pid);
+}
             await trx("products")
               .where({ id: pid })
               .update({ stock_qty: newStock });
@@ -1089,6 +1164,21 @@ inboxRoutes.post("/orders/:id/status", async (req, res) => {
         product_ids: affectedProductIds,
       });
     }
+
+    // If any affected products came back in stock due to this status change (e.g. cancellation), notify opt-in customers.
+if (restockedProductIds.length > 0) {
+  const unique = Array.from(new Set(restockedProductIds));
+  const prows = await db("products")
+    .whereIn("id", unique)
+    .select<{ id: number; name: string }[]>("id", "name");
+
+  for (const p of prows) {
+    notifyRestockSubscribers(req, { id: p.id, name: p.name }).catch((err) =>
+      console.error("[restock] notifyRestockSubscribers failed", err)
+    );
+  }
+}
+
 
     emit("orders.updated", {
       reason: "status_changed",
@@ -1504,6 +1594,13 @@ inboxRoutes.put("/products/:id", async (req, res) => {
     } = req.body ?? {};
 
     const patch: Record<string, any> = {};
+    // Load current stock for restock transition detection (<=0 -> >0)
+const before = await db("products")
+  .where({ id })
+  .select<{ stock_qty: number | null }[]>("stock_qty")
+  .first();
+const prevStock = Number(before?.stock_qty ?? 0);
+
 
     if (sku !== undefined) patch.sku = String(sku).trim();
     if (name !== undefined) patch.name = String(name).trim();
@@ -1595,6 +1692,20 @@ inboxRoutes.put("/products/:id", async (req, res) => {
     }
 
     emit("product.updated", { product: updated });
+    // If this update brought stock back (<=0 -> >0), notify opt-in customers.
+const didRestock =
+  Object.prototype.hasOwnProperty.call(patch, "stock_qty") &&
+  prevStock <= 0 &&
+  Number((updated as any).stock_qty ?? 0) > 0;
+
+if (didRestock) {
+  notifyRestockSubscribers(req, {
+    id: Number((updated as any).id),
+    name: String((updated as any).name ?? ""),
+  }).catch((err) => {
+    console.error("[restock] notifyRestockSubscribers failed", err);
+  });
+}
 
     return res.json({ product: updated });
   } catch (err: any) {
@@ -2142,9 +2253,14 @@ inboxRoutes.post(
           .json({ error: "message is required" });
       }
 
-      const customers = await db("customers")
-        .whereNotNull("wa_id")
-        .select("id", "wa_id");
+// Broadcast only to customers who have actually messaged us before.
+// (Requirement: "customers that texted us")
+const customers = await db("customers as u")
+  .join("conversations as c", "c.customer_id", "u.id")
+  .whereNotNull("u.wa_id")
+  .whereNotNull("c.last_user_message_at")
+  .distinct("u.id", "u.wa_id");
+
 
       let sent = 0;
       let failed = 0;
