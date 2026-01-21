@@ -13,6 +13,7 @@ import { authRoutes } from "./routes/auth.js";
 import { settingsRoutes } from "./routes/settings.js";
 import path from "path";
 import { filesRoutes, publicMediaRoutes } from "./routes/files.js";
+import { whatsappProfilePhotoRoutes } from "./routes/whatsappProfilePhoto.js";
 
 const app = express();
 
@@ -59,6 +60,7 @@ app.use(
 app.use(webhook);
 app.use("/auth", authRoutes);
 app.use("/files", filesRoutes);
+app.use("/settings", whatsappProfilePhotoRoutes);
 app.use("/public", publicMediaRoutes);
 app.use("/settings", settingsRoutes);
 app.use("/api",requireInboxAuth, inboxRoutes);
