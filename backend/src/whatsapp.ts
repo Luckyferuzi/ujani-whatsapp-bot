@@ -432,3 +432,71 @@ export async function sendMediaById(
 
   await apiFetch(`${phoneId}/messages`, payload);
 }
+
+export type WhatsAppBusinessProfile = {
+  about?: string | null;
+  address?: string | null;
+  description?: string | null;
+  email?: string | null;
+  profile_picture_url?: string | null;
+  websites?: string[] | null;
+  vertical?: string | null;
+};
+
+const PROFILE_FIELDS =
+  "about,address,description,email,profile_picture_url,websites,vertical";
+
+export async function getBusinessProfile(): Promise<WhatsAppBusinessProfile | null> {
+  const phoneId = getPhoneNumberId();
+  if (!phoneId) return null;
+
+  const data = await apiGet(`${phoneId}/whatsapp_business_profile?fields=${PROFILE_FIELDS}`);
+
+  // Meta responses often come as { data: [ {...} ] }
+  const profile = Array.isArray(data?.data) ? data.data[0] : data;
+  if (!profile) return null;
+
+  return {
+    about: profile.about ?? null,
+    address: profile.address ?? null,
+    description: profile.description ?? null,
+    email: profile.email ?? null,
+    profile_picture_url: profile.profile_picture_url ?? null,
+    websites: Array.isArray(profile.websites) ? profile.websites : [],
+    vertical: profile.vertical ?? null,
+  };
+}
+
+export async function updateBusinessProfile(update: WhatsAppBusinessProfile): Promise<void> {
+  const phoneId = getPhoneNumberId();
+  if (!phoneId) {
+    console.warn("[whatsapp] PHONE_NUMBER_ID missing; cannot update business profile");
+    return;
+  }
+
+  // Only send fields that are present (avoid overwriting with nulls unintentionally)
+  const payload: any = {
+    messaging_product: "whatsapp",
+  };
+
+  const pick = (k: keyof WhatsAppBusinessProfile) => {
+    const v = update[k];
+    if (v === undefined) return;
+    payload[k] = v;
+  };
+
+  pick("about");
+  pick("address");
+  pick("description");
+  pick("email");
+  pick("profile_picture_url");
+  pick("vertical");
+
+  if (update.websites !== undefined) {
+    // WhatsApp typically supports up to 2 websites; we enforce that here
+    payload.websites = (update.websites ?? []).filter(Boolean).slice(0, 2);
+  }
+
+  // Uses existing apiFetch() POST helper
+  await apiFetch(`${phoneId}/whatsapp_business_profile`, payload);
+}

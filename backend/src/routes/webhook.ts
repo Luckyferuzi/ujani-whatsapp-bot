@@ -30,6 +30,7 @@ import {
   updateOrderPaymentMode,
   getOrdersForCustomer,
 } from "../db/queries.js";
+import { getJsonSetting } from "../db/settings.js";
 
 import { emit } from '../sockets.js';
 import db from '../db/knex.js';
@@ -717,12 +718,16 @@ if ((!s || s.state === "IDLE") && !activeFlow) {
 /* -------------------------------------------------------------------------- */
 /*                                   Screens                                  */
 /* -------------------------------------------------------------------------- */
-
 async function showMainMenu(user: string, lang: Lang) {
-  // buildMainMenu is now async and uses DB-backed products (with fallback)
   const model = await buildMainMenu((key: string) => t(lang, key));
 
-  // Show OTHER language label on the toggle row
+  const presence = await getJsonSetting<any>("whatsapp_presence", {});
+
+  const header = (presence.brand_name || model.header) as string;
+  const body = (presence.menu_intro || t(lang, "menu.header")) as string;
+  const footer = (presence.menu_footer || model.footer) as string;
+  const buttonText = (presence.catalog_button_text || t(lang, "generic.open")) as string;
+
   const sections = model.sections.map((sec) => ({
     title: sec.title,
     rows: sec.rows.map((r) =>
@@ -734,13 +739,14 @@ async function showMainMenu(user: string, lang: Lang) {
 
   await sendListMessageSafe({
     to: user,
-    header: model.header,
-    body: t(lang, "menu.header"),
-    footer: model.footer,
-    buttonText: t(lang, "generic.open"),
+    header,
+    body,
+    footer,
+    buttonText,
     sections,
   });
 }
+
 
 async function showCart(user: string, lang: Lang) {
   const items = getCart(user);

@@ -10,6 +10,7 @@ import { sendRoutes } from "./routes/send.js";
 import { attachSockets } from "./sockets.js";
 import { requireInboxAuth } from "./middleware/auth.js";
 import { authRoutes } from "./routes/auth.js";
+import { settingsRoutes } from "./routes/settings.js";
 
 const app = express();
 
@@ -49,6 +50,7 @@ app.use(
  */
 app.use(webhook);
 app.use("/auth", authRoutes);
+app.use("/settings", settingsRoutes);
 app.use("/api",requireInboxAuth, inboxRoutes);
 app.use("/api",requireInboxAuth, sendRoutes);
 
