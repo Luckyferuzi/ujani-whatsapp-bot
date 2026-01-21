@@ -11,6 +11,8 @@ import { attachSockets } from "./sockets.js";
 import { requireInboxAuth } from "./middleware/auth.js";
 import { authRoutes } from "./routes/auth.js";
 import { settingsRoutes } from "./routes/settings.js";
+import path from "path";
+import { filesRoutes } from "./routes/files.js";
 
 const app = express();
 
@@ -48,8 +50,15 @@ app.use(
  *
  * inboxRoutes + sendRoutes go under /api/*
  */
+// Serve uploaded files
+app.use(
+  "/uploads",
+  express.static(path.resolve(process.cwd(), "uploads"))
+);
+
 app.use(webhook);
 app.use("/auth", authRoutes);
+app.use("/files", filesRoutes);
 app.use("/settings", settingsRoutes);
 app.use("/api",requireInboxAuth, inboxRoutes);
 app.use("/api",requireInboxAuth, sendRoutes);
