@@ -11,7 +11,16 @@ export async function requireSession(req: Request, res: Response, next: NextFunc
   const session = await db("sessions")
     .join("users", "sessions.user_id", "users.id")
     .where("sessions.token", token)
-    .select("users.id", "users.email", "users.role")
+    .select(
+      "users.id",
+      "users.email",
+      "users.role",
+      "users.full_name",
+      "users.phone",
+      "users.business_name",
+      "users.avatar_url",
+      "users.bio"
+    )
     .first();
 
   if (!session) return res.status(401).json({ error: "invalid_session" });
@@ -20,6 +29,11 @@ export async function requireSession(req: Request, res: Response, next: NextFunc
     id: session.id,
     email: session.email,
     role: session.role,
+    full_name: (session as any).full_name ?? null,
+    phone: (session as any).phone ?? null,
+    business_name: (session as any).business_name ?? null,
+    avatar_url: (session as any).avatar_url ?? null,
+    bio: (session as any).bio ?? null,
   };
 
   next();

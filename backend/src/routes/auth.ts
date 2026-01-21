@@ -104,7 +104,16 @@ authRoutes.post("/bootstrap-admin", async (req, res) => {
           password_hash: hashPassword(password),
           role: "admin",
         },
-        ["id", "email", "role"]
+        [
+          "id",
+          "email",
+          "role",
+          "full_name",
+          "phone",
+          "business_name",
+          "avatar_url",
+          "bio",
+        ]
       )
       .catch((err: any) => {
         console.error("[auth] bootstrap-admin failed", err);
@@ -149,6 +158,11 @@ authRoutes.post("/login", async (req, res) => {
       email: string;
       password_hash: string | null;
       role: "admin" | "staff";
+      full_name?: string | null;
+      phone?: string | null;
+      business_name?: string | null;
+      avatar_url?: string | null;
+      bio?: string | null;
     }>();
 
   if (!user || !user.password_hash) {
@@ -166,6 +180,11 @@ authRoutes.post("/login", async (req, res) => {
       id: user.id,
       email: user.email,
       role: user.role,
+      full_name: user.full_name ?? null,
+      phone: user.phone ?? null,
+      business_name: user.business_name ?? null,
+      avatar_url: user.avatar_url ?? null,
+      bio: user.bio ?? null,
     },
     token,
   });
@@ -243,7 +262,16 @@ authRoutes.post(
             password_hash: hashPassword(password),
             role: "staff",
           },
-          ["id", "email", "role"]
+          [
+            "id",
+            "email",
+            "role",
+            "full_name",
+            "phone",
+            "business_name",
+            "avatar_url",
+            "bio",
+          ]
         )
         .catch((err: any) => {
           console.error("[auth] create staff failed", err);
@@ -269,7 +297,17 @@ authRoutes.post(
  */
 authRoutes.get("/users", requireSession, requireAdmin, async (_req, res) => {
   const users = await db("users")
-    .select("id", "email", "role", "created_at")
+    .select(
+      "id",
+      "email",
+      "role",
+      "full_name",
+      "phone",
+      "business_name",
+      "avatar_url",
+      "created_at",
+      "updated_at"
+    )
     .orderBy("created_at", "asc");
 
   return res.json({ users });
@@ -286,27 +324,99 @@ authRoutes.patch("/profile", requireSession, async (req, res) => {
     id: number;
     email: string;
     role: "admin" | "staff";
+    full_name?: string | null;
+    phone?: string | null;
+    business_name?: string | null;
+    avatar_url?: string | null;
+    bio?: string | null;
   };
 
-  const schema = z.object({
-    email: z.string().email().optional(),
-    password: z.string().min(6).optional(),
-  });
+  const schema = z
+    .object({
+      email: z.string().email().optional(),
+      full_name: z.string().max(120).optional(),
+      phone: z.string().max(40).optional(),
+      business_name: z.string().max(160).optional(),
+      avatar_url: z.string().max(500).optional(),
+      bio: z.string().max(500).optional(),
+
+      password: z.string().min(6).optional(),
+      current_password: z.string().min(1).optional(),
+    })
+    .superRefine((val, ctx) => {
+      if (val.password && !val.current_password) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "current_password_required",
+          path: ["current_password"],
+        });
+      }
+    });
 
   const parsed = schema.safeParse(req.body ?? {});
   if (!parsed.success) {
     return res.status(400).json({ error: "invalid_payload" });
   }
 
-  const { email, password } = parsed.data;
+  const {
+    email,
+    full_name,
+    phone,
+    business_name,
+    avatar_url,
+    bio,
+    password,
+    current_password,
+  } = parsed.data;
 
   const updates: Record<string, any> = {};
 
-  if (email) {
-    updates.email = email.toLowerCase().trim();
+  const normalize = (v: unknown): string | null => {
+    if (typeof v !== "string") return null;
+    const trimmed = v.trim();
+    return trimmed.length ? trimmed : null;
+  };
+
+  if (typeof email === "string") {
+    const nextEmail = email.toLowerCase().trim();
+    if (nextEmail && nextEmail !== current.email) {
+      const existing = await db("users").select("id").where({ email: nextEmail }).first();
+      if (existing && existing.id !== current.id) {
+        return res.status(409).json({
+          error: "email_in_use",
+          message: "Barua pepe hii tayari inatumika.",
+        });
+      }
+      updates.email = nextEmail;
+    }
   }
+
+  if ("full_name" in parsed.data) updates.full_name = normalize(full_name);
+  if ("phone" in parsed.data) updates.phone = normalize(phone);
+  if ("business_name" in parsed.data) updates.business_name = normalize(business_name);
+  if ("avatar_url" in parsed.data) updates.avatar_url = normalize(avatar_url);
+  if ("bio" in parsed.data) updates.bio = normalize(bio);
+
   if (password) {
+    // Verify current password before changing
+    const row = await db("users")
+      .select("password_hash")
+      .where({ id: current.id })
+      .first<{ password_hash: string | null }>();
+
+    if (!row || !verifyPassword(String(current_password ?? ""), row.password_hash)) {
+      return res.status(401).json({
+        error: "invalid_credentials",
+        message: "Nenosiri la sasa si sahihi.",
+      });
+    }
+
     updates.password_hash = hashPassword(password);
+  }
+
+  // Always bump updated_at when anything is changed
+  if (Object.keys(updates).length > 0) {
+    updates.updated_at = db.fn.now();
   }
 
   if (Object.keys(updates).length === 0) {
@@ -320,7 +430,22 @@ authRoutes.patch("/profile", requireSession, async (req, res) => {
     return res.status(500).json({ error: "update_failed" });
   }
 
-  return res.json({ ok: true });
+  // Return updated user snapshot for convenience
+  const updated = await db("users")
+    .select(
+      "id",
+      "email",
+      "role",
+      "full_name",
+      "phone",
+      "business_name",
+      "avatar_url",
+      "bio"
+    )
+    .where({ id: current.id })
+    .first();
+
+  return res.json({ ok: true, user: updated });
 });
 
 // GET /auth/users/:userId/activity
