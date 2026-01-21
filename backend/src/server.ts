@@ -12,7 +12,7 @@ import { requireInboxAuth } from "./middleware/auth.js";
 import { authRoutes } from "./routes/auth.js";
 import { settingsRoutes } from "./routes/settings.js";
 import path from "path";
-import { filesRoutes } from "./routes/files.js";
+import { filesRoutes, publicMediaRoutes } from "./routes/files.js";
 
 const app = express();
 
@@ -59,6 +59,7 @@ app.use(
 app.use(webhook);
 app.use("/auth", authRoutes);
 app.use("/files", filesRoutes);
+app.use("/public", publicMediaRoutes);
 app.use("/settings", settingsRoutes);
 app.use("/api",requireInboxAuth, inboxRoutes);
 app.use("/api",requireInboxAuth, sendRoutes);
