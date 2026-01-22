@@ -1,188 +1,121 @@
-// web/app/profile/page.tsx
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
-import { toast } from "sonner";
+import { useEffect, useMemo, useState } from "react";
+import { authGet } from "@/lib/auth";
 import { useAuth } from "@/components/AuthProvider";
-import { authGet, authPatchJson } from "@/lib/auth";
 
-type MeResponse = {
-  user: {
-    id: number;
-    email: string;
-    role: "admin" | "staff";
-  };
+type Presence = {
+  brand_name: string | null;
+  menu_intro: string | null;
+  menu_footer: string | null;
+  catalog_button_text: string | null;
+
+  about: string | null;
+  description: string | null;
+  address: string | null;
+  email: string | null;
+  websites: string[];
+  profile_picture_url: string | null;
+  vertical: string | null;
 };
 
-export default function ProfilePage() {
-  const { user, token } = useAuth();
-  const [email, setEmail] = useState(user?.email ?? "");
-  const [role, setRole] = useState<"admin" | "staff" | "">(
-    user?.role ?? ""
-  );
-  const [currentPassword, setCurrentPassword] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [confirm, setConfirm] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [loading, setLoading] = useState(true);
+type PresenceGet = { saved: Presence; live: any };
 
-  // Optional: refresh profile from backend
+function safeTrim(v: unknown): string {
+  return typeof v === "string" ? v.trim() : "";
+}
+
+export default function ProfilePage() {
+  const { user } = useAuth();
+  const [loading, setLoading] = useState(true);
+  const [saved, setSaved] = useState<Presence | null>(null);
+  const [live, setLive] = useState<any>(null);
+
   useEffect(() => {
-    if (!token) return;
     (async () => {
       try {
-        const data = await authGet<MeResponse>("/auth/me");
-        setEmail(data.user.email);
-        setRole(data.user.role);
-      } catch (err) {
-        console.error("failed to load profile", err);
+        const p = await authGet<PresenceGet>("/settings/whatsapp-presence");
+        setSaved(p.saved);
+        setLive(p.live);
       } finally {
         setLoading(false);
       }
     })();
-  }, [token]);
+  }, []);
 
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault();
-
-    const payload: Record<string, string> = {};
-    if (email && email !== user?.email) {
-      payload.email = email;
-    }
-
-    if (newPassword || confirm || currentPassword) {
-      if (!currentPassword) {
-        toast.error("Weka nenosiri la sasa kwanza.");
-        return;
-      }
-      if (newPassword !== confirm) {
-        toast.error("Manenosiri mapya hayafanani.");
-        return;
-      }
-      if (!newPassword) {
-        toast.error("Weka nenosiri jipya.");
-        return;
-      }
-      payload.password = newPassword;
-      // Note: backend as currently defined does not verify currentPassword;
-      // if you add that later, also send it here.
-    }
-
-    if (Object.keys(payload).length === 0) {
-      toast.info("Hakuna mabadiliko ya kuhifadhi.");
-      return;
-    }
-
-    try {
-      setSaving(true);
-      await authPatchJson<{ ok: boolean }>("/auth/profile", payload);
-      toast.success("Profaili imehifadhiwa.");
-    } catch (err: any) {
-      console.error("profile update failed", err);
-      toast.error(
-        err?.message || "Imeshindikana kubadili taarifa za profaili."
-      );
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  if (!user) {
-    return (
-      <div className="p-4 text-sm text-ui-dim">
-        Tafadhali ingia kwanza.
-      </div>
-    );
-  }
+  const brand = useMemo(() => safeTrim(saved?.brand_name) || "Business", [saved?.brand_name]);
 
   return (
-    <div className="auth-root">
-      <div className="auth-card max-w-lg">
-        <div className="auth-header">
-          <div className="topbar-brand-icon">👤</div>
-          <div className="auth-title">My profile</div>
+    <div className="pr-page">
+      <div className="pr-hero">
+        <div className="pr-hero-left">
+          <div className="pr-titlewrap">
+            <div className="pr-title">Profile (Customer-facing)</div>
+            <div className="pr-subtitle">
+              Hii ni preview ya kile wateja wanaona WhatsApp. Mabadiliko fanya kwenye Settings.
+            </div>
+          </div>
         </div>
-        <p className="auth-subtitle">
-          Badilisha barua pepe (username) na nenosiri la akaunti yako.
-        </p>
-
-        {loading ? (
-          <div className="text-sm text-ui-dim py-4">Inapakia...</div>
-        ) : (
-          <form onSubmit={handleSubmit}>
-            <div className="auth-field">
-              <div className="auth-field-label">Barua pepe (username)</div>
-              <input
-                type="email"
-                className="auth-input"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                autoComplete="email"
-              />
-            </div>
-
-            <div className="auth-field">
-              <div className="auth-field-label">Jukumu</div>
-              <input
-                type="text"
-                className="auth-input"
-                value={role || user.role}
-                disabled
-              />
-            </div>
-
-            <div className="mt-4 mb-1 text-xs text-ui-dim uppercase tracking-wide">
-              Badili nenosiri
-            </div>
-
-            <div className="auth-field">
-              <div className="auth-field-label">Nenosiri la sasa</div>
-              <input
-                type="password"
-                className="auth-input"
-                value={currentPassword}
-                onChange={(e) => setCurrentPassword(e.target.value)}
-                placeholder="••••••••"
-                autoComplete="current-password"
-              />
-            </div>
-
-            <div className="auth-field">
-              <div className="auth-field-label">Nenosiri jipya</div>
-              <input
-                type="password"
-                className="auth-input"
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-                placeholder="••••••••"
-                autoComplete="new-password"
-              />
-            </div>
-
-            <div className="auth-field">
-              <div className="auth-field-label">Rudia nenosiri jipya</div>
-              <input
-                type="password"
-                className="auth-input"
-                value={confirm}
-                onChange={(e) => setConfirm(e.target.value)}
-                placeholder="••••••••"
-                autoComplete="new-password"
-              />
-            </div>
-
-            <div className="auth-actions mt-3">
-              <button
-                type="submit"
-                disabled={saving}
-                className="auth-primary-btn"
-              >
-                {saving ? "Inahifadhi..." : "Hifadhi mabadiliko"}
-              </button>
-            </div>
-          </form>
-        )}
+        <div className="pr-badges">
+          <span className="pr-pill pr-pill--role">{user?.role ?? "user"}</span>
+        </div>
       </div>
+
+      {loading ? (
+        <div className="pr-card">
+          <div className="pr-card-body">
+            <div className="pr-hint">Inapakia…</div>
+          </div>
+        </div>
+      ) : (
+        <div className="pr-grid">
+          <div className="pr-card">
+            <div className="pr-card-head">
+              <div>
+                <div className="pr-card-title">Saved Presence</div>
+                <div className="pr-card-desc">Hiki ndicho “source of truth” ya bot + profile fields.</div>
+              </div>
+            </div>
+            <div className="pr-card-body">
+              <div className="pr-note">
+                <div style={{ fontWeight: 900, marginBottom: 8 }}>{brand}</div>
+                <div style={{ marginBottom: 6 }}>{safeTrim(saved?.about) || "About haijawekwa."}</div>
+                <div style={{ marginBottom: 6 }}>{safeTrim(saved?.menu_intro) || "Menu intro haijawekwa."}</div>
+                <div style={{ fontSize: 12, opacity: 0.85 }}>
+                  Button: {safeTrim(saved?.catalog_button_text) || "(default)"}
+                </div>
+              </div>
+
+              <div className="pr-hint">
+                Websites: {(saved?.websites ?? []).filter(Boolean).join(" , ") || "-"}
+              </div>
+            </div>
+          </div>
+
+          <div className="pr-card">
+            <div className="pr-card-head">
+              <div>
+                <div className="pr-card-title">Live WhatsApp Profile</div>
+                <div className="pr-card-desc">Kilichopo WhatsApp sasa hivi (best-effort fetch).</div>
+              </div>
+            </div>
+            <div className="pr-card-body">
+              {live?.error ? (
+                <div className="pr-note">Live profile haijapatikana: {live.error}</div>
+              ) : (
+                <div className="pr-note">
+                  <div><b>about</b>: {live?.about ?? "-"}</div>
+                  <div><b>description</b>: {live?.description ?? "-"}</div>
+                  <div><b>address</b>: {live?.address ?? "-"}</div>
+                  <div><b>email</b>: {live?.email ?? "-"}</div>
+                  <div><b>websites</b>: {(live?.websites ?? []).join(" , ") || "-"}</div>
+                  <div><b>vertical</b>: {live?.vertical ?? "-"}</div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

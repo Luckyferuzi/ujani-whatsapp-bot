@@ -6,7 +6,7 @@ import {
   useState,
   type ChangeEvent,
   type KeyboardEvent,
-  type FormEvent
+  type FormEvent,
 } from "react";
 import { api, API } from "@/lib/api";
 import { formatPhonePretty } from "@/lib/phone";
@@ -26,6 +26,15 @@ function formatTime(iso: string) {
   });
 }
 
+function minutesBetween(aIso: string, bIso: string): number {
+  const a = new Date(aIso).getTime();
+  const b = new Date(bIso).getTime();
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return Number.POSITIVE_INFINITY;
+  return Math.abs(b - a) / (1000 * 60);
+}
+
+const GROUP_GAP_MINUTES = 6;
+
 type Msg = {
   id: string | number;
   conversation_id: string | number;
@@ -35,92 +44,6 @@ type Msg = {
   status?: string | null;
   created_at: string;
 };
-
-/**
- * Parse outbound menu text like:
- *
- * Karibu Ujani Herbals Chatbot
- * Karibu Ujani Herbals Chatbot
- *
- * Angalia Bidhaa zetu:
- * • UJANI DAWA YA GANZI
- * • UJANI KIBOKO KIBAMIA
- *
- * Vitendo:
- * • Angalia kikapu
- * • Kamilisha oda
- * ...
- */
-function parseMenuFromBody(body: string): ParsedMenu | null {
-  if (!body) return null;
-
-  const rawLines = body.split("\n");
-  const lines = rawLines.map((l) => l.trimEnd());
-  const trimmed = lines.map((l) => l.trim());
-
-  // Must have at least one "• something" for this to be a menu
-  const hasBullet = trimmed.some((l) => l.startsWith("• "));
-  if (!hasBullet) return null;
-
-  // Find first "Section:" line
-  let firstHeaderIndex = -1;
-  for (let i = 0; i < trimmed.length; i++) {
-    const line = trimmed[i];
-    if (!line) continue;
-    if (line.endsWith(":")) {
-      firstHeaderIndex = i;
-      break;
-    }
-  }
-
-  if (firstHeaderIndex === -1) return null;
-
-  const introLines = trimmed.slice(0, firstHeaderIndex).filter(Boolean);
-  const sections: ParsedMenu["sections"] = [];
-
-  let i = firstHeaderIndex;
-  while (i < trimmed.length) {
-    // skip empty lines
-    while (i < trimmed.length && !trimmed[i]) i++;
-    if (i >= trimmed.length) break;
-
-    const headerLine = trimmed[i];
-    if (!headerLine.endsWith(":")) break;
-
-    const title = headerLine.slice(0, -1); // remove trailing ":"
-    i++;
-
-    const options: string[] = [];
-
-    while (i < trimmed.length) {
-      const line = trimmed[i];
-
-      if (!line) {
-        i++;
-        continue;
-      }
-
-      // Next section header
-      if (line.endsWith(":")) break;
-
-      // Option line: starts with "• "
-      if (line.startsWith("• ")) {
-        options.push(line.slice(2).trim());
-      }
-
-      i++;
-    }
-
-    if (options.length > 0) {
-      sections.push({ title, options });
-    }
-  }
-
-  if (!sections.length) return null;
-
-  return { introLines, sections };
-}
-
 
 type ProductSummary = {
   id: number;
@@ -147,14 +70,11 @@ function parseMenuFromJsonBody(body: string): ParsedMenu | null {
 
   try {
     const payload = JSON.parse(match[1]);
-
     if (!payload || payload.kind !== "menu") return null;
 
     const introLines: string[] = [];
-    const header =
-      typeof payload.header === "string" ? payload.header.trim() : "";
-    const text =
-      typeof payload.body === "string" ? payload.body.trim() : "";
+    const header = typeof payload.header === "string" ? payload.header.trim() : "";
+    const text = typeof payload.body === "string" ? payload.body.trim() : "";
 
     if (header) introLines.push(header);
     if (text && text !== header) introLines.push(text);
@@ -179,8 +99,7 @@ function parseMenuFromJsonBody(body: string): ParsedMenu | null {
     // List menus
     if (payload.subtype === "list" && Array.isArray(payload.sections)) {
       for (const sec of payload.sections as any[]) {
-        const secTitle =
-          typeof sec?.title === "string" ? sec.title.trim() : "";
+        const secTitle = typeof sec?.title === "string" ? sec.title.trim() : "";
         const rows = Array.isArray(sec?.rows) ? sec.rows : [];
         const opts = rows
           .map((r: any) =>
@@ -286,7 +205,7 @@ function parseMenuFromPlainBody(body: string): ParsedMenu | null {
   return { introLines, sections };
 }
 
-/** Common React renderer for both kinds of menus */
+/** Common React renderer for menus */
 function renderMenuBlock(parsed: ParsedMenu) {
   return (
     <div className="thread-menu">
@@ -301,9 +220,7 @@ function renderMenuBlock(parsed: ParsedMenu) {
       {parsed.sections.map((section, idx) => (
         <div key={idx} className="thread-menu-section">
           {section.title && (
-            <div className="thread-menu-section-title">
-              {section.title}
-            </div>
+            <div className="thread-menu-section-title">{section.title}</div>
           )}
           <div className="thread-menu-options">
             {section.options.map((opt, j) => (
@@ -318,72 +235,69 @@ function renderMenuBlock(parsed: ParsedMenu) {
   );
 }
 
-function formatInteractiveDisplay(
-  id: string,
-  products: Record<string, string>
-): string {
+function formatInteractiveDisplay(id: string, products: Record<string, string>): string {
   if (!id) return "";
 
   const nameForSku = (sku: string) => products[sku] ?? sku;
 
-  // Customer selected a product from the list
   if (id.startsWith("PRODUCT_")) {
     const sku = id.slice("PRODUCT_".length);
     const name = nameForSku(sku);
     return `✅ Mteja amechagua bidhaa: ${name}`;
   }
 
-  // First-level "Maelezo zaidi" (DETAILS_<SKU>)
   if (id.startsWith("DETAILS_") && !id.startsWith("DETAILS2_")) {
     const sku = id.slice("DETAILS_".length);
     const name = nameForSku(sku);
     return `ℹ️ Mteja ameomba maelezo zaidi kuhusu ${name}`;
   }
 
-  // Second-level details: DETAILS2_<SKU>_<SECTION>
   if (id.startsWith("DETAILS2_")) {
-    const rest = id.slice("DETAILS2_".length); // "<SKU>_<SECTION>"
+    const rest = id.slice("DETAILS2_".length);
     const [sku, section] = rest.split("_");
     const name = nameForSku(sku);
-    if (section === "ABOUT") {
-      return `ℹ️ Mteja ameomba maelezo kuhusu ${name}`;
-    }
-    if (section === "USAGE") {
-      return `🧴 Mteja ameomba jinsi ya kutumia ${name}`;
-    }
-    if (section === "WARN") {
-      return `⚠️ Mteja ameomba tahadhari muhimu za ${name}`;
-    }
+    if (section === "ABOUT") return `ℹ️ Mteja ameomba maelezo kuhusu ${name}`;
+    if (section === "USAGE") return `🧴 Mteja ameomba jinsi ya kutumia ${name}`;
+    if (section === "WARN") return `⚠️ Mteja ameomba tahadhari muhimu za ${name}`;
   }
 
-  // Add to cart
   if (id.startsWith("ADD_")) {
     const sku = id.slice("ADD_".length);
     const name = nameForSku(sku);
     return `🛒 Mteja ameongeza kwenye mzigo: ${name}`;
   }
 
-  // Buy now
   if (id.startsWith("BUY_")) {
     const sku = id.slice("BUY_".length);
     const name = nameForSku(sku);
     return `💳 Mteja amebonyeza *Nunua sasa* — ${name}`;
   }
 
-  // Other actions from main menu
   if (id === "ACTION_VIEW_CART") return "🛒 Mteja ameangalia mzigo (cart)";
   if (id === "ACTION_CHECKOUT") return "✅ Mteja ameanza kukamilisha oda (checkout)";
-  if (id === "ACTION_TRACK_BY_NAME")
-    return "🔍 Mteja anafuata oda kwa jina";
-  if (id === "ACTION_TALK_TO_AGENT")
-    return "☎️ Mteja ameomba kuongea na agent";
+  if (id === "ACTION_TRACK_BY_NAME") return "🔍 Mteja anafuata oda kwa jina";
+  if (id === "ACTION_TALK_TO_AGENT") return "☎️ Mteja ameomba kuongea na agent";
   if (id === "ACTION_FAQ") return "❓ Mteja ameangalia maswali (FAQ)";
   if (id === "ACTION_BACK") return "↩️ Mteja amerudi kwenye menyu kuu";
 
-  // Unknown / fallback – keep it but make it clearer
   return `⛓️ Interactive: ${id}`;
 }
 
+type Role = "customer" | "agent" | "bot";
+
+function getRole(msg: Msg): Role {
+  const inbound = msg.direction === "in" || msg.direction === "inbound";
+  if (inbound) return "customer";
+
+  const body = msg.body ?? "";
+
+  // Bot tends to send structured menus / interactive markers
+  if (parseMenuFromJsonBody(body)) return "bot";
+  if (parseMenuFromPlainBody(body)) return "bot";
+  if (/^\[interactive:(.+)\]$/.test(body)) return "bot";
+
+  return "agent";
+}
 
 // LOCATION handling: "LOCATION lat,lng"
 function renderBody(
@@ -395,30 +309,19 @@ function renderBody(
   onToggleMediaActions?: (messageId: string | number) => void
 ) {
   const body = msg.body ?? "";
-  const inbound =
-    msg.direction === "in" || msg.direction === "inbound";
+  const inbound = msg.direction === "in" || msg.direction === "inbound";
   const outbound = !inbound;
 
-  /* ------------------------------------------------------------------ */
-  /* 0) Menus: first try JSON [MENU]{...}, then plain-text bullets      */
-  /* ------------------------------------------------------------------ */
-
+  /* 0) Menus: JSON then plain-text */
   const jsonMenu = parseMenuFromJsonBody(body);
-  if (jsonMenu) {
-    return renderMenuBlock(jsonMenu);
-  }
+  if (jsonMenu) return renderMenuBlock(jsonMenu);
 
   if (outbound) {
     const plainMenu = parseMenuFromPlainBody(body);
-    if (plainMenu) {
-      return renderMenuBlock(plainMenu);
-    }
+    if (plainMenu) return renderMenuBlock(plainMenu);
   }
 
-  /* ------------------------------------------------------------- */
-  /* 1) Old interactive markers: [interactive:ID] (for older msgs) */
-  /* ------------------------------------------------------------- */
-
+  /* 1) Old interactive markers */
   const interactiveMatch = body.match(/^\[interactive:(.+)\]$/);
   if (interactiveMatch) {
     const id = interactiveMatch[1];
@@ -426,10 +329,7 @@ function renderBody(
     return <div className="thread-text">{pretty}</div>;
   }
 
-  /* ----------------------------- */
-  /* 2) LOCATION "LOCATION lat,lng" */
-  /* ----------------------------- */
-
+  /* 2) LOCATION */
   if (body.startsWith("LOCATION ")) {
     const raw = body.substring("LOCATION ".length).trim();
     const [latStr, lngStr] = raw.split(",").map((p) => p.trim());
@@ -448,29 +348,17 @@ function renderBody(
         <div className="thread-location-coords">
           {lat.toFixed(5)}, {lng.toFixed(5)}
         </div>
-        <a
-          href={url}
-          target="_blank"
-          rel="noreferrer"
-          className="thread-location-link"
-        >
+        <a href={url} target="_blank" rel="noreferrer" className="thread-location-link">
           Fungua kwenye ramani
         </a>
       </div>
     );
   }
 
-  /* ------------------------------- */
-  /* 3) MEDIA marker: MEDIA:kind:id  */
-  /* ------------------------------- */
-
+  /* 3) MEDIA marker: MEDIA:kind:id */
   const mediaMatch = body.match(/^MEDIA:([a-z]+):(.+)$/);
   if (mediaMatch) {
-    const kind = mediaMatch[1] as
-      | "image"
-      | "video"
-      | "audio"
-      | "document";
+    const kind = mediaMatch[1] as "image" | "video" | "audio" | "document";
     const mediaId = mediaMatch[2];
     const src = `${API}/api/media/${encodeURIComponent(mediaId)}`;
 
@@ -515,17 +403,8 @@ function renderBody(
     if (kind === "image") {
       return (
         <div className="thread-media">
-          <img
-            src={src}
-            className="thread-image"
-            alt="Picha kutoka mteja"
-          />
-          <a
-            href={src}
-            target="_blank"
-            rel="noreferrer"
-            className="thread-media-link"
-          >
+          <img src={src} className="thread-image" alt="Picha kutoka mteja" />
+          <a href={src} target="_blank" rel="noreferrer" className="thread-media-link">
             Fungua picha
           </a>
           {showActions && (resendButton || deleteButton) && (
@@ -543,12 +422,7 @@ function renderBody(
       return (
         <div className="thread-media">
           <video src={src} controls className="thread-video" />
-          <a
-            href={src}
-            target="_blank"
-            rel="noreferrer"
-            className="thread-media-link"
-          >
+          <a href={src} target="_blank" rel="noreferrer" className="thread-media-link">
             Fungua video
           </a>
           {showActions && (resendButton || deleteButton) && (
@@ -580,12 +454,7 @@ function renderBody(
     if (kind === "document") {
       return (
         <div className="thread-media">
-          <a
-            href={src}
-            target="_blank"
-            rel="noreferrer"
-            className="thread-media-link"
-          >
+          <a href={src} target="_blank" rel="noreferrer" className="thread-media-link">
             Fungua faili
           </a>
           {showActions && (resendButton || deleteButton) && (
@@ -600,29 +469,20 @@ function renderBody(
     }
   }
 
-  /* ------------------------ */
-  /* 4) Default: plain text   */
-  /* ------------------------ */
-
+  /* 4) Default: plain text */
   return <div className="thread-text">{body}</div>;
 }
-
 
 export default function Thread({ convo }: ThreadProps) {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [loading, setLoading] = useState(false);
-  const [agentAllowed, setAgentAllowed] = useState<boolean>(
-    convo.agent_allowed
-  );
+  const [agentAllowed, setAgentAllowed] = useState<boolean>(convo.agent_allowed);
   const [text, setText] = useState("");
   const [toggling, setToggling] = useState(false);
   const [sending, setSending] = useState(false);
   const [productNames, setProductNames] = useState<Record<string, string>>({});
-    const [activeMediaActionsId, setActiveMediaActionsId] = useState<
-    string | number | null
-  >(null);
+  const [activeMediaActionsId, setActiveMediaActionsId] = useState<string | number | null>(null);
 
-  
   // scrolling
   const messagesRef = useRef<HTMLDivElement | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
@@ -630,137 +490,108 @@ export default function Thread({ convo }: ThreadProps) {
   const [isAtBottom, setIsAtBottom] = useState(true);
   const initialScrolledRef = useRef(false);
 
-  // 👇 NEW: file input ref
+  // file input
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-function handleToggleMediaActions(messageId: string | number) {
+  function handleToggleMediaActions(messageId: string | number) {
     setActiveMediaActionsId((prev) =>
       prev != null && String(prev) === String(messageId) ? null : messageId
     );
   }
 
-
   function handleInputKeyDown(e: KeyboardEvent<HTMLInputElement>) {
-  if (e.key === "Enter" && !e.shiftKey) {
-    e.preventDefault();
-    // fake form event to reuse handleSend
-    handleSend(e as any);
-  }
-}
-
-async function handleResendMedia(kind: string, mediaId: string) {
-  try {
-    const data = await api<{ ok: boolean; message: Msg }>("/api/send-media", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        conversationId: convo.id,
-        kind,
-        mediaId,
-      }),
-    });
-
-    if (data?.message) {
-      setMessages((prev) => [...prev, data.message]);
-      scrollToBottom("smooth");
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSend(e as any);
     }
-  } catch (err: any) {
-    console.error("Failed to resend media", err);
-    alert(
-      err?.message ??
-        "Imeshindikana kutuma media tena. Tafadhali jaribu tena baadae."
-    );
   }
-}
+
+  async function handleResendMedia(kind: string, mediaId: string) {
+    try {
+      const data = await api<{ ok: boolean; message: Msg }>("/api/send-media", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          conversationId: convo.id,
+          kind,
+          mediaId,
+        }),
+      });
+
+      if (data?.message) {
+        setMessages((prev) => [...prev, data.message]);
+        scrollToBottom("smooth");
+      }
+    } catch (err: any) {
+      console.error("Failed to resend media", err);
+      alert(err?.message ?? "Imeshindikana kutuma media tena. Tafadhali jaribu tena baadae.");
+    }
+  }
 
   async function handleDeleteMedia(messageId: string | number) {
-    const confirmDelete = window.confirm(
-      "Una uhakika unataka kufuta hii media?"
-    );
+    const confirmDelete = window.confirm("Una uhakika unataka kufuta hii media?");
     if (!confirmDelete) return;
 
     try {
-      await api(`/api/messages/${messageId}`, {
-        method: "DELETE",
-      });
-
-      setMessages((prev) =>
-        prev.filter((m) => String(m.id) !== String(messageId))
-      );
+      await api(`/api/messages/${messageId}`, { method: "DELETE" });
+      setMessages((prev) => prev.filter((m) => String(m.id) !== String(messageId)));
     } catch (err: any) {
       console.error("Failed to delete media", err);
-      alert(
-        err?.message ??
-          "Imeshindikana kufuta media. Tafadhali jaribu tena baadae."
-      );
+      alert(err?.message ?? "Imeshindikana kufuta media. Tafadhali jaribu tena baadae.");
     }
   }
 
+  async function handleFileChange(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
 
-async function handleFileChange(e: ChangeEvent<HTMLInputElement>) {
-  const file = e.target.files?.[0];
-  if (!file) return;
+    try {
+      const form = new FormData();
+      form.append("conversationId", String(convo.id));
+      form.append("file", file);
 
-  try {
-    const form = new FormData();
-    form.append("conversationId", String(convo.id));
-    form.append("file", file);
-
-    const data = await api<{ ok: boolean; message: Msg }>(
-      "/api/upload-media",
-      {
+      const data = await api<{ ok: boolean; message: Msg }>("/api/upload-media", {
         method: "POST",
         body: form,
-      }
-    );
+      });
 
-    if (data?.message) {
-      setMessages((prev) => [...prev, data.message]);
-      scrollToBottom("smooth");
-    }
-  } catch (err: any) {
-    console.error("Failed to send media", err);
-    alert(
-      err?.message ??
-        "Imeshindikana kutuma media. Tafadhali jaribu tena baadae."
-    );
-  } finally {
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
+      if (data?.message) {
+        setMessages((prev) => [...prev, data.message]);
+        scrollToBottom("smooth");
+      }
+    } catch (err: any) {
+      console.error("Failed to send media", err);
+      alert(err?.message ?? "Imeshindikana kutuma media. Tafadhali jaribu tena baadae.");
+    } finally {
+      if (fileInputRef.current) fileInputRef.current.value = "";
     }
   }
-}
 
   function handleAttachClick() {
     fileInputRef.current?.click();
   }
 
-
   useEffect(() => {
-  async function loadProducts() {
-    try {
-      const data = await api<ProductsResponse>("/api/products");
-      const map: Record<string, string> = {};
-      for (const p of data.items ?? []) {
-        map[p.sku] = p.name;
+    async function loadProducts() {
+      try {
+        const data = await api<ProductsResponse>("/api/products");
+        const map: Record<string, string> = {};
+        for (const p of data.items ?? []) {
+          map[p.sku] = p.name;
+        }
+        setProductNames(map);
+      } catch (err) {
+        console.error("Failed to load products for thread display", err);
       }
-      setProductNames(map);
-    } catch (err) {
-      console.error("Failed to load products for thread display", err);
     }
-  }
+    void loadProducts();
+  }, []);
 
-  void loadProducts();
-}, []);
-
-
-  // figure out the index of the OLDEST unread inbound message
+  // oldest unread inbound index
   const oldestUnreadIndex = (() => {
     if (!messages.length) return -1;
     return messages.findIndex(
-      (m) =>
-        (m.direction === "in" || m.direction === "inbound") &&
-        m.status !== "read"
+      (m) => (m.direction === "in" || m.direction === "inbound") && m.status !== "read"
     );
   })();
 
@@ -781,7 +612,7 @@ async function handleFileChange(e: ChangeEvent<HTMLInputElement>) {
     const el = messagesRef.current;
     if (!el) return;
 
-    const threshold = 50; // px from bottom to consider "at bottom"
+    const threshold = 50;
     const distFromBottom = el.scrollHeight - (el.scrollTop + el.clientHeight);
     setIsAtBottom(distFromBottom <= threshold);
   };
@@ -789,9 +620,7 @@ async function handleFileChange(e: ChangeEvent<HTMLInputElement>) {
   async function loadMessages() {
     setLoading(true);
     try {
-      const { items } = await api<{ items: Msg[] }>(
-        `/api/conversations/${convo.id}/messages`
-      );
+      const { items } = await api<{ items: Msg[] }>(`/api/conversations/${convo.id}/messages`);
       setMessages(items ?? []);
     } catch (err) {
       console.error("Failed to load messages", err);
@@ -808,28 +637,24 @@ async function handleFileChange(e: ChangeEvent<HTMLInputElement>) {
     void loadMessages();
   }, [convo.id, convo.agent_allowed]);
 
-  // Handle scroll position when messages change
+  // Handle scroll on message change
   useEffect(() => {
     if (!messages.length) return;
 
-    // FIRST time we loaded messages for this conversation
     if (!initialScrolledRef.current) {
       const didScrollToUnread = scrollToOldestUnread();
-      if (!didScrollToUnread) {
-        scrollToBottom("auto");
-      }
+      if (!didScrollToUnread) scrollToBottom("auto");
       initialScrolledRef.current = true;
       setIsAtBottom(true);
       return;
     }
 
-    // AFTER initial load: only auto-scroll if user is already at bottom
     if (isAtBottom) {
       scrollToBottom("smooth");
     }
   }, [messages, oldestUnreadIndex, isAtBottom]);
 
-  // Live Socket.IO updates: append new messages
+  // Socket updates
   useEffect(() => {
     const s = socket();
     if (!s) return;
@@ -856,7 +681,7 @@ async function handleFileChange(e: ChangeEvent<HTMLInputElement>) {
   async function toggleAgentMode() {
     const next = !agentAllowed;
     setToggling(true);
-    setAgentAllowed(next); // optimistic
+    setAgentAllowed(next);
 
     try {
       await api(`/api/conversations/${convo.id}/agent-allow`, {
@@ -873,39 +698,36 @@ async function handleFileChange(e: ChangeEvent<HTMLInputElement>) {
     }
   }
 
-async function handleSend(e: FormEvent) {
-  e.preventDefault();
-  const value = text.trim();
-  if (!value) return;
+  async function handleSend(e: FormEvent) {
+    e.preventDefault();
+    const value = text.trim();
+    if (!value) return;
 
-  if (!agentAllowed) {
-    alert("Bot mode iko ON. Washa Agent Mode ili kujibu.");
-    return;
+    if (!agentAllowed) {
+      alert("Bot mode iko ON. Washa Agent Mode ili kujibu.");
+      return;
+    }
+
+    setSending(true);
+    try {
+      await api("/api/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          conversationId: convo.id,
+          text: value,
+        }),
+      });
+
+      setText("");
+      await loadMessages();
+    } catch (err) {
+      console.error("Failed to send message", err);
+      alert("Imeshindikana kutuma ujumbe, angalia server logs.");
+    } finally {
+      setSending(false);
+    }
   }
-
-  setSending(true);
-  try {
-    await api("/api/send", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        conversationId: convo.id,
-        text: value,
-      }),
-    });
-
-    setText("");
-
-    // 🔁 Ensure we see our own message even if socket doesn't fire
-    await loadMessages();
-  } catch (err) {
-    console.error("Failed to send message", err);
-    alert("Imeshindikana kutuma ujumbe, angalia server logs.");
-  } finally {
-    setSending(false);
-  }
-}
-
 
   const title = convo.name || formatPhonePretty(convo.phone);
 
@@ -919,34 +741,37 @@ async function handleSend(e: FormEvent) {
           </div>
           <div className="thread-subtitle">
             {formatPhonePretty(convo.phone)}
-            {convo.lang && (
-              <span className="thread-lang">
-                {" "}
-                · {convo.lang.toUpperCase()}
+            {convo.lang && <span className="thread-lang"> · {convo.lang.toUpperCase()}</span>}
+            {(convo.restock_subscribed_count ?? 0) > 0 && (
+              <span className="badge badge--restock thread-restock-badge">
+                Stock Alert
+                {(convo.restock_subscribed_count ?? 0) > 1
+                  ? ` ${convo.restock_subscribed_count}`
+                  : ""}
               </span>
             )}
           </div>
         </div>
 
-        <button
-          type="button"
-          className={
-            "thread-agent-toggle" +
-            (agentAllowed ? " thread-agent-toggle--on" : "")
-          }
-          onClick={toggleAgentMode}
-          disabled={toggling}
-        >
-          <span>{agentAllowed ? "Agent Mode" : "Chatbot Mode"}</span>
-          <span className="thread-agent-pill">
-            <span
-              className={
-                "thread-agent-dot" +
-                (agentAllowed ? " thread-agent-dot--on" : "")
-              }
-            />
-          </span>
-        </button>
+<button
+  type="button"
+  className={"thread-agent-toggle" + (agentAllowed ? " thread-agent-toggle--on" : "")}
+  onClick={toggleAgentMode}
+  disabled={toggling}
+  title={agentAllowed ? "Agent Mode ON" : "Bot Mode ON"}
+  aria-label={agentAllowed ? "Switch to Bot Mode" : "Switch to Agent Mode"}
+>
+  <span className="thread-agent-toggle-left">
+    <span className="thread-agent-toggle-icon" aria-hidden="true">
+      {agentAllowed ? "🧑‍💼" : "🤖"}
+    </span>
+    <span className="thread-agent-toggle-text">
+      {agentAllowed ? "Agent Mode" : "Bot Mode"}
+    </span>
+  </span>
+</button>
+
+
       </div>
 
       {/* MESSAGES */}
@@ -956,45 +781,86 @@ async function handleSend(e: FormEvent) {
         ) : messages.length === 0 ? (
           <div className="thread-empty">Hakuna ujumbe bado.</div>
         ) : (
-          <div
-            className="thread-messages"
-            ref={messagesRef}
-            onScroll={handleScroll}
-          >
-{messages.map((m, idx) => {
-  const inbound =
-    m.direction === "in" || m.direction === "inbound";
-  const outbound = !inbound;
-  const isFirstUnread = idx === oldestUnreadIndex;
+          <div className="thread-messages" ref={messagesRef} onScroll={handleScroll}>
+            {messages.map((m, idx) => {
+              const role = getRole(m);
+              const inbound = role === "customer";
+              const outbound = !inbound;
 
-  return (
-    <div
-      key={m.id}
-      ref={isFirstUnread ? firstUnreadRef : null}
-      className={
-        "thread-message " +
-        (outbound
-          ? "thread-message--outbound"
-          : "thread-message--inbound")
-      }
-    >
-      <div className="thread-bubble">
-        {renderBody(m, productNames, handleResendMedia, handleDeleteMedia, activeMediaActionsId, handleToggleMediaActions)}
-        <div className="thread-meta">
-          <span className="thread-time">
-            {formatTime(m.created_at)}
-          </span>
-          {outbound && m.status === "read" && (
-            <span className="thread-ticks" aria-label="read">
-              ✓✓
-            </span>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-})}
+              const prev = idx > 0 ? messages[idx - 1] : null;
+              const next = idx < messages.length - 1 ? messages[idx + 1] : null;
 
+              const prevRole = prev ? getRole(prev) : null;
+              const nextRole = next ? getRole(next) : null;
+
+              const gapPrev =
+                prev && prev.created_at && m.created_at
+                  ? minutesBetween(prev.created_at, m.created_at)
+                  : Number.POSITIVE_INFINITY;
+
+              const gapNext =
+                next && next.created_at && m.created_at
+                  ? minutesBetween(m.created_at, next.created_at)
+                  : Number.POSITIVE_INFINITY;
+
+              const groupedWithPrev =
+                !!prev && prevRole === role && gapPrev <= GROUP_GAP_MINUTES;
+
+              const groupedWithNext =
+                !!next && nextRole === role && gapNext <= GROUP_GAP_MINUTES;
+
+              // Show meta only on the last message in a group
+              const showMeta = !groupedWithNext;
+
+              // Show "Bot" label only once per bot block
+              const showBotLabel = role === "bot" && !groupedWithPrev;
+
+              const isFirstUnread = idx === oldestUnreadIndex;
+
+              const bubbleClass =
+                "thread-bubble" +
+                (role === "bot" ? " thread-bubble--bot" : "") +
+                (groupedWithPrev ? " thread-bubble--stacked-prev" : "") +
+                (groupedWithNext ? " thread-bubble--stacked-next" : "");
+
+              const msgClass =
+                "thread-message " +
+                (outbound ? "thread-message--outbound" : "thread-message--inbound") +
+                (groupedWithPrev ? " thread-message--grouped" : "") +
+                (role === "bot" ? " thread-message--bot" : "");
+
+              return (
+                <div
+                  key={m.id}
+                  ref={isFirstUnread ? firstUnreadRef : null}
+                  className={msgClass}
+                >
+                  {showBotLabel && <div className="thread-role-label">Bot</div>}
+
+                  <div className={bubbleClass}>
+                    {renderBody(
+                      m,
+                      productNames,
+                      handleResendMedia,
+                      handleDeleteMedia,
+                      activeMediaActionsId,
+                      handleToggleMediaActions
+                    )}
+
+                    {showMeta && (
+                      <div className="thread-meta">
+                        <span className="thread-time">{formatTime(m.created_at)}</span>
+                        {outbound && m.status === "read" && (
+                          <span className="thread-ticks" aria-label="read">
+                            ✓✓
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
 
             <div ref={bottomRef} />
           </div>
@@ -1002,14 +868,12 @@ async function handleSend(e: FormEvent) {
       </div>
 
       {/* COMPOSER */}
-      {/* FOOTER: text + file upload */}
       <div className="thread-footer">
         <div className="thread-input-row">
-          {/* ATTACH BUTTON + HIDDEN FILE INPUT */}
           <button
             type="button"
             className="thread-attach-button"
-            onClick={handleAttachClick}
+            onClick={() => fileInputRef.current?.click()}
             title="Tuma picha / faili"
           >
             📎
@@ -1019,12 +883,10 @@ async function handleSend(e: FormEvent) {
             type="file"
             ref={fileInputRef}
             style={{ display: "none" }}
-            // allow common WhatsApp media types
             accept="image/*,video/*,audio/*,application/pdf,.doc,.docx,.xls,.xlsx"
             onChange={handleFileChange}
           />
 
-          {/* EXISTING TEXT INPUT */}
           <input
             className="thread-input"
             value={text}
@@ -1033,7 +895,6 @@ async function handleSend(e: FormEvent) {
             onKeyDown={handleInputKeyDown}
           />
 
-          {/* EXISTING SEND BUTTON */}
           <button
             type="button"
             className="thread-send-button"
@@ -1044,7 +905,6 @@ async function handleSend(e: FormEvent) {
           </button>
         </div>
       </div>
-
     </div>
   );
 }

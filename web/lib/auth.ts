@@ -4,7 +4,15 @@ import { API } from "./api";
 export type AuthUser = {
   id: number;
   email: string;
-  role: "admin" | "staff";
+  // NOTE: backend can return additional roles; keep this union in sync.
+  role: "admin" | "supervisor" | "staff";
+
+  // Profile fields (nullable)
+  full_name?: string | null;
+  phone?: string | null;
+  business_name?: string | null;
+  avatar_url?: string | null;
+  bio?: string | null;
 };
 
 export type AuthResponse = {
@@ -114,10 +122,7 @@ function requireToken(): string {
   return token;
 }
 
-async function authedJson<T>(
-  path: string,
-  init: RequestInit
-): Promise<T> {
+async function authedJson<T>(path: string, init: RequestInit): Promise<T> {
   if (!API) {
     throw new Error("NEXT_PUBLIC_API_BASE is missing.");
   }
@@ -153,25 +158,59 @@ export function authGet<T>(path: string): Promise<T> {
   return authedJson<T>(path, { method: "GET" });
 }
 
-export function authPostJson<T>(
-  path: string,
-  body: unknown
-): Promise<T> {
+export function authPostJson<T>(path: string, body: unknown): Promise<T> {
   return authedJson<T>(path, {
     method: "POST",
     body: JSON.stringify(body ?? {}),
   });
 }
 
-export function authPatchJson<T>(
-  path: string,
-  body: unknown
-): Promise<T> {
+export function authPatchJson<T>(path: string, body: unknown): Promise<T> {
   return authedJson<T>(path, {
     method: "PATCH",
     body: JSON.stringify(body ?? {}),
   });
 }
+
+export async function authPostForm<T>(path: string, form: FormData): Promise<T> {
+  if (!API) {
+    throw new Error("NEXT_PUBLIC_API_BASE is missing.");
+  }
+
+  const token = getAuthToken(); // ✅ uses ujani_auth_token
+  if (!token) {
+    throw new Error("Session imeisha. Tafadhali ingia tena.");
+  }
+
+  const res = await fetch(API + path, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      // ❗ Do not set Content-Type for FormData (browser sets boundary)
+    },
+    body: form,
+  });
+
+  let data: any = null;
+  try {
+    data = await res.json();
+  } catch {}
+
+  if (!res.ok) {
+const msg =
+  (data && (data.message || data.error)) ||
+  `Request failed (${res.status})`;
+
+const extra =
+  data?.details ? ` | details: ${typeof data.details === "string" ? data.details : JSON.stringify(data.details)}` : "";
+
+throw new Error(msg + extra);
+
+  }
+
+  return data as T;
+}
+
 
 export function authDelete(path: string): Promise<void> {
   return authedJson<void>(path, { method: "DELETE" });

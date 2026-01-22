@@ -1,7 +1,6 @@
-// web/app/inbox/page.tsx
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import ConversationList, { Convo } from "@/components/ConversationList";
 import Thread from "@/components/Thread";
 import RightPanel from "@/components/RightPanel";
@@ -12,24 +11,58 @@ import { useSearchParams } from "next/navigation";
 type MobileView = "list" | "chat";
 
 const MOBILE_BREAKPOINT = 768; // px
+const STORAGE_KEY = "ujani-inbox-active";
+
+function readSavedConversationId(): string | null {
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+
+    if (parsed && typeof parsed === "object" && typeof parsed.id === "string") {
+      return parsed.id;
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function writeSavedConversationId(id: string) {
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ id }));
+  } catch {
+    // ignore
+  }
+}
+
+function clearSavedConversationId() {
+  try {
+    window.localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    // ignore
+  }
+}
 
 export default function InboxPage() {
   const [active, setActive] = useState<Convo | null>(null);
-
   const [isMobile, setIsMobile] = useState(false);
   const [mobileView, setMobileView] = useState<MobileView>("list");
   const [showMobileMenu, setShowMobileMenu] = useState(false);
+
   const searchParams = useSearchParams();
   const phoneFromUrl = searchParams.get("phone");
 
+  // Saved selection restore (by id only, validated against server list)
+  const [savedId, setSavedId] = useState<string | null>(null);
+  const [restoreDone, setRestoreDone] = useState(false);
 
-  // Detect screen size
   useEffect(() => {
     const update = () => {
       const mobile = window.innerWidth < MOBILE_BREAKPOINT;
       setIsMobile(mobile);
       if (!mobile) {
-        // reset to desktop behaviour when resizing up
         setMobileView("list");
         setShowMobileMenu(false);
       }
@@ -40,49 +73,62 @@ export default function InboxPage() {
     return () => window.removeEventListener("resize", update);
   }, []);
 
-    // Restore last opened conversation after refresh
   useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem("ujani-inbox-active");
-      if (!raw) return;
-
-      const parsed = JSON.parse(raw) as Convo;
-      setActive(parsed);
-
-      // On small screens, jump straight to chat view
-      if (window.innerWidth < MOBILE_BREAKPOINT) {
-        setMobileView("chat");
-      }
-    } catch {
-      // ignore JSON / storage errors
-    }
+    setSavedId(readSavedConversationId());
   }, []);
 
-  
   const handlePick = async (convo: Convo) => {
-    // update selected conversation in the UI
     setActive(convo);
-
-    // persist selection across refreshes
-    try {
-      window.localStorage.setItem("ujani-inbox-active", JSON.stringify(convo));
-    } catch {
-      // ignore storage errors
-    }
+    writeSavedConversationId(convo.id);
+    setSavedId(convo.id);
+    setRestoreDone(true);
 
     if (isMobile) {
       setMobileView("chat");
       setShowMobileMenu(false);
     }
 
-    // mark this conversation as read in the backend
     try {
-      await api(`/api/conversations/${convo.id}/read`, {
-        method: "POST",
-      });
+      await api(`/api/conversations/${convo.id}/read`, { method: "POST" });
     } catch (err) {
       console.error("Failed to mark conversation as read", err);
     }
+  };
+
+  const handleLoaded = (items: Convo[]) => {
+    const list = items ?? [];
+
+    if (active && !list.some((c) => c.id === active.id)) {
+      setActive(null);
+      clearSavedConversationId();
+      setSavedId(null);
+      if (isMobile) {
+        setMobileView("list");
+        setShowMobileMenu(false);
+      }
+    }
+
+    if (phoneFromUrl) {
+      if (!restoreDone) setRestoreDone(true);
+      return;
+    }
+
+    if (restoreDone) return;
+
+    if (savedId) {
+      const match = list.find((c) => c.id === savedId);
+      if (match) {
+        setActive(match);
+        if (window.innerWidth < MOBILE_BREAKPOINT) {
+          setMobileView("chat");
+        }
+      } else {
+        clearSavedConversationId();
+        setSavedId(null);
+      }
+    }
+
+    setRestoreDone(true);
   };
 
   const handleBackToList = () => {
@@ -96,44 +142,27 @@ export default function InboxPage() {
     setShowMobileMenu((prev) => !prev);
   };
 
-  const displayName =
-    active?.name && active.name.trim().length > 0
-      ? active.name
-      : active
-      ? formatPhonePretty(active.phone)
-      : "";
+  const displayName = useMemo(() => {
+    if (active?.name && active.name.trim().length > 0) return active.name;
+    if (active) return formatPhonePretty(active.phone);
+    return "";
+  }, [active]);
+
+  const mobileRestockCount = active?.restock_subscribed_count ?? 0;
 
   return (
     <div className="inbox-root">
-      {/* Header (kept simple, title hidden via CSS) */}
-      <div className="inbox-header">
-        <div className="inbox-header-left">
-          <span className="inbox-header-title">Ujani Admin — Inbox</span>
-        </div>
-        <div className="inbox-header-right">
-          <button className="header-button">Minimize</button>
-          <span className="header-status">
-            <span className="status-dot" />{" "}
-            <span className="header-status-label">Admin</span>{" "}
-            <span className="header-status-state">Online</span>
-          </span>
-        </div>
-      </div>
-
-      {/* Main content */}
       <div className="inbox-main">
         {isMobile ? (
           <>
             {mobileView === "list" || !active ? (
-              // Mobile: only show the list
               <ConversationList
-  activeId={active ? active.id : null}
-  onPick={handlePick}
-  phoneFilter={phoneFromUrl}
-/>
-
+                activeId={active ? active.id : null}
+                onPick={handlePick}
+                phoneFilter={phoneFromUrl}
+                onLoaded={handleLoaded}
+              />
             ) : (
-              // Mobile: only show the chat + top nav
               <div className="mobile-thread-shell">
                 <div className="mobile-thread-nav">
                   <button
@@ -144,9 +173,16 @@ export default function InboxPage() {
                   >
                     ←
                   </button>
+
                   <div className="mobile-thread-nav-main">
                     <div className="mobile-thread-nav-title">
                       {displayName}
+                      {mobileRestockCount > 0 && (
+                        <span className="badge badge--restock mobile-restock-badge">
+                          Stock Alert
+                          {mobileRestockCount > 1 ? ` ${mobileRestockCount}` : ""}
+                        </span>
+                      )}
                     </div>
                     {active && (
                       <div className="mobile-thread-nav-sub">
@@ -154,6 +190,7 @@ export default function InboxPage() {
                       </div>
                     )}
                   </div>
+
                   <button
                     type="button"
                     className="mobile-nav-button"
@@ -163,11 +200,11 @@ export default function InboxPage() {
                     ⋮
                   </button>
                 </div>
+
                 <Thread convo={active} />
               </div>
             )}
 
-            {/* Mobile slide-in menu that reuses RightPanel */}
             {isMobile && active && showMobileMenu && (
               <div
                 className="mobile-right-overlay"
@@ -183,14 +220,13 @@ export default function InboxPage() {
             )}
           </>
         ) : (
-          // Desktop: classic 3-column layout
           <>
-          <ConversationList
-           activeId={active ? active.id : null}
-           onPick={handlePick}
-           phoneFilter={phoneFromUrl}
-          />
-
+            <ConversationList
+              activeId={active ? active.id : null}
+              onPick={handlePick}
+              phoneFilter={phoneFromUrl}
+              onLoaded={handleLoaded}
+            />
 
             {active ? (
               <>
@@ -198,7 +234,9 @@ export default function InboxPage() {
                 <RightPanel conversationId={active.id} />
               </>
             ) : (
-              <div className="center-muted">Select a conversation</div>
+              <div className="center-muted">
+                Select a conversation to view messages
+              </div>
             )}
           </>
         )}

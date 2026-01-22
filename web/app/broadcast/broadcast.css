@@ -1,0 +1,516 @@
+/* =========================================================
+   Broadcast Page — Smart Console UI
+   Light + Dark theme support via html[data-theme="dark"]
+   ========================================================= */
+
+.broadcast-root {
+  /* Light theme tokens */
+  --bc-bg: #f4f7fc;
+  --bc-panel: rgba(255, 255, 255, 0.92);
+  --bc-card: #ffffff;
+
+  --bc-text: #0b1220;
+  --bc-muted: #55657a;
+  --bc-muted-2: #7b8aa0;
+
+  --bc-border: rgba(15, 23, 42, 0.10);
+  --bc-shadow: 0 18px 50px rgba(15, 23, 42, 0.08);
+  --bc-shadow-soft: 0 12px 30px rgba(15, 23, 42, 0.06);
+
+  --bc-accent: #128c7e;
+  --bc-accent-strong: #0b6b61;
+  --bc-accent-soft: rgba(18, 140, 126, 0.14);
+
+  --bc-warning-soft: rgba(245, 158, 11, 0.14);
+  --bc-danger-soft: rgba(239, 68, 68, 0.14);
+
+  color: var(--bc-text);
+  background: radial-gradient(1000px 600px at 45% 0%, rgba(18, 140, 126, 0.10), transparent 55%),
+    radial-gradient(900px 520px at 80% 10%, rgba(37, 99, 235, 0.09), transparent 60%),
+    linear-gradient(180deg, var(--bc-bg), #eef3fb);
+
+  padding: 18px 16px 26px;
+
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial,
+    "Noto Sans", "Liberation Sans", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: geometricPrecision;
+}
+
+.broadcast-shell {
+  max-width: 1180px;
+  margin: 0 auto;
+
+  display: grid;
+  grid-template-columns: 1.15fr 0.85fr;
+  gap: 16px;
+  align-items: start;
+}
+
+@media (max-width: 980px) {
+  .broadcast-shell {
+    grid-template-columns: 1fr;
+  }
+}
+
+.broadcast-topbar {
+  max-width: 1180px;
+  margin: 0 auto 14px;
+
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.broadcast-title {
+  font-size: 18px;
+  font-weight: 950;
+  letter-spacing: -0.02em;
+}
+
+.broadcast-subtitle {
+  margin-top: 3px;
+  font-size: 12.5px;
+  font-weight: 800;
+  color: var(--bc-muted);
+}
+
+.broadcast-link {
+  font-size: 12px;
+  font-weight: 900;
+  color: var(--bc-accent-strong);
+  text-decoration: none;
+  border: 1px solid var(--bc-border);
+  background: rgba(255, 255, 255, 0.75);
+  border-radius: 999px;
+  padding: 8px 12px;
+  box-shadow: var(--bc-shadow-soft);
+}
+
+.broadcast-link:hover {
+  border-color: rgba(18, 140, 126, 0.35);
+  transform: translateY(-1px);
+  box-shadow: var(--bc-shadow);
+}
+
+.broadcast-card {
+  background: var(--bc-card);
+  border: 1px solid var(--bc-border);
+  border-radius: 18px;
+  box-shadow: var(--bc-shadow);
+  overflow: hidden;
+}
+
+.broadcast-card-header {
+  padding: 14px 14px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+
+  background: rgba(255, 255, 255, 0.78);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.broadcast-card-title {
+  font-size: 13.5px;
+  font-weight: 950;
+  letter-spacing: -0.01em;
+}
+
+.broadcast-card-body {
+  padding: 14px;
+}
+
+.broadcast-muted {
+  color: var(--bc-muted);
+}
+
+.broadcast-help {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--bc-muted);
+  line-height: 1.5;
+}
+
+.broadcast-section {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.broadcast-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 950;
+  margin-bottom: 8px;
+  color: var(--bc-text);
+}
+
+.broadcast-segment {
+  display: flex;
+  gap: 10px;
+}
+
+.broadcast-seg-btn {
+  flex: 1;
+  height: 40px;
+  border-radius: 999px;
+  border: 1px solid var(--bc-border);
+  background: rgba(255, 255, 255, 0.75);
+  font-size: 12.5px;
+  font-weight: 950;
+  color: var(--bc-text);
+  cursor: pointer;
+  box-shadow: var(--bc-shadow-soft);
+}
+
+.broadcast-seg-btn:hover {
+  border-color: rgba(18, 140, 126, 0.35);
+  transform: translateY(-1px);
+  box-shadow: var(--bc-shadow);
+}
+
+.broadcast-seg-btn--active {
+  background: var(--bc-accent-soft);
+  border-color: rgba(18, 140, 126, 0.45);
+  color: var(--bc-accent-strong);
+}
+
+.broadcast-textarea {
+  width: 100%;
+  min-height: 140px;
+  resize: vertical;
+
+  border-radius: 16px;
+  border: 1px solid var(--bc-border);
+  background: rgba(255, 255, 255, 0.86);
+
+  padding: 12px 12px;
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--bc-text);
+
+  outline: none;
+}
+
+.broadcast-textarea:focus {
+  border-color: rgba(18, 140, 126, 0.55);
+  box-shadow: 0 0 0 3px rgba(18, 140, 126, 0.14);
+}
+
+.broadcast-meta-row {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.broadcast-count {
+  font-size: 12px;
+  font-weight: 900;
+  color: var(--bc-muted-2);
+}
+
+.broadcast-checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.broadcast-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 12.5px;
+  font-weight: 800;
+  color: var(--bc-text);
+  line-height: 1.45;
+}
+
+.broadcast-check input {
+  margin-top: 2px;
+}
+
+.broadcast-footer {
+  margin-top: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.broadcast-primary {
+  height: 40px;
+  border-radius: 999px;
+  padding: 0 14px;
+  border: 1px solid var(--bc-accent);
+  background: var(--bc-accent);
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 950;
+  cursor: pointer;
+}
+
+.broadcast-primary:hover:enabled {
+  background: var(--bc-accent-strong);
+  border-color: var(--bc-accent-strong);
+  transform: translateY(-1px);
+  box-shadow: 0 18px 50px rgba(18, 140, 126, 0.20);
+}
+
+.broadcast-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.broadcast-flag {
+  font-size: 12px;
+  font-weight: 900;
+  color: var(--bc-muted);
+}
+
+.broadcast-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 950;
+  border: 1px solid var(--bc-border);
+  background: rgba(255, 255, 255, 0.75);
+}
+
+.broadcast-badge--warn {
+  border-color: rgba(245, 158, 11, 0.28);
+  background: var(--bc-warning-soft);
+  color: #92400e;
+}
+
+.broadcast-badge--ok {
+  border-color: rgba(18, 140, 126, 0.30);
+  background: rgba(18, 140, 126, 0.14);
+  color: var(--bc-accent-strong);
+}
+
+/* Preview */
+.broadcast-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.preview-bubble {
+  max-width: 92%;
+  border-radius: 18px;
+  padding: 10px 12px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow: var(--bc-shadow-soft);
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.45;
+}
+
+.preview-bubble--bot {
+  background: rgba(15, 23, 42, 0.04);
+  color: var(--bc-text);
+}
+
+.preview-bubble--out {
+  margin-left: auto;
+  background: rgba(18, 140, 126, 0.14);
+  border-color: rgba(18, 140, 126, 0.22);
+}
+
+.preview-meta {
+  font-size: 12px;
+  font-weight: 900;
+  color: var(--bc-muted-2);
+}
+
+/* Result card */
+.broadcast-result-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.broadcast-kpi {
+  border-radius: 16px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(255, 255, 255, 0.75);
+  padding: 10px 10px;
+  box-shadow: var(--bc-shadow-soft);
+}
+
+.broadcast-kpi-label {
+  font-size: 11.5px;
+  font-weight: 950;
+  color: var(--bc-muted);
+}
+
+.broadcast-kpi-value {
+  margin-top: 3px;
+  font-size: 16px;
+  font-weight: 950;
+  letter-spacing: -0.02em;
+  color: var(--bc-text);
+}
+
+/* =========================
+   DARK THEME (manual override)
+   ========================= */
+html[data-theme="dark"] .broadcast-root {
+  color-scheme: dark;
+
+  --bc-bg: #060a12;
+  --bc-panel: rgba(10, 15, 30, 0.92);
+  --bc-card: rgba(10, 15, 30, 0.92);
+
+  --bc-text: rgba(241, 245, 249, 0.96);
+  --bc-muted: rgba(226, 232, 240, 0.78);
+  --bc-muted-2: rgba(226, 232, 240, 0.62);
+
+  --bc-border: rgba(226, 232, 240, 0.14);
+  --bc-shadow: 0 26px 80px rgba(0, 0, 0, 0.42);
+  --bc-shadow-soft: 0 18px 54px rgba(0, 0, 0, 0.35);
+
+  --bc-accent: #16a394;
+  --bc-accent-strong: #2ad4c5;
+  --bc-accent-soft: rgba(22, 163, 148, 0.20);
+
+  background: radial-gradient(1200px 800px at 40% 0%, rgba(22, 163, 148, 0.14), transparent 60%),
+    radial-gradient(1200px 800px at 80% 10%, rgba(37, 99, 235, 0.12), transparent 60%),
+    linear-gradient(180deg, #040712, #060a12);
+}
+
+html[data-theme="dark"] .broadcast-root .broadcast-card {
+  border-color: var(--bc-border);
+}
+
+html[data-theme="dark"] .broadcast-root .broadcast-card-header {
+  background: rgba(10, 15, 30, 0.92) !important;
+  border-bottom-color: rgba(226, 232, 240, 0.10);
+}
+
+html[data-theme="dark"] .broadcast-root .broadcast-link {
+  background: rgba(2, 6, 23, 0.70);
+  border-color: rgba(226, 232, 240, 0.14);
+  color: rgba(45, 212, 191, 0.95);
+}
+
+html[data-theme="dark"] .broadcast-root .broadcast-seg-btn,
+html[data-theme="dark"] .broadcast-root .broadcast-textarea {
+  background: rgba(2, 6, 23, 0.78) !important;
+  border-color: rgba(226, 232, 240, 0.14) !important;
+  color: var(--bc-text) !important;
+}
+
+html[data-theme="dark"] .broadcast-root .preview-bubble--bot {
+  background: rgba(2, 6, 23, 0.78);
+  border-color: rgba(226, 232, 240, 0.14);
+}
+
+html[data-theme="dark"] .broadcast-root .preview-bubble--out {
+  background: rgba(6, 78, 59, 0.72);
+  border-color: rgba(22, 163, 148, 0.26);
+}
+
+html[data-theme="dark"] .broadcast-root .broadcast-kpi {
+  background: rgba(2, 6, 23, 0.70);
+  border-color: rgba(226, 232, 240, 0.12);
+}
+
+/* =========================================================
+   APPEND BELOW — Broadcast Simplification + lighter typography
+   ========================================================= */
+
+/* Tone down boldness everywhere */
+.broadcast-root {
+  font-weight: 500;
+}
+
+.broadcast-title {
+  font-weight: 800 !important;
+}
+
+.broadcast-subtitle {
+  font-weight: 600 !important;
+  opacity: 0.95;
+}
+
+.broadcast-card-title {
+  font-weight: 800 !important;
+}
+
+.broadcast-label {
+  font-weight: 700 !important;
+  opacity: 0.95;
+}
+
+.broadcast-help,
+.broadcast-note,
+.broadcast-flag,
+.preview-meta {
+  font-weight: 600 !important;
+}
+
+.broadcast-seg-btn {
+  font-weight: 700 !important;
+}
+
+.broadcast-textarea {
+  font-weight: 600 !important;
+  line-height: 1.55;
+}
+
+/* Make the page feel calmer (less heavy shadows) */
+.broadcast-card {
+  box-shadow: 0 14px 36px rgba(15, 23, 42, 0.07) !important;
+}
+
+.broadcast-link {
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06) !important;
+}
+
+.preview-bubble {
+  font-weight: 600 !important;
+}
+
+/* Simple note style */
+.broadcast-note {
+  font-size: 12px;
+  color: var(--bc-muted);
+}
+
+/* Simple warning banner */
+.broadcast-alert {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(245, 158, 11, 0.25);
+  background: rgba(245, 158, 11, 0.10);
+  color: #8a5200;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* Make checkbox row less “heavy” */
+.broadcast-check {
+  font-weight: 600 !important;
+  color: var(--bc-text);
+}
+
+/* Dark theme: make alert readable */
+html[data-theme="dark"] .broadcast-root .broadcast-alert {
+  border-color: rgba(245, 158, 11, 0.28);
+  background: rgba(245, 158, 11, 0.12);
+  color: rgba(253, 230, 138, 0.95);
+}

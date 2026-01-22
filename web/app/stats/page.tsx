@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { api } from "@/lib/api";
 import {
   BarChart,
@@ -10,6 +11,9 @@ import {
   Tooltip,
   ResponsiveContainer,
   CartesianGrid,
+  PieChart,
+  Pie,
+  Cell,
 } from "recharts";
 
 type OverviewStats = {
@@ -21,13 +25,22 @@ type OverviewStats = {
 };
 
 type DailyPoint = {
-  date: string; // e.g. "2025-12-02"
-  total_tzs: number;
+  date: string; // YYYY-MM-DD
+  total_tzs: number; // approved incomes sum
 };
 
 type DailyResponse = {
   points: DailyPoint[];
 };
+
+type ProductStat = {
+  sku: string;
+  name: string;
+  total_qty: number;
+  total_revenue: number;
+};
+
+type ProductsResponse = { items: ProductStat[] };
 
 type RangeKey = "day" | "week" | "month";
 
@@ -43,290 +56,501 @@ const RANGE_HUMAN: Record<RangeKey, string> = {
   month: "last 30 days",
 };
 
+function dateOnly(iso: string) {
+  return (iso || "").slice(0, 10);
+}
+
+function fmtTzs(v: number) {
+  return Math.floor(v || 0).toLocaleString("sw-TZ");
+}
+
+function buildSeries(points: DailyPoint[], days: number) {
+  const map = new Map<string, number>();
+  for (const p of points) map.set(p.date, Number(p.total_tzs ?? 0) || 0);
+
+  const out: { date: string; label: string; income: number }[] = [];
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  start.setDate(start.getDate() - (days - 1));
+
+  for (let i = 0; i < days; i += 1) {
+    const d = new Date(start);
+    d.setDate(start.getDate() + i);
+    const ymd = d.toISOString().slice(0, 10);
+
+    const label = d.toLocaleDateString("en-US", {
+      day: "2-digit",
+      month: "short",
+    });
+
+    out.push({
+      date: ymd,
+      label,
+      income: map.get(ymd) ?? 0,
+    });
+  }
+
+  return out;
+}
+
 export default function StatsPage() {
   const [overview, setOverview] = useState<OverviewStats | null>(null);
-  const [trend, setTrend] = useState<DailyPoint[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [trendRaw, setTrendRaw] = useState<DailyPoint[]>([]);
+  const [products, setProducts] = useState<ProductStat[]>([]);
+
+  const [range, setRange] = useState<RangeKey>("week");
+  const [productSearch, setProductSearch] = useState("");
+
+  const [loadingMain, setLoadingMain] = useState(false);
+  const [loadingProducts, setLoadingProducts] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [range, setRange] = useState<RangeKey>("week"); // default: 7 days
+
+  const days = RANGE_TO_DAYS[range];
+  const humanRange = RANGE_HUMAN[range];
+
+  async function loadMain() {
+    setLoadingMain(true);
+    setError(null);
+    try {
+      const [ov, daily] = await Promise.all([
+        api<OverviewStats>(`/api/stats/overview?days=${days}`),
+        api<DailyResponse>(`/api/stats/daily-incomes?days=${days}`),
+      ]);
+      setOverview(ov);
+      setTrendRaw(daily.points ?? []);
+    } catch (e: any) {
+      console.error(e);
+      setError(e?.message ?? "Failed to load stats");
+    } finally {
+      setLoadingMain(false);
+    }
+  }
+
+  async function loadProducts() {
+    setLoadingProducts(true);
+    try {
+      const r = await api<ProductsResponse>(`/api/stats/products`);
+      setProducts(r.items ?? []);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoadingProducts(false);
+    }
+  }
 
   useEffect(() => {
-    const load = async () => {
-      setLoading(true);
-      setError(null);
-
-      const days = RANGE_TO_DAYS[range];
-
-      try {
-        const [ov, daily] = await Promise.all([
-          api<OverviewStats>(`/api/stats/overview?days=${days}`),
-          api<DailyResponse>(`/api/stats/daily-incomes?days=${days}`),
-        ]);
-        setOverview(ov);
-        setTrend(daily.points ?? []);
-      } catch (err: any) {
-        console.error("Failed to load stats", err);
-        setError(err?.message ?? "Failed to load stats");
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    void load();
+    void loadMain();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [range]);
+
+  useEffect(() => {
+    void loadProducts();
+  }, []);
 
   const earnings = overview?.total_revenue ?? 0;
   const expenses = overview?.total_expenses ?? 0;
-  const profit =
-    overview?.approximate_profit ?? earnings - expenses;
+  const profit = overview?.approximate_profit ?? earnings - expenses;
+  const financeSplit = useMemo(() => {
+  const p = Math.max(0, profit);
+  const e = Math.max(0, expenses);
+  const total = p + e;
+
+  return {
+    total,
+    rows: [
+      { name: "Profit", value: p, key: "profit" as const },
+      { name: "Expenses", value: e, key: "expenses" as const },
+    ],
+  };
+}, [profit, expenses]);
+
   const delivery = overview?.total_delivery_fees ?? 0;
   const orders = overview?.order_count ?? 0;
 
-  // Prepare chart data
-  const profitTrend = useMemo(
-    () =>
-      trend.length > 0
-        ? trend.map((row) => {
-            const d = new Date(row.date);
-            const label = d.toLocaleDateString("en-US", {
-              day: "2-digit",
-              month: "short",
-            });
-            return {
-              date: label,
-              profit: row.total_tzs,
-            };
-          })
-        : [],
-    [trend]
-  );
+  const series = useMemo(() => buildSeries(trendRaw, days), [trendRaw, days]);
 
-  const maxProfit =
-    profitTrend.length > 0
-      ? Math.max(...profitTrend.map((p) => p.profit))
-      : 0;
+  const maxIncome = useMemo(() => {
+    if (!series.length) return 0;
+    return Math.max(...series.map((p) => p.income));
+  }, [series]);
 
-  // e.g. "22 Dec – 28 Dec" at the top of the chart
-  const periodDateLabel = useMemo(() => {
-    if (trend.length === 0) return "";
-    const first = new Date(trend[0].date);
-    const last = new Date(trend[trend.length - 1].date);
+  const periodLabel = useMemo(() => {
+    if (!series.length) return "";
+    if (days === 1) return series[0]?.label ?? "";
+    return `${series[0]?.label ?? ""} – ${series[series.length - 1]?.label ?? ""}`;
+  }, [series, days]);
 
-    const fmt = (d: Date) =>
-      d.toLocaleDateString("en-US", {
-        day: "2-digit",
-        month: "short",
-      });
+  const insights = useMemo(() => {
+    const avgIncome = days > 0 ? earnings / days : 0;
+    const avgOrders = days > 0 ? orders / days : 0;
+    const margin = earnings > 0 ? (profit / earnings) * 100 : 0;
 
-    if (RANGE_TO_DAYS[range] === 1) {
-      return fmt(last);
+    let best: { date: string; income: number } | null = null;
+    for (const p of series) {
+      if (!best || p.income > best.income) best = { date: p.date, income: p.income };
     }
 
-    return `${fmt(first)} – ${fmt(last)}`;
-  }, [trend, range]);
+    return {
+      avgIncome,
+      avgOrders,
+      margin,
+      bestDay: best,
+    };
+  }, [days, earnings, orders, profit, series]);
 
-  const humanRange = RANGE_HUMAN[range];
+  const productsFiltered = useMemo(() => {
+    const q = productSearch.trim().toLowerCase();
+    if (!q) return products.slice(0, 12);
+
+    return products
+      .filter((p) => {
+        const hay = [p.sku, p.name].join(" ").toLowerCase();
+        return hay.includes(q);
+      })
+      .slice(0, 12);
+  }, [products, productSearch]);
+
+  const axisStroke = "var(--st-axis)";
+  const gridStroke = "var(--st-grid)";
+  const barFill = "var(--st-accent)";
 
   return (
-    <div className="page-root">
-      <div className="page-inner space-y-6">
-        {/* HEADER + FILTERS */}
-        <div className="header-card flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div>
-            <h1 className="header-title">📊 Business Analytics</h1>
-            <p className="header-sub">
-              View income, expenses and approximate profit over a
-              specific period.
-            </p>
-            {error && (
-              <p className="header-note text-red-200 text-xs mt-3">
-                {error}
-              </p>
-            )}
+    <div className="stats-page">
+      {/* Topbar */}
+      <div className="st-topbar">
+        <div>
+          <div className="st-title">Business Stats</div>
+          <div className="st-subtitle">
+            Clear overview of revenue, costs, approximate profit, and best-selling products — without clutter.
           </div>
+        </div>
 
-          {/* Day / Week / Month toggle */}
-          <div className="inline-flex rounded-full border border-ui-border bg-ui-panel p-1 text-xs">
-            {([
+        <div className="st-top-actions">
+          <Link href="/incomes" className="st-btn">
+            Income
+          </Link>
+          <Link href="/expenses" className="st-btn">
+            Expenses
+          </Link>
+          <button type="button" className="st-btn st-btn-primary" onClick={() => void loadMain()} disabled={loadingMain}>
+            Refresh
+          </button>
+        </div>
+      </div>
+
+      {/* Controls */}
+      <div className="st-controls">
+        <div className="st-seg" aria-label="Range selector">
+          {(
+            [
               ["day", "Day"],
               ["week", "Week"],
               ["month", "Month"],
-            ] as [RangeKey, string][]).map(([key, label]) => {
-              const active = range === key;
-              return (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => setRange(key)}
-                  className={
-                    "px-3 py-1 rounded-full transition-colors" +
-                    (active
-                      ? " bg-indigo-600 text-white"
-                      : " text-ui-dim hover:bg-ui-subtle")
-                  }
+            ] as [RangeKey, string][]
+          ).map(([key, label]) => {
+            const active = range === key;
+            return (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setRange(key)}
+                className={"st-seg-btn" + (active ? " st-seg-btn--active" : "")}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+          {periodLabel ? <span className="st-chip">{periodLabel}</span> : <span className="st-chip">{humanRange}</span>}
+          {loadingMain ? <span className="st-chip">Loading…</span> : <span className="st-chip">Period: {humanRange}</span>}
+          {error ? <span className="st-error">{error}</span> : null}
+        </div>
+      </div>
+
+      {/* KPI Grid */}
+      <div className="st-kpi-grid">
+        <div className="st-kpi">
+          <div className="st-kpi-top">
+            <div className="st-kpi-label">Income (approved)</div>
+            <div className="st-kpi-icon">💰</div>
+          </div>
+          <div className="st-kpi-value">{fmtTzs(earnings)} TZS</div>
+          <div className="st-kpi-sub">Approved income records within {humanRange}.</div>
+        </div>
+
+        <div className="st-kpi">
+          <div className="st-kpi-top">
+            <div className="st-kpi-label">Expenses</div>
+            <div className="st-kpi-icon">💸</div>
+          </div>
+          <div className="st-kpi-value">{fmtTzs(expenses)} TZS</div>
+          <div className="st-kpi-sub">Recorded business costs within {humanRange}.</div>
+        </div>
+
+        <div className="st-kpi">
+          <div className="st-kpi-top">
+            <div className="st-kpi-label">Approx. profit</div>
+            <div className="st-kpi-icon">📈</div>
+          </div>
+          <div className="st-kpi-value">{fmtTzs(profit)} TZS</div>
+          <div className="st-kpi-sub">Income minus expenses (rough estimate) in {humanRange}.</div>
+        </div>
+
+        <div className="st-kpi">
+          <div className="st-kpi-top">
+            <div className="st-kpi-label">Completed orders</div>
+            <div className="st-kpi-icon">📦</div>
+          </div>
+          <div className="st-kpi-value">{orders}</div>
+          <div className="st-kpi-sub">Orders marked delivered within {humanRange}.</div>
+        </div>
+      </div>
+
+      {/* Main shell */}
+      <div className="st-shell">
+        {/* Left column */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          {/* Trend */}
+          <div className="st-card">
+            <div className="st-card-header">
+              <div>
+                <div className="st-card-title">Daily approved income</div>
+                <div className="st-card-sub">Bars represent approved income per day (not expenses).</div>
+              </div>
+              <span className="st-pill st-pill--accent">{humanRange}</span>
+            </div>
+
+            <div className="st-card-body">
+              {loadingMain ? (
+                <div className="st-muted">Loading trend…</div>
+              ) : series.length === 0 ? (
+                <div className="st-muted">No data available for this period.</div>
+              ) : (
+                <div className="st-chart">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={series} margin={{ top: 10, right: 10, left: -12, bottom: 0 }}>
+                      <CartesianGrid stroke={gridStroke} strokeDasharray="3 3" />
+                      <XAxis dataKey="label" stroke={axisStroke} fontSize={11} tickMargin={8} />
+                      <YAxis
+                        stroke={axisStroke}
+                        fontSize={11}
+                        tickFormatter={(v) =>
+                          v >= 1_000_000 ? `${(v / 1_000_000).toFixed(1)}M` : v >= 1_000 ? `${(v / 1_000).toFixed(0)}k` : String(v)
+                        }
+                        domain={[0, maxIncome ? maxIncome * 1.1 : "auto"]}
+                      />
+                      <Tooltip
+                        formatter={(value: any) => `${Number(value).toLocaleString("sw-TZ")} TZS`}
+                        labelStyle={{ fontSize: 12 }}
+                        contentStyle={{
+                          borderRadius: 12,
+                          borderColor: "rgba(148, 163, 184, 0.35)",
+                          boxShadow: "0 10px 30px rgba(15, 23, 42, 0.12)",
+                          background: "rgba(255,255,255,0.92)",
+                        }}
+                      />
+                      <Bar dataKey="income" fill={barFill} radius={[7, 7, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+
+              <div className="st-note">
+                Note: Profit is shown in KPI using total expenses for the same period (approximation).
+              </div>
+            </div>
+          </div>
+
+          {/* Products */}
+          <div className="st-card">
+            <div className="st-card-header">
+              <div>
+                <div className="st-card-title">Top products</div>
+                <div className="st-card-sub">Based on paid + delivered orders (overall).</div>
+              </div>
+
+              <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                <input
+                  className="st-input"
+                  style={{ width: 260 }}
+                  value={productSearch}
+                  onChange={(e) => setProductSearch(e.target.value)}
+                  placeholder="Search SKU or name…"
+                />
+                {loadingProducts ? <span className="st-chip">Loading…</span> : <span className="st-chip">{products.length} total</span>}
+              </div>
+            </div>
+
+            <div className="st-card-body">
+              {productsFiltered.length === 0 ? (
+                <div className="st-muted">No matching products.</div>
+              ) : (
+                <div className="st-table-wrap">
+                  <table className="st-table">
+                    <thead>
+                      <tr>
+                        <th>SKU</th>
+                        <th>Name</th>
+                        <th className="st-td-right">Qty</th>
+                        <th className="st-td-right">Revenue</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {productsFiltered.map((p) => (
+                        <tr key={p.sku}>
+                          <td>{p.sku}</td>
+                          <td>{p.name}</td>
+                          <td className="st-td-right">{Math.floor(p.total_qty || 0)}</td>
+                          <td className="st-td-right">{fmtTzs(p.total_revenue || 0)} TZS</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Right column: insights */}
+<aside style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+  {/* Quick insights */}
+  <div className="st-card">
+    <div className="st-card-header">
+      <div>
+        <div className="st-card-title">Quick insights</div>
+        <div className="st-card-sub">A few signals admins care about.</div>
+      </div>
+      <span className="st-pill">{humanRange}</span>
+    </div>
+
+    <div className="st-card-body">
+      <div className="st-kv">
+        <div className="st-kv-item">
+          <div className="st-kv-label">Avg income / day</div>
+          <div className="st-kv-value">{fmtTzs(insights.avgIncome)} TZS</div>
+        </div>
+
+        <div className="st-kv-item">
+          <div className="st-kv-label">Avg orders / day</div>
+          <div className="st-kv-value">{insights.avgOrders.toFixed(1)}</div>
+        </div>
+
+        <div className="st-kv-item">
+          <div className="st-kv-label">Profit margin</div>
+          <div className="st-kv-value">{Number.isFinite(insights.margin) ? `${insights.margin.toFixed(1)}%` : "—"}</div>
+        </div>
+
+        <div className="st-kv-item">
+          <div className="st-kv-label">Delivery fees</div>
+          <div className="st-kv-value">{fmtTzs(delivery)} TZS</div>
+        </div>
+      </div>
+
+      <div className="st-note">
+        {insights.bestDay ? (
+          <>
+            Best income day: <b>{dateOnly(insights.bestDay.date)}</b> —{" "}
+            <b>{fmtTzs(insights.bestDay.income)} TZS</b>.
+          </>
+        ) : (
+          <>Best income day: —</>
+        )}
+      </div>
+    </div>
+  </div>
+
+  {/* Finance split */}
+  <div className="st-card">
+    <div className="st-card-header">
+      <div>
+        <div className="st-card-title">Finance split</div>
+        <div className="st-card-sub">Profit vs Expenses (same period).</div>
+      </div>
+      <span className="st-pill st-pill--accent">{humanRange}</span>
+    </div>
+
+    <div className="st-card-body">
+      {loadingMain ? (
+        <div className="st-muted">Loading…</div>
+      ) : financeSplit.total <= 0 ? (
+        <div className="st-muted">No profit/expense data for this period.</div>
+      ) : (
+        <div className="st-split">
+          <div className="st-split-chart">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={financeSplit.rows}
+                  dataKey="value"
+                  nameKey="name"
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={52}
+                  outerRadius={78}
+                  paddingAngle={2}
                 >
-                  {label}
-                </button>
-              );
-            })}
-          </div>
-        </div>
+                  {/* Do not hardcode colors; use CSS variables so theme controls it */}
+                  <Cell fill="var(--st-split-profit)" />
+                  <Cell fill="var(--st-split-expenses)" />
+                </Pie>
+                <Tooltip
+                  formatter={(value: any, name: any) => [`${Number(value).toLocaleString("sw-TZ")} TZS`, name]}
+                  contentStyle={{
+                    borderRadius: 12,
+                    borderColor: "rgba(148, 163, 184, 0.35)",
+                    boxShadow: "0 10px 30px rgba(15, 23, 42, 0.12)",
+                    background: "rgba(255,255,255,0.92)",
+                  }}
+                />
+              </PieChart>
+            </ResponsiveContainer>
 
-        {/* KPI CARDS (all filtered by range) */}
-        <div className="kpi-grid">
-          <div className="kpi-card">
-            <div className="kpi-icon bg-emerald-100 text-emerald-600">
-              💰
+            <div className="st-split-center">
+              <div className="st-split-center-label">Total</div>
+              <div className="st-split-center-value">{fmtTzs(financeSplit.total)} TZS</div>
             </div>
-            <p className="kpi-label">
-              Income (approved, {humanRange})
-            </p>
-            <p className="kpi-value">
-              {earnings.toLocaleString("sw-TZ")} TZS
-            </p>
-            <p className="kpi-sub">
-              From all approved income records in this period.
-            </p>
           </div>
 
-          <div className="kpi-card">
-            <div className="kpi-icon bg-red-100 text-red-600">
-              💸
+          <div className="st-split-legend">
+            <div className="st-split-row">
+              <div className="st-split-left">
+                <span className="st-dot st-dot--profit" />
+                <span className="st-split-name">Profit</span>
+              </div>
+              <div className="st-split-val">
+                {fmtTzs(Math.max(0, profit))} TZS
+                <span className="st-split-pct">
+                  {financeSplit.total > 0 ? ` · ${Math.round((Math.max(0, profit) / financeSplit.total) * 100)}%` : ""}
+                </span>
+              </div>
             </div>
-            <p className="kpi-label">Expenses ({humanRange})</p>
-            <p className="kpi-value">
-              {expenses.toLocaleString("sw-TZ")} TZS
-            </p>
-            <p className="kpi-sub">
-              Total recorded business costs in this period.
-            </p>
-          </div>
 
-          <div className="kpi-card">
-            <div className="kpi-icon bg-amber-100 text-amber-600">
-              📈
+            <div className="st-split-row">
+              <div className="st-split-left">
+                <span className="st-dot st-dot--expenses" />
+                <span className="st-split-name">Expenses</span>
+              </div>
+              <div className="st-split-val">
+                {fmtTzs(Math.max(0, expenses))} TZS
+                <span className="st-split-pct">
+                  {financeSplit.total > 0 ? ` · ${Math.round((Math.max(0, expenses) / financeSplit.total) * 100)}%` : ""}
+                </span>
+              </div>
             </div>
-            <p className="kpi-label">Approx. Profit ({humanRange})</p>
-            <p className="kpi-value">
-              {profit.toLocaleString("sw-TZ")} TZS
-            </p>
-            <p className="kpi-sub">
-              Income minus expenses (rough estimate) for this period.
-            </p>
-          </div>
 
-          <div className="kpi-card">
-            <div className="kpi-icon bg-indigo-100 text-indigo-600">
-              📦
-            </div>
-            <p className="kpi-label">
-              Completed orders ({humanRange})
-            </p>
-            <p className="kpi-value">{orders}</p>
-            <p className="kpi-sub">
-              Orders marked as delivered in this period.
-            </p>
-          </div>
-        </div>
-
-        {/* DAILY PROFIT BAR CHART (also filtered by range) */}
-        <div className="panel-card">
-          <div className="flex items-center justify-between gap-2 mb-2">
-            <h2 className="section-title">
-              📊 Daily Profit ({humanRange})
-            </h2>
-            {periodDateLabel && (
-              <span className="text-[10px] md:text-xs text-ui-dim border border-ui-border rounded-full px-2 py-0.5">
-                {periodDateLabel}
-              </span>
-            )}
-          </div>
-
-          {loading && (
-            <p className="muted">Inapakia takwimu za kila siku...</p>
-          )}
-
-          {!loading && profitTrend.length === 0 && (
-            <p className="muted">
-              Hakuna approved income ya kutosha kuonyesha chati.
-            </p>
-          )}
-
-          {!loading && profitTrend.length > 0 && (
-            <div className="chart-wrap">
-              <ResponsiveContainer width="100%" height={260}>
-                <BarChart
-                  data={profitTrend}
-                  margin={{ top: 10, right: 10, left: -10, bottom: 0 }}
-                >
-                  <CartesianGrid
-                    strokeDasharray="3 3"
-                    opacity={0.15}
-                  />
-                  <XAxis
-                    dataKey="date"
-                    stroke="#94a3b8"
-                    fontSize={11}
-                    tickMargin={8}
-                  />
-                  <YAxis
-                    stroke="#94a3b8"
-                    fontSize={11}
-                    tickFormatter={(v) =>
-                      v >= 1_000_000
-                        ? `${(v / 1_000_000).toFixed(1)}M`
-                        : v >= 1_000
-                        ? `${(v / 1_000).toFixed(0)}k`
-                        : v.toString()
-                    }
-                    domain={[0, maxProfit ? maxProfit * 1.1 : "auto"]}
-                  />
-                  <Tooltip
-                    formatter={(value: any) =>
-                      `${Number(value).toLocaleString("sw-TZ")} TZS`
-                    }
-                    labelStyle={{ fontSize: 12 }}
-                    contentStyle={{
-                      borderRadius: 12,
-                      borderColor: "#e2e8f0",
-                      boxShadow: "0 8px 20px rgba(15,23,42,0.08)",
-                    }}
-                  />
-                  <Bar
-                    dataKey="profit"
-                    fill="#10b981"
-                    radius={[6, 6, 0, 0]}
-                  />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          )}
-
-          <p className="text-xs text-slate-500 mt-2">
-            *Each bar shows profit per day for the selected period
-            (approved incomes only).
-          </p>
-        </div>
-
-        {/* SUMMARY CARD */}
-        <div className="panel-card">
-          <h2 className="section-title mb-2">
-            📌 Quick summary ({humanRange})
-          </h2>
-          <div className="text-sm space-y-1">
-            <div>
-              Completed orders: <b>{orders}</b>
-            </div>
-            <div className="text-xs text-slate-500">
-              Delivery fees collected:{" "}
-              <b>{delivery.toLocaleString("sw-TZ")} TZS</b>
-            </div>
-            <div className="text-xs text-slate-500">
-              Net (income − expenses):{" "}
-              <b>{profit.toLocaleString("sw-TZ")} TZS</b>
+            <div className="st-split-foot">
+              Profit is clamped to 0 if negative (keeps chart readable).
             </div>
           </div>
         </div>
+      )}
+    </div>
+  </div>
+</aside>
+
       </div>
     </div>
   );

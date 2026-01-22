@@ -43,9 +43,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
       // ignore parse errors – some error responses are not JSON
     }
     console.error("[api] non-OK response", res.status, body ?? {});
-    const e: ApiError = new Error(
-      body?.error ?? `API error (${res.status})`
-    );
+    const e: ApiError = new Error(body?.error ?? `API error (${res.status})`);
     e.status = res.status;
     throw e;
   }
@@ -74,6 +72,30 @@ export function post<T>(path: string, body?: unknown, init?: RequestInit) {
   return api<T>(path, {
     ...init,
     method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(init?.headers ?? {}),
+    },
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+}
+
+export function put<T>(path: string, body?: unknown, init?: RequestInit) {
+  return api<T>(path, {
+    ...init,
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      ...(init?.headers ?? {}),
+    },
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+}
+
+export function patch<T>(path: string, body?: unknown, init?: RequestInit) {
+  return api<T>(path, {
+    ...init,
+    method: "PATCH",
     headers: {
       "Content-Type": "application/json",
       ...(init?.headers ?? {}),

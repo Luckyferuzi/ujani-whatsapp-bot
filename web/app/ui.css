@@ -1,0 +1,617 @@
+/*
+  UI System (Phase 1)
+  - Tailwind utilities + a cohesive console theme
+  - Imported after globals.css in app/layout.tsx so it can safely override legacy styles.
+*/
+
+@import "tailwindcss";
+
+:root {
+  /* Brand */
+  --ui-brand: #128c7e;
+  --ui-brand-strong: #0c6a5d;
+  --ui-brand-soft: rgba(18, 140, 126, 0.12);
+
+  /* Surfaces */
+  --ui-bg: #f5f6f8;
+  --ui-surface: #ffffff;
+  --ui-surface-2: #f7f8fb;
+
+  /* Borders */
+  --ui-border: #e6e8ee;
+  --ui-border-2: #eef0f4;
+
+  /* Text */
+  --ui-text: #0f172a;
+  --ui-muted: #64748b;
+
+  /* Status */
+  --ui-success: #16a34a;
+  --ui-warning: #d97706;
+  --ui-danger: #dc2626;
+
+  /* Radii */
+  --ui-radius-xl: 18px;
+  --ui-radius-lg: 14px;
+  --ui-radius-md: 10px;
+  --ui-radius-pill: 9999px;
+
+  /* Shadows */
+  --ui-shadow-1: 0 10px 24px rgba(15, 23, 42, 0.08);
+  --ui-shadow-2: 0 16px 38px rgba(15, 23, 42, 0.12);
+
+  /* Layout */
+  --ui-topbar-h: 56px;
+}
+
+/* Override legacy variable names used across the app (minimizes refactors) */
+:root {
+  --bg-page: var(--ui-bg);
+  --bg-panel: var(--ui-surface);
+  --bg-subtle: var(--ui-surface-2);
+  --border-subtle: var(--ui-border);
+  --border-strong: var(--ui-border);
+  --text-main: var(--ui-text);
+  --text-muted: var(--ui-muted);
+
+  /* Legacy "accent" is now the brand color */
+  --accent: var(--ui-brand);
+  --accent-soft: var(--ui-brand-soft);
+  --accent-strong: var(--ui-brand-strong);
+
+  --danger: var(--ui-danger);
+  --success: var(--ui-success);
+  --warning: var(--ui-warning);
+
+  --radius-lg: var(--ui-radius-lg);
+  --radius-pill: var(--ui-radius-pill);
+
+  --shadow-soft: var(--ui-shadow-1);
+  --topbar-height: var(--ui-topbar-h);
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--ui-bg);
+  color: var(--ui-text);
+}
+
+/* =========================
+   App shell
+   ========================= */
+
+.app-shell {
+  min-height: 100vh;
+  display: flex;
+  background: var(--ui-bg);
+}
+
+.app-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-page {
+  flex: 1;
+  min-height: 0;
+  padding: 18px 18px 28px;
+}
+
+.app-page--flush {
+  padding: 0;
+}
+
+/* Constrain content for non-inbox pages */
+.page-container {
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+/* =========================
+   Topbar (global)
+   ========================= */
+
+.topbar-root {
+  height: var(--ui-topbar-h);
+  background: var(--ui-surface);
+  border-bottom: 1px solid var(--ui-border);
+  padding: 0 14px;
+}
+
+.topbar-brand {
+  border-radius: var(--ui-radius-pill);
+  padding: 6px 10px;
+}
+
+.topbar-brand:hover {
+  background: rgba(15, 23, 42, 0.03);
+}
+
+.topbar-brand-icon {
+  background: rgba(18, 140, 126, 0.12);
+}
+
+.topbar-link {
+  border-radius: var(--ui-radius-pill);
+  border: 1px solid transparent;
+  padding: 7px 12px;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--ui-muted);
+  line-height: 1;
+}
+
+.topbar-link:hover {
+  background: rgba(15, 23, 42, 0.04);
+  border-color: var(--ui-border);
+  color: var(--ui-text);
+}
+
+.topbar-link--active {
+  background: var(--ui-brand-soft);
+  border-color: rgba(18, 140, 126, 0.45);
+  color: var(--ui-brand-strong);
+}
+
+.topbar-avatar-button {
+  background: #0f172a;
+}
+
+/* Mobile: show page title when nav collapses */
+.topbar-mobile-title {
+  display: none;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ui-text);
+}
+
+@media (max-width: 768px) {
+  .topbar-mobile-title {
+    display: block;
+  }
+}
+
+/* =========================
+   UI primitives (used by components/ui)
+   ========================= */
+
+.ui-card {
+  background: var(--ui-surface);
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-xl);
+  box-shadow: 0 1px 0 rgba(148, 163, 184, 0.25);
+}
+
+.ui-card--shadow {
+  box-shadow: var(--ui-shadow-1);
+}
+
+.ui-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: var(--ui-radius-pill);
+  border: 1px solid transparent;
+  padding: 9px 14px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.05s ease, background 0.15s ease,
+    border-color 0.15s ease, color 0.15s ease;
+}
+
+.ui-btn:active {
+  transform: translateY(1px);
+}
+
+.ui-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.ui-btn--primary {
+  background: var(--ui-brand);
+  color: #ffffff;
+}
+
+.ui-btn--primary:hover:not(:disabled) {
+  background: var(--ui-brand-strong);
+}
+
+.ui-btn--secondary {
+  background: var(--ui-surface);
+  border-color: var(--ui-border);
+  color: var(--ui-text);
+}
+
+.ui-btn--secondary:hover:not(:disabled) {
+  background: rgba(15, 23, 42, 0.03);
+}
+
+.ui-btn--ghost {
+  background: transparent;
+  color: var(--ui-text);
+}
+
+.ui-btn--ghost:hover:not(:disabled) {
+  background: rgba(15, 23, 42, 0.04);
+}
+
+.ui-input,
+.ui-textarea {
+  width: 100%;
+  background: var(--ui-surface);
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-lg);
+  padding: 10px 12px;
+  font-size: 13px;
+  color: var(--ui-text);
+  outline: none;
+}
+
+.ui-input {
+  border-radius: var(--ui-radius-pill);
+}
+
+.ui-input:focus,
+.ui-textarea:focus {
+  border-color: rgba(18, 140, 126, 0.55);
+  box-shadow: 0 0 0 3px rgba(18, 140, 126, 0.14);
+}
+
+.ui-textarea {
+  resize: none;
+}
+
+.ui-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: var(--ui-radius-pill);
+  padding: 3px 9px;
+  font-size: 11px;
+  font-weight: 700;
+  border: 1px solid transparent;
+  line-height: 1.3;
+}
+
+.ui-chip--neutral {
+  background: rgba(15, 23, 42, 0.04);
+  border-color: rgba(15, 23, 42, 0.06);
+  color: var(--ui-muted);
+}
+
+.ui-chip--success {
+  background: rgba(22, 163, 74, 0.12);
+  border-color: rgba(22, 163, 74, 0.25);
+  color: #166534;
+}
+
+.ui-chip--warning {
+  background: rgba(217, 119, 6, 0.12);
+  border-color: rgba(217, 119, 6, 0.25);
+  color: #92400e;
+}
+
+.ui-chip--danger {
+  background: rgba(220, 38, 38, 0.10);
+  border-color: rgba(220, 38, 38, 0.22);
+  color: #991b1b;
+}
+
+/* =========================
+   Legacy button classes (override for consistency)
+   ========================= */
+
+.btn {
+  border-radius: var(--ui-radius-pill);
+  border: 1px solid transparent;
+  padding: 9px 14px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.btn-xs {
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+.btn-primary {
+  background: var(--ui-brand);
+  color: #ffffff;
+}
+
+.btn-primary:hover:not(.btn-disabled):not(:disabled) {
+  background: var(--ui-brand-strong);
+}
+
+.btn-secondary {
+  background: var(--ui-surface);
+  border-color: var(--ui-border);
+  color: var(--ui-text);
+}
+
+.btn-secondary:hover:not(.btn-disabled):not(:disabled) {
+  background: rgba(15, 23, 42, 0.03);
+}
+
+.btn-danger {
+  background: rgba(220, 38, 38, 0.10);
+  border-color: rgba(220, 38, 38, 0.18);
+  color: #991b1b;
+}
+
+.btn-danger:hover:not(.btn-disabled):not(:disabled) {
+  background: rgba(220, 38, 38, 0.16);
+}
+
+.btn-disabled,
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* =========================
+   Optional: cleaner page headings
+   ========================= */
+
+.page-title {
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+.page-subtitle {
+  font-size: 13px;
+  color: var(--ui-muted);
+}
+
+.page-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+@media (max-width: 768px) {
+  .page-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
+/* =========================
+   Mobile sidebar drawer
+   ========================= */
+
+.sidebar-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.38);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+  z-index: 60;
+}
+
+.sidebar-overlay--open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.sidebar {
+  position: fixed;
+  inset: 0 auto 0 0;
+  width: 320px;
+  max-width: 86vw;
+  background: var(--ui-surface);
+  border-right: 1px solid var(--ui-border);
+  box-shadow: var(--ui-shadow-2);
+  transform: translateX(-104%);
+  transition: transform 0.18s ease;
+  z-index: 61;
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar--open {
+  transform: translateX(0);
+}
+
+.sidebar-header {
+  padding: 14px 14px 10px;
+  border-bottom: 1px solid var(--ui-border-2);
+}
+
+.sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.sidebar-brand-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  background: var(--ui-brand-soft);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+}
+
+.sidebar-brand-title {
+  font-size: 14px;
+  font-weight: 850;
+  color: var(--ui-text);
+  line-height: 1.1;
+}
+
+.sidebar-brand-subtitle {
+  font-size: 12px;
+  color: var(--ui-muted);
+  margin-top: 2px;
+}
+
+.sidebar-scroll {
+  overflow-y: auto;
+  padding: 12px 10px 10px;
+  min-height: 0;
+}
+
+.sidebar-section {
+  margin-bottom: 14px;
+}
+
+.sidebar-section-title {
+  font-size: 11px;
+  font-weight: 850;
+  color: var(--ui-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 0 6px;
+  margin-bottom: 8px;
+}
+
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sidebar-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 10px;
+  border-radius: 12px;
+  color: var(--ui-text);
+  text-decoration: none;
+  border: 1px solid transparent;
+}
+
+.sidebar-link:hover {
+  background: rgba(15, 23, 42, 0.04);
+  border-color: rgba(15, 23, 42, 0.06);
+}
+
+.sidebar-link--active {
+  background: var(--ui-brand-soft);
+  border-color: rgba(18, 140, 126, 0.28);
+}
+
+.sidebar-link-icon {
+  width: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sidebar-link-label {
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.sidebar-footer {
+  border-top: 1px solid var(--ui-border-2);
+  margin-top: 8px;
+  padding: 10px 10px 6px;
+}
+
+.sidebar-footer-email {
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--ui-text);
+  word-break: break-all;
+}
+
+.sidebar-footer-role {
+  font-size: 11px;
+  color: var(--ui-muted);
+}
+
+/* Desktop: the drawer remains available but closed by default.
+   (Top navigation is the primary navigation on md+.) */
+@media (min-width: 768px) {
+  .sidebar {
+    width: 340px;
+  }
+}
+
+/* APPEND BELOW — Phase 2 thread rendering helpers */
+
+/* Day separators */
+.thread-day-sep {
+  display: flex;
+  justify-content: center;
+  margin: 14px 0 10px;
+}
+
+.thread-day-chip {
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--ui-muted);
+  background: rgba(15, 23, 42, 0.04);
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  border-radius: var(--ui-radius-pill);
+  padding: 4px 10px;
+}
+
+/* System events (mode toggles, etc.) */
+.thread-event {
+  display: flex;
+  justify-content: center;
+  margin: 8px 0;
+  font-size: 12px;
+  color: var(--ui-muted);
+}
+
+.thread-event::before,
+.thread-event::after {
+  content: "";
+  height: 1px;
+  background: rgba(15, 23, 42, 0.08);
+  flex: 1;
+  margin: 0 10px;
+  align-self: center;
+}
+
+/* Bot label (shown only when bot starts speaking, to reduce admin confusion) */
+.thread-bot-label {
+  font-size: 11px;
+  font-weight: 900;
+  color: var(--ui-muted);
+  margin: 0 0 6px 6px;
+}
+
+/* Bot bubble tint (still calm, not noisy) */
+.thread-bubble--bot {
+  background: rgba(15, 23, 42, 0.03) !important;
+}
+
+/* Interactive selections */
+.thread-selection {
+  font-weight: 750;
+}
+
+/* Media edit button consistent look */
+.thread-media-edit {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  border: 1px solid rgba(15, 23, 42, 0.10);
+  background: rgba(255, 255, 255, 0.9);
+  border-radius: var(--ui-radius-pill);
+  padding: 2px 8px;
+  font-weight: 900;
+  cursor: pointer;
+}

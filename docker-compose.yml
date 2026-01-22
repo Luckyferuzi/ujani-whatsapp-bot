@@ -1,0 +1,87 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: omniflow_db
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-omniflow}
+      POSTGRES_USER: ${POSTGRES_USER:-omniflow}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-omniflow_password}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-omniflow} -d ${POSTGRES_DB:-omniflow}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  backend:
+    build:
+      context: ./backend
+    container_name: omniflow_backend
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # Server
+      PORT: 3000
+      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:3001}
+
+      # Auth gate for /api/* (required by web dashboard)
+      INBOX_ACCESS_KEY: ${INBOX_ACCESS_KEY}
+
+      # Database (inside docker network)
+      DATABASE_URL: postgres://${POSTGRES_USER:-omniflow}:${POSTGRES_PASSWORD:-omniflow_password}@db:5432/${POSTGRES_DB:-omniflow}
+
+      # IMPORTANT:
+      # - For a new install (empty DB): baseline
+      # - For existing/legacy DB: legacy
+      MIGRATIONS_MODE: ${MIGRATIONS_MODE:-baseline}
+
+      # WhatsApp (fill these for production WhatsApp connectivity)
+      VERIFY_TOKEN: ${VERIFY_TOKEN:-change-me}
+      WHATSAPP_TOKEN: ${WHATSAPP_TOKEN:-}
+      PHONE_NUMBER_ID: ${PHONE_NUMBER_ID:-}
+      APP_SECRET: ${APP_SECRET:-}
+
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3000}
+      BUSINESS_WA_NUMBER_E164: ${BUSINESS_WA_NUMBER_E164:-}
+
+      # Optional payment labels / instructions (legacy fields still accepted)
+      LIPA_NAMBA_TILL: ${LIPA_NAMBA_TILL:-}
+      LIPA_NAMBA_NAME: ${LIPA_NAMBA_NAME:-}
+      VODA_LNM_TILL: ${VODA_LNM_TILL:-}
+      VODA_LNM_NAME: ${VODA_LNM_NAME:-}
+      VODA_P2P_MSISDN: ${VODA_P2P_MSISDN:-}
+      VODA_P2P_NAME: ${VODA_P2P_NAME:-}
+
+      # Delivery (legacy fields; safe defaults)
+      BASE_LAT: ${BASE_LAT:-}
+      BASE_LNG: ${BASE_LNG:-}
+      SERVICE_RADIUS_KM: ${SERVICE_RADIUS_KM:-0}
+      REQUIRE_LOCATION_PIN: ${REQUIRE_LOCATION_PIN:-false}
+      DELIVERY_RATE_PER_KM: ${DELIVERY_RATE_PER_KM:-1000}
+      DELIVERY_ROUND_TO: ${DELIVERY_ROUND_TO:-500}
+      DEFAULT_DISTANCE_KM: ${DEFAULT_DISTANCE_KM:-8}
+
+    ports:
+      - "${BACKEND_PORT:-3000}:3000"
+
+  web:
+    build:
+      context: ./web
+      args:
+        NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE:-http://localhost:3000}
+        NEXT_PUBLIC_INBOX_ACCESS_KEY: ${INBOX_ACCESS_KEY}
+    container_name: omniflow_web
+    depends_on:
+      - backend
+    environment:
+      # Next.js runtime port inside container
+      PORT: 3000
+    ports:
+      - "${WEB_PORT:-3001}:3000"
+
+volumes:
+  db_data:

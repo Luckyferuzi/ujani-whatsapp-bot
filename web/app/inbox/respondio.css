@@ -1,0 +1,1944 @@
+/* =========================================================
+   Inbox UI (Smart Console) — loaded via /app/inbox/layout.tsx
+   This file intentionally overrides Inbox-related rules in globals.css
+   ========================================================= */
+
+.inbox-root {
+  --inbox-accent: #128c7e;
+  --inbox-accent-strong: #0b6b61;
+  --inbox-accent-soft: rgba(18, 140, 126, 0.12);
+
+  --inbox-page: #f5f7fb;
+  --inbox-panel: #ffffff;
+  --inbox-subtle: #f2f5fb;
+
+  --inbox-border: #e6eaf2;
+  --inbox-text: #0f172a;
+  --inbox-muted: #64748b;
+
+  --inbox-radius: 18px;
+  --inbox-pill: 999px;
+
+  height: calc(100vh - var(--topbar-height));
+  background: var(--inbox-page) !important;
+  display: flex;
+  flex-direction: column;
+}
+
+/* If globals.css renders an inbox header, hide it */
+.inbox-root .inbox-header {
+  display: none !important;
+}
+
+/* CRITICAL: stop any global responsive rule from stacking the inbox */
+.inbox-root .inbox-main {
+  flex: 1;
+  min-height: 0;
+  display: flex !important;
+  flex-direction: row !important;
+  background: var(--inbox-page) !important;
+}
+
+/* When nothing selected */
+.center-muted {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--inbox-muted);
+  font-weight: 700;
+}
+
+/* =========================================================
+   LEFT COLUMN — Conversation list
+   ========================================================= */
+
+.inbox-root .conversation-list {
+  width: 380px !important;
+  flex: 0 0 380px !important;
+  min-width: 0;
+  background: var(--inbox-panel);
+  border-right: 1px solid var(--inbox-border);
+  display: flex;
+  flex-direction: column;
+}
+
+.inbox-root .conversation-list-header {
+  padding: 14px 14px 10px;
+  border-bottom: 1px solid var(--inbox-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--inbox-panel);
+}
+
+.inbox-root .conversation-list-header-title {
+  font-size: 16px;
+  font-weight: 950;
+  letter-spacing: -0.01em;
+  color: var(--inbox-text);
+}
+
+.inbox-root .conversation-list-header-count {
+  min-width: 28px;
+  height: 22px;
+  padding: 0 9px;
+  border-radius: var(--inbox-pill);
+  border: 1px solid var(--inbox-border);
+  background: var(--inbox-subtle);
+  color: var(--inbox-muted);
+  font-size: 12px;
+  font-weight: 900;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.inbox-root .conversation-views {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--inbox-border);
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  background: var(--inbox-panel);
+}
+
+.inbox-root .conversation-view-button {
+  border: 1px solid var(--inbox-border);
+  background: var(--inbox-subtle);
+  color: var(--inbox-text);
+  border-radius: var(--inbox-pill);
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 900;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.inbox-root .conversation-view-button:hover {
+  background: #ffffff;
+  border-color: rgba(18, 140, 126, 0.35);
+}
+
+.inbox-root .conversation-view-button--active {
+  background: var(--inbox-accent-soft);
+  border-color: rgba(18, 140, 126, 0.55);
+  color: var(--inbox-accent-strong);
+}
+
+.inbox-root .conversation-view-count {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: var(--inbox-pill);
+  border: 1px solid var(--inbox-border);
+  background: #ffffff;
+  font-size: 11px;
+  font-weight: 950;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.inbox-root .conversation-search {
+  padding: 12px;
+  border-bottom: 1px solid var(--inbox-border);
+  background: var(--inbox-panel);
+}
+
+.inbox-root .conversation-search-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.inbox-root .conversation-search-input {
+  width: 100%;
+  border-radius: var(--inbox-pill);
+  border: 1px solid var(--inbox-border);
+  background: var(--inbox-subtle);
+  padding: 10px 12px 10px 36px;
+  font-size: 13px;
+  outline: none;
+  color: var(--inbox-text);
+
+  background-image: url("data:image/svg+xml,%3Csvg width='16' height='16' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Ccircle cx='7' cy='7' r='4.5' stroke='%239ca3af'/%3E%3Cpath d='M10 10l3 3' stroke='%239ca3af' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: 12px center;
+  background-size: 15px 15px;
+}
+
+.inbox-root .conversation-search-input:focus {
+  border-color: rgba(18, 140, 126, 0.55);
+  box-shadow: 0 0 0 3px rgba(18, 140, 126, 0.14);
+  background-color: #ffffff;
+}
+
+.inbox-root .conversation-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+}
+
+.inbox-root .conversation-item {
+  position: relative;
+  padding: 12px 12px;
+  display: flex;
+  gap: 12px;
+  border-bottom: 1px solid #f1f3f7;
+  background: var(--inbox-panel);
+  cursor: pointer;
+}
+
+.inbox-root .conversation-item:hover {
+  background: #fbfcff;
+}
+
+.inbox-root .conversation-item--selected {
+  background: #f4fffb;
+}
+
+.inbox-root .conversation-item--selected::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 10px;
+  bottom: 10px;
+  width: 3px;
+  border-radius: 999px;
+  background: var(--inbox-accent);
+}
+
+.inbox-root .conversation-avatar {
+  width: 42px;
+  height: 42px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, rgba(18, 140, 126, 0.16), rgba(37, 99, 235, 0.10));
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+}
+
+.inbox-root .conversation-avatar span {
+  font-weight: 950;
+  font-size: 12px;
+  color: var(--inbox-text);
+}
+
+.inbox-root .conversation-title {
+  font-size: 13.5px;
+  font-weight: 950;
+  color: var(--inbox-text);
+}
+
+.inbox-root .conversation-subtitle {
+  font-size: 12px;
+  color: var(--inbox-muted);
+}
+
+.inbox-root .badge--unread {
+  background: var(--inbox-accent) !important;
+}
+
+.inbox-root .badge--bot {
+  background: rgba(15, 23, 42, 0.04) !important;
+  border-color: rgba(15, 23, 42, 0.06) !important;
+  color: var(--inbox-muted) !important;
+}
+
+.inbox-root .badge--restock {
+  background: rgba(217, 119, 6, 0.12) !important;
+  border-color: rgba(217, 119, 6, 0.25) !important;
+  color: #92400e !important;
+}
+
+/* =========================================================
+   MIDDLE COLUMN — Thread (visual polish)
+   ========================================================= */
+
+.inbox-root .thread {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(180deg, #f7f9fc, #f3f6fb);
+}
+
+.inbox-root .thread-header {
+  background: var(--inbox-panel);
+  border-bottom: 1px solid var(--inbox-border);
+}
+
+.inbox-root .thread-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  justify-content: center;
+}
+
+.inbox-root .thread-messages {
+  width: min(880px, 100%);
+  padding: 18px 22px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.inbox-root .thread-message {
+  display: flex;
+}
+
+.inbox-root .thread-message--inbound {
+  justify-content: flex-start;
+}
+
+.inbox-root .thread-message--outbound {
+  justify-content: flex-end;
+}
+
+.inbox-root .thread-bubble {
+  max-width: 72%;
+  border-radius: 18px;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.45;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  box-shadow: 0 12px 26px rgba(15, 23, 42, 0.06);
+  background: #ffffff;
+}
+
+.inbox-root .thread-message--outbound .thread-bubble {
+  background: #dff7f1;
+  border-color: rgba(18, 140, 126, 0.20);
+}
+
+.inbox-root .thread-footer {
+  background: var(--inbox-panel);
+  border-top: 1px solid var(--inbox-border);
+}
+
+/* =========================================================
+   RIGHT COLUMN — Right panel (when visible)
+   ========================================================= */
+
+.inbox-root .right-panel {
+  width: 380px;
+  flex: 0 0 380px;
+  min-width: 0;
+  border-left: 1px solid var(--inbox-border);
+  background: var(--inbox-subtle);
+  padding: 14px;
+  overflow: auto;
+}
+
+/* Responsive: hide right panel on smaller screens */
+@media (max-width: 1180px) {
+  .inbox-root .right-panel {
+    display: none !important;
+  }
+}
+
+/* Responsive: reduce list width before mobile */
+@media (max-width: 960px) {
+  .inbox-root .conversation-list {
+    width: 340px !important;
+    flex-basis: 340px !important;
+  }
+}
+
+@media (max-width: 640px) {
+  .inbox-root .thread-messages {
+    padding: 12px 12px;
+  }
+  .inbox-root .thread-bubble {
+    max-width: 86%;
+  }
+}
+
+/* =========================================================
+   APPEND BELOW — Thread message grouping (calm WhatsApp feel)
+   ========================================================= */
+
+.inbox-root .thread-messages {
+  /* slightly tighter base spacing */
+  gap: 10px;
+}
+
+.inbox-root .thread-message--grouped {
+  /* pull messages closer when they are part of the same block */
+  margin-top: -6px;
+}
+
+.inbox-root .thread-role-label {
+  font-size: 11px;
+  font-weight: 950;
+  color: var(--inbox-muted);
+  margin: 0 0 6px;
+  padding: 0 6px;
+}
+
+.inbox-root .thread-message--outbound .thread-role-label {
+  text-align: right;
+}
+
+.inbox-root .thread-bubble--stacked-prev {
+  /* continuation: flatter top corner on the sender side */
+  margin-top: 4px;
+}
+
+.inbox-root .thread-bubble--stacked-next {
+  /* next continuation: flatter bottom corner on the sender side */
+  margin-bottom: 4px;
+}
+
+/* Inbound (left) stacked corners */
+.inbox-root .thread-message--inbound .thread-bubble--stacked-prev {
+  border-top-left-radius: 10px;
+}
+.inbox-root .thread-message--inbound .thread-bubble--stacked-next {
+  border-bottom-left-radius: 10px;
+}
+
+/* Outbound (right) stacked corners */
+.inbox-root .thread-message--outbound .thread-bubble--stacked-prev {
+  border-top-right-radius: 10px;
+}
+.inbox-root .thread-message--outbound .thread-bubble--stacked-next {
+  border-bottom-right-radius: 10px;
+}
+
+/* Bot blocks: keep subtle and readable */
+.inbox-root .thread-message--bot .thread-bubble {
+  background: rgba(15, 23, 42, 0.03) !important;
+}
+
+/* =========================================================
+   APPEND BELOW — RightPanel “Smart Console” refinements
+   ========================================================= */
+
+.inbox-root .rp-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.inbox-root .rp-card-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.inbox-root .rp-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.inbox-root .rp-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.inbox-root .rp-actions--wrap {
+  flex-wrap: wrap;
+}
+
+.inbox-root .rp-actions--column {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.inbox-root .rp-icon-button {
+  margin-left: auto;
+  border: 1px solid var(--inbox-border);
+  background: #ffffff;
+  border-radius: 999px;
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-weight: 900;
+}
+
+.inbox-root .rp-icon-button:hover {
+  background: var(--inbox-subtle);
+  border-color: rgba(18, 140, 126, 0.35);
+}
+
+.inbox-root .rp-icon-button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.inbox-root .rp-order-select-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.inbox-root .rp-select {
+  border: 1px solid var(--inbox-border);
+  background: #ffffff;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--inbox-text);
+  outline: none;
+  max-width: 220px;
+}
+
+.inbox-root .rp-select:focus {
+  border-color: rgba(18, 140, 126, 0.55);
+  box-shadow: 0 0 0 3px rgba(18, 140, 126, 0.14);
+}
+
+.inbox-root .rp-chip {
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 950;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(15, 23, 42, 0.04);
+  color: var(--inbox-text);
+  white-space: nowrap;
+}
+
+.inbox-root .rp-chip--success {
+  background: rgba(22, 163, 74, 0.12);
+  border-color: rgba(22, 163, 74, 0.25);
+  color: #166534;
+}
+
+.inbox-root .rp-chip--warning {
+  background: rgba(217, 119, 6, 0.12);
+  border-color: rgba(217, 119, 6, 0.25);
+  color: #92400e;
+}
+
+.inbox-root .rp-chip--danger {
+  background: rgba(220, 38, 38, 0.12);
+  border-color: rgba(220, 38, 38, 0.25);
+  color: #991b1b;
+}
+
+.inbox-root .rp-chip--neutral {
+  background: rgba(15, 23, 42, 0.04);
+  border-color: rgba(15, 23, 42, 0.08);
+  color: var(--inbox-muted);
+}
+
+.inbox-root .rp-inline-form {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.inbox-root .rp-inline-form-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.inbox-root .rp-input {
+  width: 100%;
+  border: 1px solid var(--inbox-border);
+  background: #ffffff;
+  border-radius: 12px;
+  padding: 8px 10px;
+  font-size: 12px;
+  outline: none;
+}
+
+.inbox-root .rp-input:focus {
+  border-color: rgba(18, 140, 126, 0.55);
+  box-shadow: 0 0 0 3px rgba(18, 140, 126, 0.14);
+}
+
+.inbox-root .rp-error {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #b91c1c;
+}
+
+.inbox-root .rp-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.inbox-root .rp-list-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  background: #ffffff;
+}
+
+.inbox-root .rp-list-main {
+  min-width: 0;
+}
+
+.inbox-root .rp-list-title {
+  font-size: 12.5px;
+  font-weight: 950;
+  color: var(--inbox-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 220px;
+}
+
+.inbox-root .rp-list-sub {
+  font-size: 11px;
+  color: var(--inbox-muted);
+}
+
+.inbox-root .rp-list-right {
+  font-size: 11px;
+  font-weight: 900;
+  color: var(--inbox-muted);
+}
+
+.inbox-root .rp-muted {
+  font-size: 12px;
+  color: var(--inbox-muted);
+}
+
+/* =========================================================
+   APPEND BELOW — Final polish: typography + readable colors
+   Goal: calmer contrast, premium feel, zero “washed out” text
+   ========================================================= */
+
+/* Stronger, cleaner type rendering (Inbox only) */
+.inbox-root {
+  /* Slightly deeper, more premium neutral palette */
+  --inbox-text: #0b1220;            /* deep slate */
+  --inbox-muted: #526177;           /* readable muted */
+  --inbox-muted-2: #73829a;         /* secondary muted */
+  --inbox-border: #e3e9f3;          /* softer border */
+  --inbox-page: #f4f7fc;            /* slightly cleaner page */
+  --inbox-subtle: #f1f5fb;          /* subtle input/pills */
+
+  color: var(--inbox-text);
+
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial,
+    "Noto Sans", "Liberation Sans", sans-serif;
+
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+
+  text-rendering: geometricPrecision;
+}
+
+/* Make common text blocks consistent */
+.inbox-root .panel-card-title,
+.inbox-root .thread-title,
+.inbox-root .conversation-title {
+  color: var(--inbox-text) !important;
+}
+
+.inbox-root .thread-subtitle,
+.inbox-root .conversation-subtitle,
+.inbox-root .conversation-time,
+.inbox-root .panel-card-body--muted,
+.inbox-root .center-muted,
+.inbox-root .rp-muted,
+.inbox-root .rp-list-sub,
+.inbox-root .rp-list-right {
+  color: var(--inbox-muted) !important;
+}
+
+/* Links should look premium (not neon) */
+.inbox-root a {
+  color: var(--inbox-accent-strong);
+}
+.inbox-root a:hover {
+  color: var(--inbox-accent);
+}
+
+/* Conversation list: make preview and time easier to read */
+.inbox-root .conversation-time {
+  color: var(--inbox-muted-2) !important;
+  font-weight: 800;
+}
+
+.inbox-root .conversation-subtitle {
+  line-height: 1.35;
+}
+
+/* Thread bubbles: improve contrast and readability */
+.inbox-root .thread-bubble {
+  color: var(--inbox-text) !important;
+}
+
+.inbox-root .thread-message--inbound .thread-bubble {
+  background: #ffffff !important;
+}
+
+.inbox-root .thread-message--outbound .thread-bubble {
+  background: #dcf7f0 !important; /* slightly nicer green tint */
+  border-color: rgba(18, 140, 126, 0.22) !important;
+}
+
+/* Bot bubble: slightly darker tint so it doesn’t look “disabled” */
+.inbox-root .thread-bubble--bot {
+  background: rgba(15, 23, 42, 0.045) !important;
+  border-color: rgba(15, 23, 42, 0.08) !important;
+}
+
+/* Thread meta time: make it visible but subtle */
+.inbox-root .thread-meta,
+.inbox-root .thread-time {
+  color: var(--inbox-muted-2) !important;
+  font-weight: 800;
+}
+
+/* RightPanel: define panel row typography (these were previously unstylized) */
+.inbox-root .panel-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.inbox-root .panel-label {
+  font-size: 12px;
+  font-weight: 900;
+  color: var(--inbox-muted) !important;
+  white-space: nowrap;
+}
+
+.inbox-root .panel-value {
+  font-size: 12.5px;
+  font-weight: 900;
+  color: var(--inbox-text) !important;
+  text-align: right;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* RightPanel select + inputs: better text contrast */
+.inbox-root .rp-select,
+.inbox-root .rp-input,
+.inbox-root .thread-input,
+.inbox-root .conversation-search-input {
+  color: var(--inbox-text) !important;
+}
+
+.inbox-root .rp-select::placeholder,
+.inbox-root .rp-input::placeholder,
+.inbox-root .thread-input::placeholder,
+.inbox-root .conversation-search-input::placeholder {
+  color: rgba(82, 97, 119, 0.75) !important;
+  font-weight: 800;
+}
+
+/* Buttons: make secondary buttons look less “flat grey” */
+.inbox-root .btn.btn-secondary {
+  background: #ffffff !important;
+  border: 1px solid var(--inbox-border) !important;
+  color: var(--inbox-text) !important;
+}
+
+.inbox-root .btn.btn-secondary:hover {
+  border-color: rgba(18, 140, 126, 0.35) !important;
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.06);
+}
+
+/* Badges: sharpen text a bit */
+.inbox-root .badge {
+  font-weight: 950;
+}
+
+.inbox-root .badge--unread {
+  background: var(--inbox-accent) !important;
+  color: #ffffff !important;
+}
+
+.inbox-root .badge--restock {
+  background: rgba(14, 165, 233, 0.12) !important;
+  border-color: rgba(14, 165, 233, 0.22) !important;
+  color: #075985 !important;
+}
+
+/* Make panel cards feel “crisp” with slightly stronger heading spacing */
+.inbox-root .panel-card-title {
+  font-size: 13.5px;
+  letter-spacing: -0.01em;
+}
+
+.inbox-root .panel-card-body {
+  color: var(--inbox-text) !important;
+  line-height: 1.45;
+}
+
+/* Clean focus rings (smart look) */
+.inbox-root input:focus,
+.inbox-root select:focus,
+.inbox-root button:focus {
+  outline: none;
+}
+
+.inbox-root .conversation-search-input:focus,
+.inbox-root .thread-input:focus,
+.inbox-root .rp-input:focus,
+.inbox-root .rp-select:focus {
+  border-color: rgba(18, 140, 126, 0.55) !important;
+  box-shadow: 0 0 0 3px rgba(18, 140, 126, 0.14) !important;
+}
+
+/* =========================================================
+   APPEND BELOW — Extra polish: spacing, rhythm, “smart console”
+   ========================================================= */
+
+/* ---------- Global rhythm (Inbox only) ---------- */
+
+/* Reduce harshness, make surfaces feel intentional */
+.inbox-root .conversation-list,
+.inbox-root .thread,
+.inbox-root .right-panel {
+  min-height: 0;
+}
+
+.inbox-root .conversation-list,
+.inbox-root .right-panel {
+  background: var(--inbox-panel) !important;
+}
+
+/* Give the page a subtle depth */
+.inbox-root .conversation-list,
+.inbox-root .thread-header,
+.inbox-root .thread-footer {
+  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.04);
+}
+
+/* ---------- Conversation list: premium scanability ---------- */
+
+/* Better scroll */
+.inbox-root .conversation-items {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(15, 23, 42, 0.20) transparent;
+}
+.inbox-root .conversation-items::-webkit-scrollbar {
+  width: 10px;
+}
+.inbox-root .conversation-items::-webkit-scrollbar-track {
+  background: transparent;
+}
+.inbox-root .conversation-items::-webkit-scrollbar-thumb {
+  background: rgba(15, 23, 42, 0.15);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+.inbox-root .conversation-items::-webkit-scrollbar-thumb:hover {
+  background: rgba(15, 23, 42, 0.22);
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+/* Refine list row density */
+.inbox-root .conversation-item {
+  padding: 12px 12px;
+  align-items: center;
+}
+
+/* Make unread chats “pop” subtly without screaming */
+.inbox-root .conversation-item--unread {
+  background: linear-gradient(90deg, rgba(18, 140, 126, 0.06), transparent 60%);
+}
+.inbox-root .conversation-item--unread:hover {
+  background: linear-gradient(90deg, rgba(18, 140, 126, 0.08), #fbfcff 60%);
+}
+
+/* Cleaner row layout */
+.inbox-root .conversation-main {
+  gap: 6px;
+}
+
+.inbox-root .conversation-top-row {
+  align-items: baseline;
+}
+
+.inbox-root .conversation-title {
+  font-size: 13.8px;
+  letter-spacing: -0.01em;
+}
+
+/* Make subtitle easier to scan */
+.inbox-root .conversation-subtitle {
+  max-width: 100%;
+  opacity: 0.95;
+}
+
+/* Badge alignment improvements */
+.inbox-root .conversation-badges {
+  gap: 6px;
+  align-items: center;
+}
+
+/* Better selected row highlight */
+.inbox-root .conversation-item--selected {
+  background: linear-gradient(90deg, rgba(18, 140, 126, 0.10), rgba(18, 140, 126, 0.03) 45%, #ffffff 100%) !important;
+}
+.inbox-root .conversation-item--selected::before {
+  top: 10px !important;
+  bottom: 10px !important;
+}
+
+/* Avatar: slightly clearer type */
+.inbox-root .conversation-avatar span {
+  letter-spacing: 0.02em;
+}
+
+/* ---------- Views row + search polish ---------- */
+
+.inbox-root .conversation-views {
+  padding-top: 12px;
+  padding-bottom: 12px;
+}
+
+.inbox-root .conversation-view-button {
+  transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease;
+}
+.inbox-root .conversation-view-button:active {
+  transform: scale(0.98);
+}
+
+.inbox-root .conversation-search {
+  padding-top: 12px;
+  padding-bottom: 12px;
+}
+
+.inbox-root .conversation-search-input {
+  transition: border-color 120ms ease, box-shadow 120ms ease, background-color 120ms ease;
+}
+
+/* ---------- Thread: premium WhatsApp calm ---------- */
+
+/* Center the thread content even more nicely */
+.inbox-root .thread-body {
+  background:
+    radial-gradient(900px 500px at 40% 0%, rgba(37, 99, 235, 0.06), transparent 60%),
+    radial-gradient(900px 500px at 80% 10%, rgba(18, 140, 126, 0.07), transparent 60%),
+    linear-gradient(180deg, #f7f9fc, #f3f6fb);
+}
+
+/* Improve thread header spacing/typography */
+.inbox-root .thread-header {
+  padding: 14px 16px !important;
+}
+
+.inbox-root .thread-title {
+  font-size: 15px !important;
+  letter-spacing: -0.015em;
+}
+
+.inbox-root .thread-subtitle {
+  font-size: 12px !important;
+}
+
+/* Scrollbar for messages */
+.inbox-root .thread-messages {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(15, 23, 42, 0.18) transparent;
+}
+.inbox-root .thread-messages::-webkit-scrollbar {
+  width: 10px;
+}
+.inbox-root .thread-messages::-webkit-scrollbar-track {
+  background: transparent;
+}
+.inbox-root .thread-messages::-webkit-scrollbar-thumb {
+  background: rgba(15, 23, 42, 0.14);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+.inbox-root .thread-messages::-webkit-scrollbar-thumb:hover {
+  background: rgba(15, 23, 42, 0.22);
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+/* Bubble polish */
+.inbox-root .thread-bubble {
+  padding: 10px 12px !important;
+  font-size: 13.2px !important;
+  letter-spacing: -0.005em;
+  border-radius: 18px;
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+
+.inbox-root .thread-message--inbound .thread-bubble {
+  box-shadow: 0 14px 28px rgba(15, 23, 42, 0.07) !important;
+}
+
+.inbox-root .thread-message--outbound .thread-bubble {
+  box-shadow: 0 14px 28px rgba(18, 140, 126, 0.09) !important;
+}
+
+/* Bubble hover = subtle lift (premium) */
+.inbox-root .thread-bubble:hover {
+  transform: translateY(-1px);
+}
+
+/* Message grouping: tighten more gracefully */
+.inbox-root .thread-message--grouped {
+  margin-top: -8px !important;
+}
+.inbox-root .thread-bubble--stacked-prev {
+  margin-top: 2px !important;
+}
+.inbox-root .thread-bubble--stacked-next {
+  margin-bottom: 2px !important;
+}
+
+/* Bot label looks like a small chip, not a raw label */
+.inbox-root .thread-role-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  background: rgba(15, 23, 42, 0.04);
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-weight: 950;
+  color: var(--inbox-muted) !important;
+}
+
+/* Thread menu options look like actionable pills */
+.inbox-root .thread-menu-option {
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.04);
+  transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease;
+}
+.inbox-root .thread-menu-option:hover {
+  border-color: rgba(18, 140, 126, 0.28);
+  box-shadow: 0 16px 34px rgba(15, 23, 42, 0.07);
+  transform: translateY(-1px);
+}
+
+/* Composer: looks like a modern chat input */
+.inbox-root .thread-footer {
+  padding: 12px 12px !important;
+}
+
+.inbox-root .thread-input-row {
+  gap: 10px !important;
+}
+
+.inbox-root .thread-attach-button {
+  width: 40px;
+  height: 40px;
+  border-radius: 999px !important;
+  border: 1px solid var(--inbox-border) !important;
+  background: #ffffff !important;
+  transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease;
+}
+.inbox-root .thread-attach-button:hover {
+  border-color: rgba(18, 140, 126, 0.35) !important;
+  box-shadow: 0 16px 34px rgba(15, 23, 42, 0.06);
+  transform: translateY(-1px);
+}
+.inbox-root .thread-attach-button:active {
+  transform: scale(0.98);
+}
+
+.inbox-root .thread-input {
+  height: 40px;
+  border-radius: 999px !important;
+  padding: 10px 14px !important;
+  font-weight: 800;
+}
+
+.inbox-root .thread-send-button {
+  height: 40px;
+  border-radius: 999px !important;
+  padding: 0 14px !important;
+  font-weight: 950;
+  transition: transform 120ms ease, box-shadow 120ms ease, background-color 120ms ease;
+}
+.inbox-root .thread-send-button:hover {
+  box-shadow: 0 16px 34px rgba(18, 140, 126, 0.18);
+  transform: translateY(-1px);
+}
+.inbox-root .thread-send-button:active {
+  transform: scale(0.98);
+}
+
+/* ---------- Right panel: make it feel like a console ---------- */
+
+/* Right panel should match subtle background, not pure white */
+.inbox-root .right-panel {
+  background: var(--inbox-subtle) !important;
+}
+
+/* Card spacing/typography */
+.inbox-root .panel-card {
+  border-radius: 18px !important;
+  padding: 14px 14px !important;
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.07) !important;
+}
+
+.inbox-root .panel-card-title {
+  font-size: 14px !important;
+}
+
+/* Tabs become stronger */
+.inbox-root .panel-header--tabs {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--inbox-subtle);
+  padding: 6px 0 12px;
+}
+
+.inbox-root .panel-header-tab {
+  transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease;
+}
+
+.inbox-root .panel-header-tab:hover {
+  border-color: rgba(18, 140, 126, 0.35) !important;
+  box-shadow: 0 16px 34px rgba(15, 23, 42, 0.06);
+  transform: translateY(-1px);
+}
+
+.inbox-root .panel-header-tab:active {
+  transform: scale(0.98);
+}
+
+/* RightPanel list rows: more breathable */
+.inbox-root .rp-list-row {
+  transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease;
+}
+.inbox-root .rp-list-row:hover {
+  border-color: rgba(18, 140, 126, 0.28);
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.07);
+  transform: translateY(-1px);
+}
+
+/* Buttons inside panel: consistent height and weight */
+.inbox-root .btn.btn-xs {
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 999px !important;
+  font-weight: 900;
+}
+
+/* Success button: stronger green */
+.inbox-root .btn.btn-success,
+.inbox-root .btn.btn-primary {
+  background-color: var(--inbox-accent) !important;
+  border-color: var(--inbox-accent) !important;
+  color: #ffffff !important;
+}
+
+.inbox-root .btn.btn-success:hover,
+.inbox-root .btn.btn-primary:hover {
+  background-color: var(--inbox-accent-strong) !important;
+  border-color: var(--inbox-accent-strong) !important;
+  box-shadow: 0 16px 34px rgba(18, 140, 126, 0.18);
+}
+
+/* ---------- Empty states: look intentional ---------- */
+
+.inbox-root .thread-empty,
+.inbox-root .conversation-empty,
+.inbox-root .panel-empty,
+.inbox-root .center-muted {
+  background: rgba(255, 255, 255, 0.75);
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  border-radius: 18px;
+  padding: 14px 16px;
+  box-shadow: 0 16px 34px rgba(15, 23, 42, 0.06);
+}
+
+/* ---------- Mobile polish ---------- */
+@media (max-width: 768px) {
+  .inbox-root .mobile-thread-nav {
+    background: #ffffff;
+    border-bottom: 1px solid var(--inbox-border);
+    box-shadow: 0 10px 26px rgba(15, 23, 42, 0.04);
+  }
+
+  .inbox-root .mobile-nav-button {
+    width: 40px;
+    height: 40px;
+    border-radius: 999px;
+    font-weight: 900;
+  }
+}
+
+/* =========================================================
+   APPEND BELOW — WOW MODE
+   - Automatic dark mode (prefers-color-scheme)
+   - Optional manual override hooks (theme-dark)
+   - Glassy panels, micro-interactions, premium depth
+   ========================================================= */
+
+/* Smooth UI transitions (but respect reduced motion) */
+@media (prefers-reduced-motion: no-preference) {
+  .inbox-root *,
+  .inbox-root *::before,
+  .inbox-root *::after {
+    transition:
+      background-color 140ms ease,
+      border-color 140ms ease,
+      color 140ms ease,
+      box-shadow 180ms ease,
+      transform 140ms ease,
+      opacity 140ms ease;
+  }
+}
+
+/* “Glassy” headers + footers (falls back safely) */
+.inbox-root .thread-header,
+.inbox-root .thread-footer,
+.inbox-root .conversation-list-header,
+.inbox-root .conversation-views,
+.inbox-root .conversation-search,
+.inbox-root .panel-header--tabs {
+  background: rgba(255, 255, 255, 0.78) !important;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+/* Stronger premium accent on selected chat (subtle gradient rail) */
+.inbox-root .conversation-item--selected::before {
+  background: linear-gradient(180deg, var(--inbox-accent), rgba(18, 140, 126, 0.35)) !important;
+}
+
+/* Add a gentle “focus halo” for selected chat row */
+.inbox-root .conversation-item--selected {
+  box-shadow: 0 16px 42px rgba(18, 140, 126, 0.10) !important;
+}
+
+/* Enhance bubbles with slightly more “depth” */
+.inbox-root .thread-message--inbound .thread-bubble {
+  box-shadow: 0 18px 44px rgba(15, 23, 42, 0.08) !important;
+}
+.inbox-root .thread-message--outbound .thread-bubble {
+  box-shadow: 0 18px 44px rgba(18, 140, 126, 0.14) !important;
+}
+
+/* ---------------------------------------------------------
+   DARK MODE (Automatic)
+   Uses OS preference, and also supports manual override:
+   - add class "theme-dark" to .inbox-root (later, if you want)
+   - OR set <html data-theme="dark">
+   --------------------------------------------------------- */
+
+@media (prefers-color-scheme: dark) {
+  .inbox-root {
+    --inbox-page: #060a12;
+    --inbox-panel: rgba(15, 23, 42, 0.72);
+    --inbox-subtle: rgba(15, 23, 42, 0.52);
+    --inbox-border: rgba(148, 163, 184, 0.16);
+
+    --inbox-text: #e6edf7;
+    --inbox-muted: rgba(226, 232, 240, 0.74);
+    --inbox-muted-2: rgba(226, 232, 240, 0.58);
+
+    /* keep brand */
+    --inbox-accent: #16a394;
+    --inbox-accent-strong: #0e766b;
+    --inbox-accent-soft: rgba(22, 163, 148, 0.16);
+
+    background: radial-gradient(1200px 800px at 40% 0%, rgba(22, 163, 148, 0.12), transparent 60%),
+      radial-gradient(1200px 800px at 80% 10%, rgba(37, 99, 235, 0.10), transparent 60%),
+      linear-gradient(180deg, #040712, #060a12) !important;
+  }
+
+  /* Glass surfaces in dark mode */
+  .inbox-root .thread-header,
+  .inbox-root .thread-footer,
+  .inbox-root .conversation-list-header,
+  .inbox-root .conversation-views,
+  .inbox-root .conversation-search,
+  .inbox-root .panel-header--tabs {
+    background: rgba(15, 23, 42, 0.72) !important;
+    border-color: var(--inbox-border) !important;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }
+
+  /* Column surfaces */
+  .inbox-root .conversation-list {
+    background: rgba(15, 23, 42, 0.78) !important;
+    border-right-color: var(--inbox-border) !important;
+  }
+
+  .inbox-root .right-panel {
+    background: rgba(15, 23, 42, 0.52) !important;
+    border-left-color: var(--inbox-border) !important;
+  }
+
+  /* Conversation rows */
+  .inbox-root .conversation-item {
+    background: rgba(15, 23, 42, 0.72) !important;
+    border-bottom-color: rgba(148, 163, 184, 0.08) !important;
+  }
+
+  .inbox-root .conversation-item:hover {
+    background: rgba(15, 23, 42, 0.92) !important;
+  }
+
+  .inbox-root .conversation-item--unread {
+    background: linear-gradient(90deg, rgba(22, 163, 148, 0.14), rgba(15, 23, 42, 0.74) 65%) !important;
+  }
+
+  .inbox-root .conversation-item--selected {
+    background: linear-gradient(90deg, rgba(22, 163, 148, 0.18), rgba(15, 23, 42, 0.82) 55%, rgba(15, 23, 42, 0.86) 100%) !important;
+    box-shadow: 0 18px 52px rgba(22, 163, 148, 0.12) !important;
+  }
+
+  /* Search/input */
+  .inbox-root .conversation-search-input,
+  .inbox-root .thread-input,
+  .inbox-root .rp-input,
+  .inbox-root .rp-select {
+    background: rgba(2, 6, 23, 0.55) !important;
+    border-color: var(--inbox-border) !important;
+    color: var(--inbox-text) !important;
+  }
+
+  .inbox-root .conversation-search-input:focus,
+  .inbox-root .thread-input:focus,
+  .inbox-root .rp-input:focus,
+  .inbox-root .rp-select:focus {
+    border-color: rgba(22, 163, 148, 0.65) !important;
+    box-shadow: 0 0 0 3px rgba(22, 163, 148, 0.18) !important;
+  }
+
+  /* Thread background becomes deep and premium */
+  .inbox-root .thread-body {
+    background:
+      radial-gradient(900px 520px at 40% 0%, rgba(22, 163, 148, 0.13), transparent 60%),
+      radial-gradient(900px 520px at 80% 10%, rgba(37, 99, 235, 0.12), transparent 60%),
+      linear-gradient(180deg, rgba(2, 6, 23, 0.45), rgba(2, 6, 23, 0.65)) !important;
+  }
+
+  /* Bubbles (dark mode) */
+  .inbox-root .thread-message--inbound .thread-bubble {
+    background: rgba(2, 6, 23, 0.62) !important;
+    border-color: rgba(148, 163, 184, 0.14) !important;
+    color: var(--inbox-text) !important;
+    box-shadow: 0 20px 56px rgba(0, 0, 0, 0.35) !important;
+  }
+
+  .inbox-root .thread-message--outbound .thread-bubble {
+    background: rgba(6, 78, 59, 0.58) !important; /* green tint */
+    border-color: rgba(22, 163, 148, 0.24) !important;
+    box-shadow: 0 20px 56px rgba(22, 163, 148, 0.18) !important;
+  }
+
+  .inbox-root .thread-bubble--bot {
+    background: rgba(30, 41, 59, 0.55) !important;
+    border-color: rgba(148, 163, 184, 0.14) !important;
+  }
+
+  /* Right panel cards */
+  .inbox-root .panel-card {
+    background: rgba(15, 23, 42, 0.78) !important;
+    border-color: rgba(148, 163, 184, 0.12) !important;
+    box-shadow: 0 22px 70px rgba(0, 0, 0, 0.35) !important;
+  }
+
+  /* Tabs */
+  .inbox-root .panel-header-tab {
+    background: rgba(2, 6, 23, 0.45) !important;
+    border-color: rgba(148, 163, 184, 0.14) !important;
+    color: var(--inbox-text) !important;
+  }
+  .inbox-root .panel-header-tab--active {
+    background: rgba(22, 163, 148, 0.18) !important;
+    border-color: rgba(22, 163, 148, 0.38) !important;
+  }
+
+  /* Buttons */
+  .inbox-root .btn.btn-secondary {
+    background: rgba(2, 6, 23, 0.45) !important;
+    border-color: rgba(148, 163, 184, 0.14) !important;
+    color: var(--inbox-text) !important;
+  }
+
+  .inbox-root .btn.btn-secondary:hover {
+    border-color: rgba(22, 163, 148, 0.35) !important;
+    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.35) !important;
+  }
+
+  .inbox-root .btn.btn-success,
+  .inbox-root .btn.btn-primary {
+    background-color: var(--inbox-accent) !important;
+    border-color: var(--inbox-accent) !important;
+    color: #00100e !important;
+  }
+
+  .inbox-root .btn.btn-success:hover,
+  .inbox-root .btn.btn-primary:hover {
+    background-color: #2ad4c5 !important;
+    border-color: #2ad4c5 !important;
+    box-shadow: 0 22px 60px rgba(22, 163, 148, 0.22) !important;
+  }
+
+  /* Badges */
+  .inbox-root .badge--unread {
+    background: #22c55e !important;
+    color: #04120c !important;
+  }
+  .inbox-root .badge--bot {
+    background: rgba(148, 163, 184, 0.12) !important;
+    border-color: rgba(148, 163, 184, 0.16) !important;
+    color: rgba(226, 232, 240, 0.72) !important;
+  }
+  .inbox-root .badge--restock {
+    background: rgba(14, 165, 233, 0.16) !important;
+    border-color: rgba(14, 165, 233, 0.24) !important;
+    color: rgba(125, 211, 252, 0.95) !important;
+  }
+
+  /* Links */
+  .inbox-root a {
+    color: rgba(45, 212, 191, 0.95) !important;
+  }
+  .inbox-root a:hover {
+    color: rgba(34, 211, 238, 0.95) !important;
+  }
+
+  /* Scrollbars (dark mode) */
+  .inbox-root .conversation-items::-webkit-scrollbar-thumb,
+  .inbox-root .thread-messages::-webkit-scrollbar-thumb {
+    background: rgba(226, 232, 240, 0.18);
+  }
+  .inbox-root .conversation-items::-webkit-scrollbar-thumb:hover,
+  .inbox-root .thread-messages::-webkit-scrollbar-thumb:hover {
+    background: rgba(226, 232, 240, 0.28);
+  }
+}
+
+/* Manual override hooks (optional for later)
+   If later you want a toggle:
+   - set <html data-theme="dark"> OR add class "theme-dark" to .inbox-root
+*/
+html[data-theme="dark"] .inbox-root,
+.inbox-root.theme-dark {
+  /* This will piggyback on the dark variables if OS is light */
+  --inbox-page: #060a12;
+  --inbox-panel: rgba(15, 23, 42, 0.72);
+  --inbox-subtle: rgba(15, 23, 42, 0.52);
+  --inbox-border: rgba(148, 163, 184, 0.16);
+
+  --inbox-text: #e6edf7;
+  --inbox-muted: rgba(226, 232, 240, 0.74);
+  --inbox-muted-2: rgba(226, 232, 240, 0.58);
+
+  --inbox-accent: #16a394;
+  --inbox-accent-strong: #0e766b;
+  --inbox-accent-soft: rgba(22, 163, 148, 0.16);
+}
+
+/* =========================================================
+   APPEND BELOW — Theme toggle buttons (RightPanel Settings)
+   ========================================================= */
+
+.inbox-root .rp-theme-row {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.inbox-root .rp-theme-btn {
+  flex: 1;
+  height: 36px;
+  border-radius: 999px;
+  border: 1px solid var(--inbox-border);
+  background: #ffffff;
+  color: var(--inbox-text);
+  font-weight: 950;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.inbox-root .rp-theme-btn:hover {
+  border-color: rgba(18, 140, 126, 0.35);
+  box-shadow: 0 16px 34px rgba(15, 23, 42, 0.06);
+  transform: translateY(-1px);
+}
+
+.inbox-root .rp-theme-btn--active {
+  background: var(--inbox-accent-soft);
+  border-color: rgba(18, 140, 126, 0.55);
+  color: var(--inbox-accent-strong);
+}
+
+/* Dark override: buttons adapt */
+html[data-theme="dark"] .inbox-root .rp-theme-btn,
+.inbox-root.theme-dark .rp-theme-btn {
+  background: rgba(2, 6, 23, 0.45);
+  border-color: rgba(148, 163, 184, 0.14);
+  color: var(--inbox-text);
+}
+
+html[data-theme="dark"] .inbox-root .rp-theme-btn--active,
+.inbox-root.theme-dark .rp-theme-btn--active {
+  background: rgba(22, 163, 148, 0.18);
+  border-color: rgba(22, 163, 148, 0.38);
+}
+
+/* =========================================================
+   APPEND BELOW — Dark Mode Readability Fix (HIGH CONTRAST)
+   - Make surfaces more opaque
+   - Force readable text colors
+   - Fix pills/inputs/menu options in dark mode
+   ========================================================= */
+
+html[data-theme="dark"] .inbox-root,
+.inbox-root.theme-dark {
+  color-scheme: dark;
+
+  /* More opaque surfaces = better readability */
+  --inbox-panel: rgba(10, 15, 30, 0.92);
+  --inbox-subtle: rgba(10, 15, 30, 0.78);
+  --inbox-border: rgba(226, 232, 240, 0.14);
+
+  /* Stronger text */
+  --inbox-text: rgba(241, 245, 249, 0.96);
+  --inbox-muted: rgba(226, 232, 240, 0.78);
+  --inbox-muted-2: rgba(226, 232, 240, 0.62);
+}
+
+/* Force key headings/labels to be readable */
+html[data-theme="dark"] .inbox-root .panel-card-title,
+html[data-theme="dark"] .inbox-root .thread-title,
+html[data-theme="dark"] .inbox-root .conversation-title,
+.inbox-root.theme-dark .panel-card-title,
+.inbox-root.theme-dark .thread-title,
+.inbox-root.theme-dark .conversation-title {
+  color: var(--inbox-text) !important;
+}
+
+/* Make muted text still readable */
+html[data-theme="dark"] .inbox-root .thread-subtitle,
+html[data-theme="dark"] .inbox-root .conversation-subtitle,
+html[data-theme="dark"] .inbox-root .panel-label,
+html[data-theme="dark"] .inbox-root .rp-muted,
+.inbox-root.theme-dark .thread-subtitle,
+.inbox-root.theme-dark .conversation-subtitle,
+.inbox-root.theme-dark .panel-label,
+.inbox-root.theme-dark .rp-muted {
+  color: var(--inbox-muted) !important;
+}
+
+/* Values should pop */
+html[data-theme="dark"] .inbox-root .panel-value,
+.inbox-root.theme-dark .panel-value {
+  color: var(--inbox-text) !important;
+}
+
+/* Tabs + top strips should not wash out */
+html[data-theme="dark"] .inbox-root .thread-header,
+html[data-theme="dark"] .inbox-root .thread-footer,
+html[data-theme="dark"] .inbox-root .conversation-list-header,
+html[data-theme="dark"] .inbox-root .conversation-views,
+html[data-theme="dark"] .inbox-root .conversation-search,
+html[data-theme="dark"] .inbox-root .panel-header--tabs,
+.inbox-root.theme-dark .thread-header,
+.inbox-root.theme-dark .thread-footer,
+.inbox-root.theme-dark .conversation-list-header,
+.inbox-root.theme-dark .conversation-views,
+.inbox-root.theme-dark .conversation-search,
+.inbox-root.theme-dark .panel-header--tabs {
+  background: rgba(10, 15, 30, 0.92) !important;
+  border-color: var(--inbox-border) !important;
+}
+
+/* Conversation filter pills: readable */
+html[data-theme="dark"] .inbox-root .conversation-view-button,
+.inbox-root.theme-dark .conversation-view-button {
+  background: rgba(2, 6, 23, 0.70) !important;
+  border-color: rgba(226, 232, 240, 0.14) !important;
+  color: var(--inbox-text) !important;
+}
+
+html[data-theme="dark"] .inbox-root .conversation-view-button--active,
+.inbox-root.theme-dark .conversation-view-button--active {
+  background: rgba(22, 163, 148, 0.22) !important;
+  border-color: rgba(22, 163, 148, 0.42) !important;
+  color: rgba(226, 232, 240, 0.95) !important;
+}
+
+html[data-theme="dark"] .inbox-root .conversation-view-count,
+.inbox-root.theme-dark .conversation-view-count {
+  background: rgba(2, 6, 23, 0.72) !important;
+  border-color: rgba(226, 232, 240, 0.14) !important;
+  color: var(--inbox-text) !important;
+}
+
+/* Inputs: stronger background + readable placeholders */
+html[data-theme="dark"] .inbox-root .conversation-search-input,
+html[data-theme="dark"] .inbox-root .thread-input,
+html[data-theme="dark"] .inbox-root .rp-input,
+html[data-theme="dark"] .inbox-root .rp-select,
+.inbox-root.theme-dark .conversation-search-input,
+.inbox-root.theme-dark .thread-input,
+.inbox-root.theme-dark .rp-input,
+.inbox-root.theme-dark .rp-select {
+  background: rgba(2, 6, 23, 0.78) !important;
+  border-color: rgba(226, 232, 240, 0.14) !important;
+  color: var(--inbox-text) !important;
+}
+
+html[data-theme="dark"] .inbox-root .conversation-search-input::placeholder,
+html[data-theme="dark"] .inbox-root .thread-input::placeholder,
+html[data-theme="dark"] .inbox-root .rp-input::placeholder,
+.inbox-root.theme-dark .conversation-search-input::placeholder,
+.inbox-root.theme-dark .thread-input::placeholder,
+.inbox-root.theme-dark .rp-input::placeholder {
+  color: rgba(226, 232, 240, 0.55) !important;
+}
+
+/* Thread bubbles: increase opacity for readability */
+html[data-theme="dark"] .inbox-root .thread-message--inbound .thread-bubble,
+.inbox-root.theme-dark .thread-message--inbound .thread-bubble {
+  background: rgba(2, 6, 23, 0.78) !important;
+  border-color: rgba(226, 232, 240, 0.14) !important;
+  color: var(--inbox-text) !important;
+}
+
+html[data-theme="dark"] .inbox-root .thread-message--outbound .thread-bubble,
+.inbox-root.theme-dark .thread-message--outbound .thread-bubble {
+  background: rgba(6, 78, 59, 0.72) !important;
+  border-color: rgba(22, 163, 148, 0.26) !important;
+  color: rgba(241, 245, 249, 0.96) !important;
+}
+
+/* Menu options in dark mode should NOT be white */
+html[data-theme="dark"] .inbox-root .thread-menu-option,
+.inbox-root.theme-dark .thread-menu-option {
+  background: rgba(2, 6, 23, 0.70) !important;
+  border-color: rgba(226, 232, 240, 0.12) !important;
+  color: var(--inbox-text) !important;
+}
+
+/* Right panel cards: higher contrast */
+html[data-theme="dark"] .inbox-root .panel-card,
+.inbox-root.theme-dark .panel-card {
+  background: rgba(10, 15, 30, 0.92) !important;
+  border-color: rgba(226, 232, 240, 0.12) !important;
+}
+
+/* Buttons: ensure text is readable */
+html[data-theme="dark"] .inbox-root .btn.btn-secondary,
+.inbox-root.theme-dark .btn.btn-secondary {
+  background: rgba(2, 6, 23, 0.72) !important;
+  border-color: rgba(226, 232, 240, 0.14) !important;
+  color: var(--inbox-text) !important;
+}
+
+/* Success button text should be WHITE for clarity */
+html[data-theme="dark"] .inbox-root .btn.btn-success,
+html[data-theme="dark"] .inbox-root .btn.btn-primary,
+.inbox-root.theme-dark .btn.btn-success,
+.inbox-root.theme-dark .btn.btn-primary {
+  color: #ffffff !important;
+}
+
+/* =========================================================
+   APPEND BELOW — Dark mode accent glows (hover/active)
+   ========================================================= */
+
+html[data-theme="dark"] .inbox-root,
+.inbox-root.theme-dark {
+  --glow-accent: rgba(22, 163, 148, 0.38);
+  --glow-accent-2: rgba(22, 163, 148, 0.22);
+  --glow-blue: rgba(59, 130, 246, 0.28);
+}
+
+/* Conversation filters: glow on hover */
+html[data-theme="dark"] .inbox-root .conversation-view-button:hover,
+.inbox-root.theme-dark .conversation-view-button:hover {
+  box-shadow:
+    0 0 0 1px rgba(22, 163, 148, 0.18),
+    0 18px 44px var(--glow-accent-2);
+  border-color: rgba(22, 163, 148, 0.38) !important;
+}
+
+/* Selected chat row: subtle green edge glow */
+html[data-theme="dark"] .inbox-root .conversation-item--selected,
+.inbox-root.theme-dark .conversation-item--selected {
+  box-shadow:
+    0 0 0 1px rgba(22, 163, 148, 0.16),
+    0 22px 60px rgba(22, 163, 148, 0.16) !important;
+}
+
+/* Tabs: glow on hover + active */
+html[data-theme="dark"] .inbox-root .panel-header-tab:hover,
+.inbox-root.theme-dark .panel-header-tab:hover {
+  box-shadow:
+    0 0 0 1px rgba(22, 163, 148, 0.16),
+    0 18px 44px var(--glow-accent-2);
+  border-color: rgba(22, 163, 148, 0.34) !important;
+}
+
+html[data-theme="dark"] .inbox-root .panel-header-tab--active,
+.inbox-root.theme-dark .panel-header-tab--active {
+  box-shadow:
+    0 0 0 1px rgba(22, 163, 148, 0.22),
+    0 24px 70px rgba(22, 163, 148, 0.18);
+}
+
+/* Thread bubbles: premium lift + soft glow */
+html[data-theme="dark"] .inbox-root .thread-bubble:hover,
+.inbox-root.theme-dark .thread-bubble:hover {
+  box-shadow:
+    0 0 0 1px rgba(226, 232, 240, 0.10),
+    0 24px 70px rgba(0, 0, 0, 0.40);
+  transform: translateY(-1px);
+}
+
+html[data-theme="dark"] .inbox-root .thread-message--outbound .thread-bubble:hover,
+.inbox-root.theme-dark .thread-message--outbound .thread-bubble:hover {
+  box-shadow:
+    0 0 0 1px rgba(22, 163, 148, 0.18),
+    0 26px 76px rgba(22, 163, 148, 0.18);
+}
+
+/* Inputs: slight glow on focus (already present, enhance) */
+html[data-theme="dark"] .inbox-root .conversation-search-input:focus,
+html[data-theme="dark"] .inbox-root .thread-input:focus,
+html[data-theme="dark"] .inbox-root .rp-input:focus,
+html[data-theme="dark"] .inbox-root .rp-select:focus,
+.inbox-root.theme-dark .conversation-search-input:focus,
+.inbox-root.theme-dark .thread-input:focus,
+.inbox-root.theme-dark .rp-input:focus,
+.inbox-root.theme-dark .rp-select:focus {
+  box-shadow:
+    0 0 0 3px rgba(22, 163, 148, 0.20),
+    0 20px 60px rgba(22, 163, 148, 0.10) !important;
+}
+
+/* Right panel cards: faint edge glow on hover */
+html[data-theme="dark"] .inbox-root .panel-card:hover,
+.inbox-root.theme-dark .panel-card:hover {
+  box-shadow:
+    0 0 0 1px rgba(226, 232, 240, 0.10),
+    0 26px 80px rgba(0, 0, 0, 0.42) !important;
+}
+
+/* Theme buttons: glow */
+html[data-theme="dark"] .inbox-root .rp-theme-btn:hover,
+.inbox-root.theme-dark .rp-theme-btn:hover {
+  box-shadow:
+    0 0 0 1px rgba(22, 163, 148, 0.16),
+    0 20px 60px rgba(22, 163, 148, 0.12);
+}
+
+/* =========================================================
+   APPEND BELOW — Bot/Agent toggle icon styling
+   ========================================================= */
+
+.inbox-root .thread-agent-toggle-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 950;
+}
+
+.inbox-root .thread-agent-toggle-icon {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.06);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  font-size: 14px;
+}
+
+.inbox-root .thread-agent-toggle-text {
+  font-size: 12.5px;
+  letter-spacing: -0.01em;
+}
+
+/* Dark mode: make icon chip readable */
+html[data-theme="dark"] .inbox-root .thread-agent-toggle-icon,
+.inbox-root.theme-dark .thread-agent-toggle-icon {
+  background: rgba(2, 6, 23, 0.70);
+  border-color: rgba(226, 232, 240, 0.14);
+  color: rgba(241, 245, 249, 0.96);
+}
+
+/* Dark mode: glow on hover for the toggle */
+html[data-theme="dark"] .inbox-root .thread-agent-toggle:hover,
+.inbox-root.theme-dark .thread-agent-toggle:hover {
+  box-shadow:
+    0 0 0 1px rgba(22, 163, 148, 0.18),
+    0 18px 50px rgba(22, 163, 148, 0.16);
+  transform: translateY(-1px);
+}
+
+/* =========================================================
+   APPEND BELOW — Bot/Agent toggle: animated slider + remove dot
+   ========================================================= */
+
+/* Safety: if any old pill exists, hide it */
+.inbox-root .thread-agent-pill,
+.inbox-root .thread-agent-dot {
+  display: none !important;
+}
+
+/* Premium toggle container */
+.inbox-root .thread-agent-toggle {
+  position: relative;
+  overflow: hidden;
+  border-radius: 999px !important;
+
+  border: 1px solid var(--inbox-border) !important;
+  background: rgba(255, 255, 255, 0.85) !important;
+
+  padding: 8px 12px !important;
+  min-height: 38px;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  /* Keep label above the slider */
+  z-index: 0;
+}
+
+/* Sliding “segment” indicator */
+.inbox-root .thread-agent-toggle::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+
+  height: 74%;
+  width: 46%;
+
+  left: 6%;
+  border-radius: 999px;
+
+  background: rgba(15, 23, 42, 0.06);
+  border: 1px solid rgba(15, 23, 42, 0.06);
+
+  z-index: 0;
+
+  transition: left 220ms ease, background-color 220ms ease, border-color 220ms ease,
+    box-shadow 220ms ease;
+}
+
+/* When ON: slider moves to the right + becomes accent */
+.inbox-root .thread-agent-toggle--on::after {
+  left: calc(100% - 46% - 6%);
+  background: var(--inbox-accent-soft);
+  border-color: rgba(18, 140, 126, 0.28);
+  box-shadow: 0 18px 44px rgba(18, 140, 126, 0.16);
+}
+
+/* Content sits above slider */
+.inbox-root .thread-agent-toggle-left {
+  position: relative;
+  z-index: 1;
+
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+
+  font-weight: 950;
+  color: var(--inbox-text);
+}
+
+/* Icon chip: subtle movement for “wow” */
+.inbox-root .thread-agent-toggle-icon {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.05);
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  font-size: 14px;
+
+  transition: transform 220ms ease, background-color 220ms ease, border-color 220ms ease;
+}
+
+/* On state: icon chip gets a tiny slide */
+.inbox-root .thread-agent-toggle--on .thread-agent-toggle-icon {
+  transform: translateX(2px);
+  background: rgba(18, 140, 126, 0.12);
+  border-color: rgba(18, 140, 126, 0.22);
+}
+
+.inbox-root .thread-agent-toggle-text {
+  font-size: 12.5px;
+  letter-spacing: -0.01em;
+}
+
+/* Hover “wow” lift */
+.inbox-root .thread-agent-toggle:hover {
+  box-shadow: 0 18px 46px rgba(15, 23, 42, 0.10);
+  transform: translateY(-1px);
+}
+
+/* =======================
+   Dark theme improvements
+   ======================= */
+
+html[data-theme="dark"] .inbox-root .thread-agent-toggle,
+.inbox-root.theme-dark .thread-agent-toggle {
+  background: rgba(10, 15, 30, 0.92) !important;
+  border-color: rgba(226, 232, 240, 0.14) !important;
+}
+
+html[data-theme="dark"] .inbox-root .thread-agent-toggle::after,
+.inbox-root.theme-dark .thread-agent-toggle::after {
+  background: rgba(2, 6, 23, 0.78);
+  border-color: rgba(226, 232, 240, 0.12);
+}
+
+html[data-theme="dark"] .inbox-root .thread-agent-toggle--on::after,
+.inbox-root.theme-dark .thread-agent-toggle--on::after {
+  background: rgba(22, 163, 148, 0.22);
+  border-color: rgba(22, 163, 148, 0.35);
+  box-shadow: 0 22px 60px rgba(22, 163, 148, 0.18);
+}
+
+html[data-theme="dark"] .inbox-root .thread-agent-toggle-icon,
+.inbox-root.theme-dark .thread-agent-toggle-icon {
+  background: rgba(2, 6, 23, 0.78);
+  border-color: rgba(226, 232, 240, 0.14);
+  color: rgba(241, 245, 249, 0.96);
+}
+
+html[data-theme="dark"] .inbox-root .thread-agent-toggle:hover,
+.inbox-root.theme-dark .thread-agent-toggle:hover {
+  box-shadow:
+    0 0 0 1px rgba(22, 163, 148, 0.16),
+    0 22px 60px rgba(22, 163, 148, 0.14);
+}
