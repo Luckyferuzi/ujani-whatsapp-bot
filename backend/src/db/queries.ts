@@ -160,8 +160,15 @@ export async function upsertCustomerByWa(
 
 
 export async function getOrCreateConversation(customerId: number) {
+  return getOrCreateConversationForPhone(customerId, null);
+}
+
+export async function getOrCreateConversationForPhone(
+  customerId: number,
+  phoneNumberId: string | null
+) {
   const existing = await db("conversations")
-    .where({ customer_id: customerId })
+    .where({ customer_id: customerId, phone_number_id: phoneNumberId })
     .orderBy("id", "desc")
     .first();
 
@@ -170,11 +177,94 @@ export async function getOrCreateConversation(customerId: number) {
   const [inserted] = await db("conversations")
     .insert({
       customer_id: customerId,
+      phone_number_id: phoneNumberId,
       agent_allowed: false,
     })
     .returning<{ id: number }[]>("id");
 
   return inserted.id;
+}
+
+/* ------------------------ WhatsApp phone numbers -------------------------- */
+
+export async function upsertWhatsAppPhoneNumber(args: {
+  phone_number_id: string;
+  display_phone_number?: string | null;
+  label?: string | null;
+}): Promise<void> {
+  if (!args.phone_number_id) return;
+
+  const existing = await db("whatsapp_phone_numbers")
+    .where({ phone_number_id: args.phone_number_id })
+    .first();
+
+  // If this is the first number ever, make it default.
+  const anyRows = await db("whatsapp_phone_numbers").first();
+  const shouldDefault = !anyRows;
+
+  if (!existing) {
+    await db("whatsapp_phone_numbers").insert({
+      phone_number_id: args.phone_number_id,
+      display_phone_number: args.display_phone_number ?? null,
+      label: args.label ?? null,
+      is_default: shouldDefault,
+      updated_at: db.fn.now(),
+    });
+    return;
+  }
+
+  const patch: any = { updated_at: db.fn.now() };
+  if (args.display_phone_number && args.display_phone_number !== existing.display_phone_number) {
+    patch.display_phone_number = args.display_phone_number;
+  }
+  if (args.label && args.label !== existing.label) {
+    patch.label = args.label;
+  }
+
+  // If there is no default row, promote this one.
+  const hasDefault = await db("whatsapp_phone_numbers").where({ is_default: true }).first();
+  if (!hasDefault) patch.is_default = true;
+
+  if (Object.keys(patch).length > 1) {
+    await db("whatsapp_phone_numbers")
+      .where({ phone_number_id: args.phone_number_id })
+      .update(patch);
+  }
+}
+
+export async function listWhatsAppPhoneNumbers() {
+  const rows = await db("whatsapp_phone_numbers")
+    .select(
+      "id",
+      "phone_number_id",
+      "display_phone_number",
+      "label",
+      "is_default",
+      "created_at",
+      "updated_at"
+    )
+    .orderBy([{ column: "is_default", order: "desc" }, { column: "id", order: "asc" }]);
+  return rows;
+}
+
+export async function setDefaultWhatsAppPhoneNumber(phoneNumberId: string): Promise<void> {
+  if (!phoneNumberId) return;
+  await db.transaction(async (trx) => {
+    await trx("whatsapp_phone_numbers").update({ is_default: false, updated_at: trx.fn.now() });
+    await trx("whatsapp_phone_numbers")
+      .where({ phone_number_id: phoneNumberId })
+      .update({ is_default: true, updated_at: trx.fn.now() });
+  });
+}
+
+export async function getDefaultWhatsAppPhoneNumberId(): Promise<string | null> {
+  const row = await db("whatsapp_phone_numbers")
+    .where({ is_default: true })
+    .select("phone_number_id")
+    .first();
+  if (row?.phone_number_id) return row.phone_number_id as string;
+  const any = await db("whatsapp_phone_numbers").select("phone_number_id").first();
+  return (any?.phone_number_id as string | undefined) ?? null;
 }
 
 /* ------------------------------ Message logging ---------------------------- */

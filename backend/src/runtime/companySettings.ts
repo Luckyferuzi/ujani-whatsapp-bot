@@ -30,10 +30,16 @@ export type CompanySettings = {
 
   whatsapp_token: string | null;
   phone_number_id: string | null;
+  waba_id: string | null;
   verify_token: string | null;
   app_secret: string | null;
   app_id: string | null;
   graph_api_version: string | null;
+
+  // Embedded Signup / Coexistence
+  whatsapp_embedded_config_id: string | null;
+  whatsapp_solution_id: string | null;
+  coexistence_enabled: boolean;
 
   is_setup_complete: boolean;
 };
@@ -53,10 +59,15 @@ export const DEFAULT_COMPANY_SETTINGS: CompanySettings = {
 
   whatsapp_token: null,
   phone_number_id: null,
+  waba_id: null,
   verify_token: null,
   app_secret: null,
   app_id: null,
   graph_api_version: "v19.0",
+
+  whatsapp_embedded_config_id: null,
+  whatsapp_solution_id: null,
+  coexistence_enabled: false,
 
   is_setup_complete: false,
 };
@@ -93,6 +104,21 @@ export function getWhatsAppTokenEffective(): string | null {
 
 export function getPhoneNumberIdEffective(): string | null {
   return cached.phone_number_id || (process.env.PHONE_NUMBER_ID ?? null);
+}
+
+export function getWabaIdEffective(): string | null {
+  return cached.waba_id || (process.env.WABA_ID ?? null);
+}
+
+export function getEmbeddedConfigIdEffective(): string | null {
+  return (
+    cached.whatsapp_embedded_config_id ||
+    (process.env.WHATSAPP_EMBEDDED_CONFIG_ID ?? null)
+  );
+}
+
+export function getSolutionIdEffective(): string | null {
+  return cached.whatsapp_solution_id || (process.env.WHATSAPP_SOLUTION_ID ?? null);
 }
 
 export async function loadCompanySettingsToCache(): Promise<CompanySettings> {

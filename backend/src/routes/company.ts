@@ -19,6 +19,11 @@ import {
 } from "../runtime/companySettings.js";
 import { getBusinessProfile, sendText } from "../whatsapp.js";
 import { setJsonSetting } from "../db/settings.js";
+import {
+  listWhatsAppPhoneNumbers,
+  setDefaultWhatsAppPhoneNumber,
+  upsertWhatsAppPhoneNumber,
+} from "../db/queries.js";
 
 export const companyRoutes = Router();
 
@@ -38,10 +43,15 @@ const patchSchema = z
 
     whatsapp_token: z.string().nullable().optional(),
     phone_number_id: z.string().nullable().optional(),
+    waba_id: z.string().nullable().optional(),
     verify_token: z.string().nullable().optional(),
     app_secret: z.string().nullable().optional(),
     app_id: z.string().nullable().optional(),
     graph_api_version: z.string().nullable().optional(),
+
+    whatsapp_embedded_config_id: z.string().nullable().optional(),
+    whatsapp_solution_id: z.string().nullable().optional(),
+    coexistence_enabled: z.boolean().optional(),
 
     is_setup_complete: z.boolean().optional(),
   })
@@ -106,11 +116,44 @@ companyRoutes.put("/company/settings", async (req, res) => {
   const touchedWA =
     "whatsapp_token" in parsed.data ||
     "phone_number_id" in parsed.data ||
+    "waba_id" in parsed.data ||
     "graph_api_version" in parsed.data;
 
   if (touchedWA && next.whatsapp_token && next.phone_number_id) {
+    // Track this phone number in DB (multi-number support).
+    await upsertWhatsAppPhoneNumber({
+      phone_number_id: next.phone_number_id,
+    });
+
     await refreshBusinessInfoBestEffort();
   }
+
+  return res.json({ ok: true, settings: next });
+});
+
+// List connected WhatsApp phone numbers (single-tenant, multi-number).
+companyRoutes.get("/company/whatsapp-numbers", async (_req, res) => {
+  const rows = await listWhatsAppPhoneNumbers();
+  return res.json({ ok: true, numbers: rows });
+});
+
+// Set default sending phone number.
+companyRoutes.post("/company/whatsapp-numbers/default", async (req, res) => {
+  const schema = z
+    .object({ phone_number_id: z.string().min(3) })
+    .strict();
+
+  const parsed = schema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return res.status(400).json({ error: "invalid_payload" });
+  }
+
+  await setDefaultWhatsAppPhoneNumber(parsed.data.phone_number_id);
+
+  // Also update company_settings.phone_number_id to keep the legacy/default path aligned.
+  const current = await loadCompanySettingsToCache().catch(() => getCompanySettingsCached());
+  const next = { ...current, phone_number_id: parsed.data.phone_number_id };
+  await saveCompanySettings(next);
 
   return res.json({ ok: true, settings: next });
 });

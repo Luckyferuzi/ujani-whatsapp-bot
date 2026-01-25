@@ -9,6 +9,8 @@ import {
   sendButtonsMessage,
   markAsRead,
   verifySignature,
+  rememberCustomerPhoneNumberId,
+  getRememberedPhoneNumberId,
 } from '../whatsapp.js';
 import { feeForDarDistance } from '../delivery.js';
 import {
@@ -22,6 +24,8 @@ import { getSession, saveSession, resetSession } from '../session.js';
 import {
   upsertCustomerByWa,
   getOrCreateConversation,
+  getOrCreateConversationForPhone,
+  upsertWhatsAppPhoneNumber,
   insertInboundMessage,
   insertOutboundMessage,
   updateConversationLastUserMessageAt,
@@ -30,6 +34,7 @@ import {
   findLatestOrderByCustomerName,
   updateOrderPaymentMode,
   getOrdersForCustomer,
+  upsertWhatsAppPhoneNumber,
 } from "../db/queries.js";
 import { getJsonSetting } from "../db/settings.js";
 
@@ -41,14 +46,17 @@ export const webhook = Router();
  * Send a text message from the bot and ALSO log it as an outbound message
  * so that it appears in the Inbox thread.
  */
-async function sendBotText(user: string, body: string) {
-  // 1) Send to WhatsApp
-  await sendText(user, body);
+async function sendBotText(user: string, body: string, phoneNumberId?: string | null) {
+  // 1) Send to WhatsApp (use the correct business number if known)
+  await sendText(user, body, { phoneNumberId: phoneNumberId ?? null });
 
   // 2) Persist and emit for the inbox
   try {
     const customerId = await upsertCustomerByWa(user, undefined, user);
-    const conversationId = await getOrCreateConversation(customerId);
+    const conversationId = await getOrCreateConversationForPhone(
+      customerId,
+      phoneNumberId ?? null
+    );
 
     const inserted = await insertOutboundMessage(conversationId, "text", body);
 
@@ -165,7 +173,10 @@ async function sendListMessageSafe(p: SafeListPayload) {
   // 3) Log it as an outbound message for the admin inbox
   try {
     const customerId = await upsertCustomerByWa(p.to, undefined, p.to);
-    const conversationId = await getOrCreateConversation(customerId);
+    const conversationId = await getOrCreateConversationForPhone(
+      customerId,
+      getRememberedPhoneNumberId(p.to) ?? null
+    );
     const inserted = await insertOutboundMessage(
       conversationId,
       "text",
@@ -216,7 +227,10 @@ async function sendButtonsMessageSafe(
   // 3) Log it as an outbound message for the admin inbox
   try {
     const customerId = await upsertCustomerByWa(to, undefined, to);
-    const conversationId = await getOrCreateConversation(customerId);
+    const conversationId = await getOrCreateConversationForPhone(
+      customerId,
+      getRememberedPhoneNumberId(to) ?? null
+    );
     const inserted = await insertOutboundMessage(
       conversationId,
       "text",
@@ -485,6 +499,21 @@ webhook.post("/webhook", async (req: Request, res: Response) => {
         const field = ch?.field as string | undefined;
         const contacts = ch?.value?.contacts ?? [];
 
+        // For multi-number setups, WhatsApp includes which business number
+        // received the message in value.metadata.phone_number_id.
+        const businessPhoneNumberId: string | null =
+          (ch?.value?.metadata?.phone_number_id as string | undefined) ?? null;
+        const displayPhoneNumber: string | null =
+          (ch?.value?.metadata?.display_phone_number as string | undefined) ?? null;
+
+        if (businessPhoneNumberId) {
+          // Track numbers in DB so we can switch defaults and debug connections.
+          await upsertWhatsAppPhoneNumber({
+            phone_number_id: businessPhoneNumberId,
+            display_phone_number: displayPhoneNumber,
+          }).catch(() => {});
+        }
+
         // WhatsApp Business App Coexistence: capture SMB message echoes.
         // These are messages sent by the business in the WhatsApp Business app after onboarding.
         if (field === "smb_message_echoes") {
@@ -493,13 +522,19 @@ webhook.post("/webhook", async (req: Request, res: Response) => {
             const to = emsg?.to as string | undefined;
             if (!to) continue;
 
+            // Ensure replies continue from the same business number.
+            rememberCustomerPhoneNumberId(to, businessPhoneNumberId);
+
             const matchingContact = contacts.find((c: any) => c.wa_id === to);
             const profileName: string | undefined =
               (matchingContact?.profile?.name as string | undefined) ??
               (contacts[0]?.profile?.name as string | undefined);
 
             const customerId = await upsertCustomerByWa(to, profileName);
-            const convoId = await getOrCreateConversation(customerId);
+            const convoId = await getOrCreateConversationForPhone(
+              customerId,
+              businessPhoneNumberId
+            );
 
             const type = (emsg?.type as string | undefined) ?? "unknown";
             let body: string | null = null;
@@ -551,6 +586,12 @@ webhook.post("/webhook", async (req: Request, res: Response) => {
     const from = msg?.from as string;
     const mid = msg?.id as string | undefined;
     if (!from) continue;
+
+    // Ensure subsequent bot replies use the same business number.
+    rememberCustomerPhoneNumberId(from, businessPhoneNumberId);
+
+    // Remember which business number this customer is currently talking to.
+    rememberCustomerPhoneNumberId(from, businessPhoneNumberId);
 
     // Try to get WhatsApp profile name for this sender
     const matchingContact = contacts.find(
@@ -624,7 +665,10 @@ try {
     profileName,
     from
   );
-  const conversationId = await getOrCreateConversation(customerId);
+  const conversationId = await getOrCreateConversationForPhone(
+    customerId,
+    businessPhoneNumberId
+  );
 // 2) Pick a body to store (text, user's choice label, location coords, or media)
 let bodyForDb: string | null = text ?? null;
 
@@ -1072,7 +1116,10 @@ if (N.startsWith("RESTOCK_YES:") || N.startsWith("RESTOCK_NO:")) {
 
   if (id === 'ACTION_TALK_TO_AGENT') {
     const customerId = await upsertCustomerByWa(user, undefined, user);
-    const conversationId = await getOrCreateConversation(customerId);
+    const conversationId = await getOrCreateConversationForPhone(
+      customerId,
+      getRememberedPhoneNumberId(user) ?? null
+    );
 
     await db('conversations')
       .where({ id: conversationId })
@@ -1100,7 +1147,10 @@ if (N.startsWith("RESTOCK_YES:") || N.startsWith("RESTOCK_NO:")) {
 
   if (id === 'ACTION_RETURN_TO_BOT') {
     const customerId = await upsertCustomerByWa(user, undefined, user);
-    const conversationId = await getOrCreateConversation(customerId);
+    const conversationId = await getOrCreateConversationForPhone(
+      customerId,
+      getRememberedPhoneNumberId(user) ?? null
+    );
 
     await db('conversations')
       .where({ id: conversationId })
@@ -1219,7 +1269,10 @@ if (N.startsWith("RESTOCK_YES:") || N.startsWith("RESTOCK_NO:")) {
   // --- NEW: customer asks to talk to an agent ---
 if (id === 'ACTION_TALK_TO_AGENT') {
   const customerId = await upsertCustomerByWa(user, undefined, user);
-  const conversationId = await getOrCreateConversation(customerId);
+  const conversationId = await getOrCreateConversationForPhone(
+    customerId,
+    getRememberedPhoneNumberId(user) ?? null
+  );
 
   await db('conversations')
     .where({ id: conversationId })
@@ -1233,7 +1286,10 @@ if (id === 'ACTION_TALK_TO_AGENT') {
   // --- NEW: customer goes back from agent to bot ---
   if (id === 'ACTION_RETURN_TO_BOT') {
     const customerId = await upsertCustomerByWa(user, undefined, user);
-    const conversationId = await getOrCreateConversation(customerId);
+    const conversationId = await getOrCreateConversationForPhone(
+      customerId,
+      getRememberedPhoneNumberId(user) ?? null
+    );
 
     // Turn agent off so the bot talks again
     await db('conversations')
@@ -1615,7 +1671,10 @@ if (id.startsWith("ORDER_CANCEL_")) {
 
     // Reuse the existing "talk to agent" logic:
     const customerId = await upsertCustomerByWa(user, undefined, user);
-    const conversationId = await getOrCreateConversation(customerId);
+    const conversationId = await getOrCreateConversationForPhone(
+      customerId,
+      getRememberedPhoneNumberId(user) ?? null
+    );
 
     await db("conversations")
       .where({ id: conversationId })
@@ -1867,7 +1926,10 @@ async function sendProductDetailsOptions(
 async function isAgentAllowed(waId: string): Promise<boolean> {
   // Reuse your existing helpers
   const customerId = await upsertCustomerByWa(waId, undefined, waId);
-  const conversationId = await getOrCreateConversation(customerId);
+  const conversationId = await getOrCreateConversationForPhone(
+    customerId,
+    getRememberedPhoneNumberId(waId) ?? null
+  );
 
   const row = await db("conversations")
     .where({ id: conversationId })

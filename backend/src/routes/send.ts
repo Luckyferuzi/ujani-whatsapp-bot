@@ -32,7 +32,7 @@ sendRoutes.post("/send", async (req, res) => {
     const convo = await db("conversations as c")
       .leftJoin("customers as u", "u.id", "c.customer_id")
       .where("c.id", id)
-      .select("c.id", "c.agent_allowed", "u.wa_id")
+      .select("c.id", "c.agent_allowed", "c.phone_number_id", "u.wa_id")
       .first();
 
     if (!convo) {
@@ -55,7 +55,7 @@ sendRoutes.post("/send", async (req, res) => {
     const trimmed = String(text).trim();
 
     // Send via WhatsApp – if this fails, throw and let the outer catch handle it
-    await sendText(convo.wa_id, trimmed);
+    await sendText(convo.wa_id, trimmed, { phoneNumberId: (convo as any).phone_number_id ?? null });
 
     // Log outgoing message
     const [msg] = await db("messages")
@@ -120,7 +120,7 @@ sendRoutes.post(
       const convo = await db("conversations")
         .where({ "conversations.id": id })
         .join("customers as cu", "cu.id", "conversations.customer_id")
-        .select("conversations.agent_allowed", "cu.wa_id")
+        .select("conversations.agent_allowed", "conversations.phone_number_id", "cu.wa_id")
         .first();
 
       if (!convo) {
@@ -170,10 +170,14 @@ sendRoutes.post(
 
 
       // 1) Upload media to WhatsApp → get mediaId
-      const mediaId = await uploadMedia(file.buffer, filename, mime);
+      const mediaId = await uploadMedia(file.buffer, filename, mime, {
+        phoneNumberId: (convo as any).phone_number_id ?? null,
+      });
 
       // 2) Send media message
-      await sendMediaById(waId, type, mediaId);
+      await sendMediaById(waId, type, mediaId, undefined, {
+        phoneNumberId: (convo as any).phone_number_id ?? null,
+      });
 
       // 3) Store outbound message in DB with MEDIA marker
       const [msg] = await db("messages")
@@ -229,7 +233,7 @@ sendRoutes.post("/send-media", async (req, res) => {
     const convo = await db("conversations as c")
       .leftJoin("customers as u", "u.id", "c.customer_id")
       .where("c.id", id)
-      .select("c.id", "c.agent_allowed", "u.wa_id")
+      .select("c.id", "c.agent_allowed", "c.phone_number_id", "u.wa_id")
       .first();
 
     if (!convo) {
@@ -262,7 +266,9 @@ sendRoutes.post("/send-media", async (req, res) => {
     }
 
     // 1) Re-send media via WhatsApp
-    await sendMediaById(waId, type, mediaId);
+    await sendMediaById(waId, type, mediaId, undefined, {
+      phoneNumberId: (convo as any).phone_number_id ?? null,
+    });
 
     // 2) Log outgoing message
     const [msg] = await db("messages")

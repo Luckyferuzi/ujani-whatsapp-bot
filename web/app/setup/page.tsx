@@ -19,13 +19,24 @@ type CompanySettings = {
 
   whatsapp_token: string | null;
   phone_number_id: string | null;
+  waba_id: string | null;
   verify_token: string | null;
   app_id: string | null;
   app_secret: string | null;
   graph_api_version: string | null;
 
+  whatsapp_embedded_config_id: string | null;
+  whatsapp_solution_id: string | null;
+  coexistence_enabled: boolean;
+
   is_setup_complete: boolean;
 };
+
+declare global {
+  interface Window {
+    FB?: any;
+  }
+}
 
 export default function SetupPage() {
   const router = useRouter();
@@ -33,10 +44,19 @@ export default function SetupPage() {
   const [saving, setSaving] = useState(false);
 
   const [settings, setSettings] = useState<CompanySettings | null>(null);
+  const [phoneNumbers, setPhoneNumbers] = useState<
+    { phone_number_id: string; display_phone_number: string | null; label: string | null; is_default: boolean }[]
+  >([]);
 
   const [testTo, setTestTo] = useState("");
   const [testText, setTestText] = useState("Hello from OmniFlow Inbox ✅");
   const [testResult, setTestResult] = useState<string | null>(null);
+
+  const [embedStatus, setEmbedStatus] = useState<string | null>(null);
+  const [embedError, setEmbedError] = useState<string | null>(null);
+
+  const [pendingCode, setPendingCode] = useState<string | null>(null);
+  const [pendingIds, setPendingIds] = useState<{ waba_id?: string; phone_number_id?: string } | null>(null);
 
   const complete = settings?.is_setup_complete ?? false;
 
@@ -82,16 +102,185 @@ export default function SetupPage() {
   async function load() {
     setLoading(true);
     try {
-      const r = await get<{ ok: true; settings: CompanySettings }>("/api/company/settings");
+      const [r, pn] = await Promise.all([
+        get<{ ok: true; settings: CompanySettings }>("/api/company/settings"),
+        get<{ items: any[] }>("/api/company/whatsapp-numbers").catch(() => ({ items: [] })),
+      ]);
+
       setSettings(r.settings);
+      setPhoneNumbers(
+        (pn.items || []).map((x: any) => ({
+          phone_number_id: String(x.phone_number_id),
+          display_phone_number: x.display_phone_number ?? null,
+          label: x.label ?? null,
+          is_default: !!x.is_default,
+        }))
+      );
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function makeDefaultNumber(phone_number_id: string) {
+    try {
+      await post<{ ok: true }>("/api/company/whatsapp-numbers/default", { phone_number_id });
+      await load();
+    } catch (e: any) {
+      setEmbedError(e?.message ?? "Failed to set default number");
     }
   }
 
   useEffect(() => {
     void load();
   }, []);
+
+  // Listen for Embedded Signup postMessage events.
+  useEffect(() => {
+    function onMessage(event: MessageEvent) {
+      try {
+        const origin = String(event.origin || "");
+        // Accept events from Meta/Facebook domains only
+        if (!origin.includes("facebook.com")) return;
+
+        const raw = event.data;
+        const payload = typeof raw === "string" ? JSON.parse(raw) : raw;
+        if (!payload || payload.type !== "WA_EMBEDDED_SIGNUP") return;
+
+        if (payload.event === "FINISH" || payload.event === "FINISH_ONLY_WABA") {
+          const waba_id = payload.data?.waba_id as string | undefined;
+          const phone_number_id = payload.data?.phone_number_id as string | undefined;
+          setPendingIds({ waba_id, phone_number_id });
+          setEmbedStatus("Embedded Signup finished. Exchanging code…");
+        }
+
+        if (payload.event === "CANCEL") {
+          setEmbedStatus("Embedded Signup cancelled.");
+        }
+
+        if (payload.event === "ERROR") {
+          setEmbedError(payload.data?.error_message ?? "Embedded Signup error");
+        }
+      } catch {
+        // Ignore parse errors
+      }
+    }
+
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, []);
+
+  // When we have both the OAuth code and the session IDs, exchange server-side.
+  useEffect(() => {
+    async function run() {
+      if (!pendingCode || !pendingIds?.waba_id || !pendingIds?.phone_number_id) return;
+      if (!settings) return;
+
+      setEmbedError(null);
+      setEmbedStatus("Exchanging auth code and subscribing webhooks…");
+
+      try {
+        await post<{ ok: true; settings: CompanySettings }>("/api/whatsapp/embedded/exchange", {
+          code: pendingCode,
+          redirect_uri: window.location.origin + "/setup",
+          waba_id: pendingIds.waba_id,
+          phone_number_id: pendingIds.phone_number_id,
+          graph_api_version: settings.graph_api_version ?? "v19.0",
+        });
+
+        setPendingCode(null);
+        setPendingIds(null);
+        setEmbedStatus("Connected via Embedded Signup ✅");
+
+        await load();
+      } catch (e: any) {
+        setEmbedError(e?.message ?? "Failed to exchange Embedded Signup code");
+        setEmbedStatus(null);
+      }
+    }
+
+    void run();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingCode, pendingIds]);
+
+  async function loadFacebookSdk(appId: string): Promise<void> {
+    if (window.FB) return;
+
+    await new Promise<void>((resolve, reject) => {
+      const existing = document.getElementById("facebook-jssdk");
+      if (existing) return resolve();
+
+      const script = document.createElement("script");
+      script.id = "facebook-jssdk";
+      script.async = true;
+      script.defer = true;
+      script.src = "https://connect.facebook.net/en_US/sdk.js";
+      script.onload = () => resolve();
+      script.onerror = () => reject(new Error("Failed to load Facebook SDK"));
+      document.head.appendChild(script);
+    });
+
+    // Meta's SDK sets window.fbAsyncInit callback
+    await new Promise<void>((resolve) => {
+      (window as any).fbAsyncInit = function () {
+        window.FB?.init({
+          appId,
+          cookie: true,
+          xfbml: false,
+          version: "v19.0",
+        });
+        resolve();
+      };
+
+      // If SDK already initialized very quickly, resolve anyway.
+      setTimeout(() => resolve(), 1500);
+    });
+  }
+
+  async function connectEmbeddedSignup() {
+    if (!settings) return;
+
+    setEmbedError(null);
+    setEmbedStatus(null);
+
+    const appId = settings.app_id ?? "";
+    const configId = settings.whatsapp_embedded_config_id ?? "";
+    if (!appId || !configId) {
+      setEmbedError("Please enter App ID and Embedded Config ID, then Save WhatsApp settings.");
+      return;
+    }
+
+    try {
+      await loadFacebookSdk(appId);
+    } catch (e: any) {
+      setEmbedError(e?.message ?? "Failed to load Facebook SDK");
+      return;
+    }
+
+    setEmbedStatus("Starting Embedded Signup…");
+
+    window.FB?.login(
+      (response: any) => {
+        const code = response?.authResponse?.code as string | undefined;
+        if (!code) {
+          setEmbedStatus(null);
+          setEmbedError("Embedded Signup did not return an auth code. Check your Meta app OAuth settings.");
+          return;
+        }
+        setPendingCode(code);
+      },
+      {
+        config_id: configId,
+        response_type: "code",
+        override_default_response_type: true,
+        extras: {
+          sessionInfoVersion: 3,
+          ...(settings.whatsapp_solution_id
+            ? { setup: { solutionID: settings.whatsapp_solution_id } }
+            : {}),
+        },
+      }
+    );
+  }
 
   async function saveSettings(patch: Partial<CompanySettings>) {
     if (!settings) return;
@@ -229,6 +418,57 @@ export default function SetupPage() {
               placeholder="v19.0"
             />
           </div>
+
+          <div>
+            <label className="block text-sm mb-1">Embedded Signup Config ID (recommended)</label>
+            <input
+              className="w-full border border-ui-border rounded px-3 py-2 text-sm"
+              value={settings.whatsapp_embedded_config_id ?? ""}
+              onChange={(e) =>
+                setSettings({ ...settings, whatsapp_embedded_config_id: e.target.value || null })
+              }
+              placeholder="e.g. 123456789012345"
+            />
+            <div className="text-xs text-ui-dim mt-1">
+              Create this in Meta Developer Dashboard → Facebook Login for Business → Configurations.
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm mb-1">Solution ID (optional)</label>
+            <input
+              className="w-full border border-ui-border rounded px-3 py-2 text-sm"
+              value={settings.whatsapp_solution_id ?? ""}
+              onChange={(e) => setSettings({ ...settings, whatsapp_solution_id: e.target.value || null })}
+              placeholder="Only if you are a solution partner"
+            />
+          </div>
+
+          <div className="flex items-start gap-2 border border-ui-border rounded px-3 py-2 text-sm">
+            <input
+              type="checkbox"
+              className="mt-1"
+              checked={!!settings.coexistence_enabled}
+              onChange={(e) => setSettings({ ...settings, coexistence_enabled: e.target.checked })}
+            />
+            <span>
+              <div className="font-medium">Coexistence mode</div>
+              <div className="text-ui-dim text-xs">
+                Enables safe handling of WhatsApp Business App echoes (bot will not loop on your own agent messages).
+              </div>
+            </span>
+          </div>
+
+          {settings.waba_id ? (
+            <div>
+              <label className="block text-sm mb-1">WABA ID</label>
+              <input
+                className="w-full border border-ui-border rounded px-3 py-2 text-sm bg-gray-50"
+                value={settings.waba_id}
+                readOnly
+              />
+            </div>
+          ) : null}
         </div>
 
         <div className="mt-3 flex gap-2">
@@ -239,15 +479,75 @@ export default function SetupPage() {
               saveSettings({
                 whatsapp_token: settings.whatsapp_token,
                 phone_number_id: settings.phone_number_id,
+                waba_id: settings.waba_id,
                 verify_token: settings.verify_token,
                 app_id: settings.app_id,
                 app_secret: settings.app_secret,
                 graph_api_version: settings.graph_api_version,
+                whatsapp_embedded_config_id: settings.whatsapp_embedded_config_id,
+                whatsapp_solution_id: settings.whatsapp_solution_id,
+                coexistence_enabled: settings.coexistence_enabled,
               })
             }
           >
             Save WhatsApp settings
           </button>
+          <button
+            disabled={saving}
+            className="px-3 py-2 rounded bg-ui-primary text-white text-sm disabled:opacity-50"
+            onClick={connectEmbeddedSignup}
+          >
+            Connect via Embedded Signup
+          </button>
+        </div>
+
+        {(embedStatus || embedError) && (
+          <div className="mt-3 text-sm">
+            {embedStatus ? <div className="text-green-700">{embedStatus}</div> : null}
+            {embedError ? <div className="text-red-600">{embedError}</div> : null}
+          </div>
+        )}
+
+        <div className="mt-4 border-t border-ui-border pt-4">
+          <div className="font-medium text-sm mb-2">Connected business numbers</div>
+          {phoneNumbers.length === 0 ? (
+            <div className="text-xs text-ui-dim">
+              No numbers detected yet. Connect via Embedded Signup (recommended) or receive your first webhook.
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {phoneNumbers.map((p) => (
+                <div
+                  key={p.phone_number_id}
+                  className="flex items-center justify-between border border-ui-border rounded px-3 py-2"
+                >
+                  <div>
+                    <div className="text-sm font-medium">
+                      {p.display_phone_number ?? p.phone_number_id}
+                    </div>
+                    <div className="text-xs text-ui-dim">phone_number_id: {p.phone_number_id}</div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    {p.is_default ? (
+                      <span className="text-xs px-2 py-1 rounded bg-gray-100">Default</span>
+                    ) : (
+                      <button
+                        className="text-xs px-2 py-1 rounded border border-ui-border"
+                        onClick={() => makeDefaultNumber(p.phone_number_id)}
+                      >
+                        Set default
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="text-xs text-ui-dim mt-2">
+            The bot will reply from the same number a customer messaged. Default is used for proactive messages (broadcasts, restock alerts, etc.).
+          </div>
         </div>
 
         <div className="mt-4 border-t border-ui-border pt-4">

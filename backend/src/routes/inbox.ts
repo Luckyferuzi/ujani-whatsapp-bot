@@ -134,14 +134,17 @@ async function notifyRestockSubscribers(
     const msg = t(lang, "restock.available", { name: product.name });
 
     try {
-      // 1) Send WhatsApp message
-      await sendText(waId, msg);
-
-      // 2) Log it to the latest conversation (for the admin inbox)
+      // 1) Find the most recent conversation so we can send from the same
+      // business number (multi-number support).
       const convo = await db("conversations")
         .where({ customer_id: r.customer_id })
         .orderBy("created_at", "desc")
         .first();
+
+      // 2) Send WhatsApp message
+      await sendText(waId, msg, {
+        phoneNumberId: (convo as any)?.phone_number_id ?? null,
+      });
 
       if (convo) {
         const inserted = await insertOutboundMessage(convo.id, "text", msg);
@@ -179,6 +182,7 @@ inboxRoutes.get("/conversations", async (_req, res) => {
       .join("customers as u", "u.id", "c.customer_id")
       .select(
         "c.id",
+        "c.phone_number_id",
         "u.name",
         "u.phone",
         "u.lang",
@@ -1276,14 +1280,17 @@ if (newStatus === "preparing") {
           // }
 
           if (msg) {
-            // 1) send to WhatsApp
-            await sendText(waId, msg);
-
-            // 2) log to messages + emit to inbox UI
             const convo = await db("conversations")
               .where({ customer_id: updatedOrder.customer_id })
               .orderBy("created_at", "desc")
               .first<{ id: number }>();
+
+            // 1) send to WhatsApp (prefer the same business number)
+            await sendText(waId, msg, {
+              phoneNumberId: (convo as any)?.phone_number_id ?? null,
+            });
+
+            // 2) log to messages + emit to inbox UI
 
             if (convo) {
               const inserted = await insertOutboundMessage(convo.id, "text", msg);

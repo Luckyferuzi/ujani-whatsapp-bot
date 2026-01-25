@@ -39,6 +39,37 @@ function getPhoneNumberId(): string {
   );
 }
 
+// When you have multiple business numbers under one WABA, WhatsApp webhooks include
+// a metadata.phone_number_id telling you which number the user messaged.
+//
+// We cache the most recent phone_number_id per customer wa_id so the bot can
+// reply from the correct number without having to thread phone_number_id through
+// every internal call site.
+const RECENT_PHONE_BY_CUSTOMER = new Map<string, string>();
+
+export function rememberCustomerPhoneNumberId(
+  customerWaId: string,
+  phoneNumberId: string | null | undefined
+) {
+  if (!customerWaId) return;
+  const pid = (phoneNumberId ?? "").toString().trim();
+  if (!pid) return;
+  RECENT_PHONE_BY_CUSTOMER.set(customerWaId, pid);
+}
+
+export function getRememberedPhoneNumberId(customerWaId: string): string | null {
+  return RECENT_PHONE_BY_CUSTOMER.get(customerWaId) ?? null;
+}
+
+function resolvePhoneNumberId(explicit?: string | null, customerWaId?: string | null): string {
+  if (explicit && String(explicit).trim()) return String(explicit).trim();
+  if (customerWaId) {
+    const remembered = getRememberedPhoneNumberId(customerWaId);
+    if (remembered) return remembered;
+  }
+  return getPhoneNumberId();
+}
+
 const GRAPH_BASE = 'https://graph.facebook.com';
 function getGraphVer(): string {
   return getGraphApiVersionEffective();
@@ -105,8 +136,12 @@ async function apiFetch(path: string, body: unknown) {
 /*                             WhatsApp senders                                */
 /* -------------------------------------------------------------------------- */
 
-export async function sendText(to: string, body: string) {
-  const phoneId = getPhoneNumberId();
+export async function sendText(
+  to: string,
+  body: string,
+  opts?: { phoneNumberId?: string | null }
+) {
+  const phoneId = resolvePhoneNumberId(opts?.phoneNumberId ?? null, to);
   if (!phoneId) {
     console.warn('[whatsapp] PHONE_NUMBER_ID missing; cannot sendText');
     return;
@@ -131,8 +166,9 @@ export async function sendListMessage(args: {
   footer?: string;
   buttonText: string;
   sections: ListSection[];
+  phoneNumberId?: string | null;
 }) {
-  const phoneId = getPhoneNumberId();
+  const phoneId = resolvePhoneNumberId(args.phoneNumberId ?? null, args.to);
   if (!phoneId) {
     console.warn('[whatsapp] PHONE_NUMBER_ID missing; cannot sendListMessage');
     return;
@@ -175,9 +211,10 @@ type Button = { id: string; title: string };
 export async function sendButtonsMessage(
   to: string,
   body: string,
-  buttons: Button[]
+  buttons: Button[],
+  opts?: { phoneNumberId?: string | null }
 ) {
-  const phoneId = getPhoneNumberId();
+  const phoneId = resolvePhoneNumberId(opts?.phoneNumberId ?? null, to);
   if (!phoneId) {
     console.warn('[whatsapp] PHONE_NUMBER_ID missing; cannot sendButtonsMessage');
     return;
@@ -200,9 +237,12 @@ export async function sendButtonsMessage(
   await apiFetch(`${phoneId}/messages`, payload);
 }
 
-export async function markAsRead(messageId?: string) {
+export async function markAsRead(
+  messageId?: string,
+  opts?: { phoneNumberId?: string | null }
+) {
   if (!messageId) return;
-  const phoneId = getPhoneNumberId();
+  const phoneId = resolvePhoneNumberId(opts?.phoneNumberId ?? null);
   if (!phoneId) {
     console.warn('[whatsapp] PHONE_NUMBER_ID missing; cannot markAsRead');
     return;
@@ -383,9 +423,10 @@ export async function downloadMedia(
 export async function uploadMedia(
   buffer: Buffer,
   filename: string,
-  contentType: string
+  contentType: string,
+  opts?: { phoneNumberId?: string | null }
 ): Promise<string> {
-  const phoneId = getPhoneNumberId();
+  const phoneId = resolvePhoneNumberId(opts?.phoneNumberId ?? null, to);
   if (!phoneId) {
     throw new Error("PHONE_NUMBER_ID missing; cannot upload media");
   }
@@ -425,9 +466,10 @@ export async function sendMediaById(
   to: string,
   kind: "image" | "video" | "audio" | "document",
   mediaId: string,
-  caption?: string
+  caption?: string,
+  opts?: { phoneNumberId?: string | null }
 ) {
-  const phoneId = getPhoneNumberId();
+  const phoneId = resolvePhoneNumberId(opts?.phoneNumberId ?? null);
   if (!phoneId) {
     console.warn("[whatsapp] PHONE_NUMBER_ID missing; cannot sendMediaById");
     return;

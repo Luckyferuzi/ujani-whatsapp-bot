@@ -15,6 +15,7 @@ import path from "path";
 import { filesRoutes, publicMediaRoutes } from "./routes/files.js";
 import { whatsappProfilePhotoRoutes } from "./routes/whatsappProfilePhoto.js";
 import { companyRoutes } from "./routes/company.js";
+import { embeddedSignupRoutes } from "./routes/embeddedSignup.js";
 import { loadCompanySettingsToCache } from "./runtime/companySettings.js";
 
 const app = express();
@@ -72,6 +73,7 @@ app.use("/settings", whatsappProfilePhotoRoutes);
 app.use("/public", publicMediaRoutes);
 app.use("/settings", settingsRoutes);
 app.use("/api", requireInboxAuth, companyRoutes);
+app.use("/api", requireInboxAuth, embeddedSignupRoutes);
 app.use("/api",requireInboxAuth, inboxRoutes);
 app.use("/api",requireInboxAuth, sendRoutes);
 
