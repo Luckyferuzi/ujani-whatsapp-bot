@@ -2,6 +2,12 @@ import { Router } from "express";
 import multer from "multer";
 import { requireSession, requireAdmin } from "../middleware/sessionAuth.js";
 import crypto from "crypto";
+import {
+  getAppIdEffective,
+  getGraphApiVersionEffective,
+  getPhoneNumberIdEffective,
+  getWhatsAppTokenEffective,
+} from "../runtime/companySettings.js";
 
 export const whatsappProfilePhotoRoutes = Router();
 
@@ -97,10 +103,10 @@ whatsappProfilePhotoRoutes.post(
   requireAdmin,
   upload.single("file"),
   async (req: any, res) => {
-    const token = process.env.WHATSAPP_TOKEN;
-    const phoneNumberId = process.env.PHONE_NUMBER_ID;
-    const appId = process.env.APP_ID;
-    const version = process.env.GRAPH_API_VERSION || "v19.0";
+    const token = getWhatsAppTokenEffective() || process.env.WHATSAPP_TOKEN;
+    const phoneNumberId = getPhoneNumberIdEffective() || process.env.PHONE_NUMBER_ID;
+    const appId = getAppIdEffective() || process.env.APP_ID;
+    const version = getGraphApiVersionEffective();
 
     if (!token) return res.status(500).json({ error: "WHATSAPP_TOKEN_missing" });
     if (!phoneNumberId) return res.status(500).json({ error: "PHONE_NUMBER_ID_missing" });

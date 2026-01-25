@@ -1,6 +1,7 @@
 // src/routes/webhook.ts
 import { Router, Request, Response } from 'express';
 import { env } from '../config.js';
+import { getVerifyTokenEffective } from '../runtime/companySettings.js';
 import { t, Lang } from '../i18n.js';
 import {
   sendText,
@@ -452,7 +453,8 @@ webhook.get('/webhook', (req: Request, res: Response) => {
   const mode = req.query['hub.mode'];
   const token = req.query['hub.verify_token'];
   const challenge = req.query['hub.challenge'];
-  if (mode === 'subscribe' && token === env.VERIFY_TOKEN) return res.status(200).send(challenge);
+  const expected = getVerifyTokenEffective() ?? env.VERIFY_TOKEN;
+  if (mode === 'subscribe' && token === expected) return res.status(200).send(challenge);
   return res.sendStatus(403);
 });
 
@@ -468,14 +470,84 @@ webhook.post("/webhook", async (req: Request, res: Response) => {
       return res.sendStatus(401);
     }
 
+    // Coexistence can deliver non-standard payloads (e.g. history/state sync)
+    // depending on the partner/product. A simple best-effort handling avoids
+    // breaking the primary message flow.
+    if (req.body?.event && req.body?.data) {
+      console.log("[webhook] coexistence event", req.body.event);
+      return res.sendStatus(200);
+    }
+
     const entries = req.body?.entry ?? [];
     for (const entry of entries) {
-const changes = entry?.changes ?? [];
-for (const ch of changes) {
-  const messages = ch?.value?.messages ?? [];
-  const contacts = ch?.value?.contacts ?? [];
+      const changes = entry?.changes ?? [];
+      for (const ch of changes) {
+        const field = ch?.field as string | undefined;
+        const contacts = ch?.value?.contacts ?? [];
 
-  for (const msg of messages) {
+        // WhatsApp Business App Coexistence: capture SMB message echoes.
+        // These are messages sent by the business in the WhatsApp Business app after onboarding.
+        if (field === "smb_message_echoes") {
+          const echoes = ch?.value?.message_echoes ?? [];
+          for (const emsg of echoes) {
+            const to = emsg?.to as string | undefined;
+            if (!to) continue;
+
+            const matchingContact = contacts.find((c: any) => c.wa_id === to);
+            const profileName: string | undefined =
+              (matchingContact?.profile?.name as string | undefined) ??
+              (contacts[0]?.profile?.name as string | undefined);
+
+            const customerId = await upsertCustomerByWa(to, profileName);
+            const convoId = await getOrCreateConversation(customerId);
+
+            const type = (emsg?.type as string | undefined) ?? "unknown";
+            let body: string | null = null;
+            if (type === "text") body = emsg?.text?.body ?? null;
+            else if (type === "button") body = emsg?.button?.text ?? null;
+            else if (type === "interactive") body = JSON.stringify(emsg?.interactive ?? {});
+            else if (type === "image" || type === "video" || type === "audio" || type === "document") {
+              const mediaId = emsg?.[type]?.id ?? null;
+              body = mediaId ? `MEDIA:${type}:${mediaId}` : null;
+            } else {
+              body = JSON.stringify(emsg ?? {});
+            }
+
+            const [msgRow] = await db("messages")
+              .insert({
+                conversation_id: convoId,
+                wa_message_id: emsg?.id ?? null,
+                direction: "out",
+                type,
+                body,
+                status: "delivered",
+              })
+              .returning([
+                "id",
+                "conversation_id",
+                "wa_message_id",
+                "direction",
+                "type",
+                "body",
+                "status",
+                "created_at",
+              ]);
+
+            emit("message.created", { conversation_id: convoId, message: msgRow });
+          }
+
+          continue; // do not run the bot on echoes
+        }
+
+        // History / contact sync events can be quite large; ignore for now.
+        if (field === "history" || field === "smb_app_state_sync") {
+          console.log("[webhook] coexistence field received", field);
+          continue;
+        }
+
+        const messages = ch?.value?.messages ?? [];
+
+        for (const msg of messages) {
     const from = msg?.from as string;
     const mid = msg?.id as string | undefined;
     if (!from) continue;

@@ -14,8 +14,16 @@ import { settingsRoutes } from "./routes/settings.js";
 import path from "path";
 import { filesRoutes, publicMediaRoutes } from "./routes/files.js";
 import { whatsappProfilePhotoRoutes } from "./routes/whatsappProfilePhoto.js";
+import { companyRoutes } from "./routes/company.js";
+import { loadCompanySettingsToCache } from "./runtime/companySettings.js";
 
 const app = express();
+
+// Warm the company settings cache on startup so WhatsApp config can be read
+// synchronously from src/whatsapp.ts.
+await loadCompanySettingsToCache().catch((err) => {
+  console.warn("[startup] failed to load company_settings; using env/defaults", err);
+});
 
 /**
  * Capture raw body for ALL JSON requests so verifySignature(req)
@@ -63,6 +71,7 @@ app.use("/files", filesRoutes);
 app.use("/settings", whatsappProfilePhotoRoutes);
 app.use("/public", publicMediaRoutes);
 app.use("/settings", settingsRoutes);
+app.use("/api", requireInboxAuth, companyRoutes);
 app.use("/api",requireInboxAuth, inboxRoutes);
 app.use("/api",requireInboxAuth, sendRoutes);
 

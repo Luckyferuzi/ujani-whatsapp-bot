@@ -20,6 +20,7 @@ type CompanySettings = {
   whatsapp_token: string | null;
   phone_number_id: string | null;
   verify_token: string | null;
+  app_id: string | null;
   app_secret: string | null;
   graph_api_version: string | null;
 
@@ -201,6 +202,25 @@ export default function SetupPage() {
             />
           </div>
           <div>
+            <label className="block text-sm mb-1">App ID (optional)</label>
+            <input
+              className="w-full border border-ui-border rounded px-3 py-2 text-sm"
+              value={settings.app_id ?? ""}
+              onChange={(e) => setSettings({ ...settings, app_id: e.target.value || null })}
+              placeholder="123456789"
+            />
+          </div>
+          <div>
+            <label className="block text-sm mb-1">App Secret (optional)</label>
+            <input
+              className="w-full border border-ui-border rounded px-3 py-2 text-sm"
+              value={settings.app_secret ?? ""}
+              onChange={(e) => setSettings({ ...settings, app_secret: e.target.value || null })}
+              placeholder="your-app-secret"
+              type="password"
+            />
+          </div>
+          <div>
             <label className="block text-sm mb-1">Graph API version</label>
             <input
               className="w-full border border-ui-border rounded px-3 py-2 text-sm"
@@ -220,6 +240,8 @@ export default function SetupPage() {
                 whatsapp_token: settings.whatsapp_token,
                 phone_number_id: settings.phone_number_id,
                 verify_token: settings.verify_token,
+                app_id: settings.app_id,
+                app_secret: settings.app_secret,
                 graph_api_version: settings.graph_api_version,
               })
             }

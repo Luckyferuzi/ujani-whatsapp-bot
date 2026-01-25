@@ -1,12 +1,22 @@
 // src/whatsapp.ts
 import crypto from 'crypto';
 import { env } from './config.js';
+import {
+  getAppSecretEffective,
+  getGraphApiVersionEffective,
+  getPhoneNumberIdEffective,
+  getWhatsAppTokenEffective,
+} from './runtime/companySettings.js';
 
 /* -------------------------------------------------------------------------- */
 /*                              Environment helpers                           */
 /* -------------------------------------------------------------------------- */
 
 function getToken(): string {
+  // Prefer DB-backed runtime config (web Setup Wizard), then env.
+  const fromDb = getWhatsAppTokenEffective();
+  if (fromDb) return fromDb;
+
   // Support common naming variants without adding new required envs.
   return (
     (env as any).WABA_TOKEN ||
@@ -17,6 +27,10 @@ function getToken(): string {
 }
 
 function getPhoneNumberId(): string {
+  // Prefer DB-backed runtime config (web Setup Wizard), then env.
+  const fromDb = getPhoneNumberIdEffective();
+  if (fromDb) return fromDb;
+
   return (
     (env as any).PHONE_NUMBER_ID ||
     (env as any).WHATSAPP_PHONE_NUMBER_ID ||
@@ -26,7 +40,9 @@ function getPhoneNumberId(): string {
 }
 
 const GRAPH_BASE = 'https://graph.facebook.com';
-const GRAPH_VER = (env as any).GRAPH_API_VERSION || 'v19.0';
+function getGraphVer(): string {
+  return getGraphApiVersionEffective();
+}
 
 /* -------------------------------------------------------------------------- */
 /*                                HTTP client                                 */
@@ -35,7 +51,7 @@ const GRAPH_VER = (env as any).GRAPH_API_VERSION || 'v19.0';
 
 async function apiGet(path: string) {
   const token = getToken();
-  const url = `${GRAPH_BASE}/${GRAPH_VER}/${path}`;
+  const url = `${GRAPH_BASE}/${getGraphVer()}/${path}`;
   const res = await fetch(url, {
     method: "GET",
     headers: {
@@ -54,7 +70,7 @@ async function apiGet(path: string) {
 
 async function apiFetch(path: string, body: unknown) {
   const token = getToken();
-  const url = `${GRAPH_BASE}/${GRAPH_VER}/${path}`;
+  const url = `${GRAPH_BASE}/${getGraphVer()}/${path}`;
   const res = await fetch(url, {
     method: "POST",
     headers: {
@@ -263,7 +279,7 @@ function timingSafeEqual(a: string, b: string): boolean {
 
 export function verifySignature(arg1: any, arg2?: string): boolean {
   try {
-    const APP_SECRET = (env as any).APP_SECRET as string | undefined;
+    const APP_SECRET = getAppSecretEffective() ?? ((env as any).APP_SECRET as string | undefined);
 
     // In dev / debugging, don't block just because APP_SECRET is missing
     if (!APP_SECRET) {
@@ -383,7 +399,7 @@ export async function uploadMedia(
   form.append("messaging_product", "whatsapp");
   form.append("type", contentType);
 
-  const url = `${GRAPH_BASE}/${GRAPH_VER}/${phoneId}/media`;
+  const url = `${GRAPH_BASE}/${getGraphVer()}/${phoneId}/media`;
   const res = await fetch(url, {
     method: "POST",
     headers: {
