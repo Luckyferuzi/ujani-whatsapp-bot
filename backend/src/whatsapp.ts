@@ -426,7 +426,7 @@ export async function uploadMedia(
   contentType: string,
   opts?: { phoneNumberId?: string | null }
 ): Promise<string> {
-  const phoneId = resolvePhoneNumberId(opts?.phoneNumberId ?? null, to);
+  const phoneId = resolvePhoneNumberId(opts?.phoneNumberId ?? null);
   if (!phoneId) {
     throw new Error("PHONE_NUMBER_ID missing; cannot upload media");
   }
