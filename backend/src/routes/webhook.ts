@@ -25,7 +25,6 @@ import {
   upsertCustomerByWa,
   getOrCreateConversation,
   getOrCreateConversationForPhone,
-  upsertWhatsAppPhoneNumber,
   insertInboundMessage,
   insertOutboundMessage,
   updateConversationLastUserMessageAt,
