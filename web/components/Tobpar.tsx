@@ -327,6 +327,18 @@ export default function Topbar({
                 </Link>
               );
             })}
+            {user?.role === "admin" && (() => {
+  const active = pathname === "/setup" || pathname?.startsWith("/setup/");
+  return (
+    <Link
+      href="/setup"
+      className={"topbar-link" + (active ? " topbar-link--active" : "")}
+    >
+      Setup
+    </Link>
+  );
+})()}
+
           </nav>
         )}
       </div>
@@ -420,6 +432,18 @@ export default function Topbar({
 
                 {user.role === "admin" && (
                   <>
+                  <button
+  type="button"
+  className="topbar-menu-item"
+  role="menuitem"
+  onClick={() => {
+    setMenuOpen(false);
+    router.push("/setup");
+  }}
+>
+  <IconReceipt width={18} height={18} />
+  <span>Setup Wizard</span>
+</button>
                     <button
                       type="button"
                       className="topbar-menu-item"
