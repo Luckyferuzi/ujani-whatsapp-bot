@@ -134,7 +134,7 @@ companyRoutes.put("/company/settings", async (req, res) => {
 // List connected WhatsApp phone numbers (single-tenant, multi-number).
 companyRoutes.get("/company/whatsapp-numbers", async (_req, res) => {
   const rows = await listWhatsAppPhoneNumbers();
-  return res.json({ ok: true, numbers: rows });
+  return res.json({ ok: true, items: rows, numbers: rows });
 });
 
 // Set default sending phone number.
