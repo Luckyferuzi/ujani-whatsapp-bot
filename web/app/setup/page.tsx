@@ -354,28 +354,58 @@ export default function SetupPage() {
 
     setEmbedStatus("Starting Embedded Signup…");
 
-    window.FB?.login(
-      (response: any) => {
-        const code = response?.authResponse?.code as string | undefined;
-        if (!code) {
+window.FB?.login(
+  (response: any) => {
+    const auth = response?.authResponse;
+
+    // Meta can return either a code or (sometimes) an accessToken depending on config.
+    const code = auth?.code as string | undefined;
+    const accessToken = auth?.accessToken as string | undefined;
+
+    if (code) {
+      setPendingCode(code);
+      return;
+    }
+
+    // Fallback: if your configuration returns a token instead of a code
+    if (accessToken) {
+      // We'll store it using the same backend exchange endpoint (after you apply the backend patch below)
+      setPendingCode(null);
+      setEmbedStatus("Received access token (no auth code). Saving token…");
+      void post("/api/whatsapp/embedded/exchange", {
+        access_token: accessToken,
+        redirect_uri: window.location.origin + "/setup",
+        waba_id: pendingIds?.waba_id,
+        phone_number_id: pendingIds?.phone_number_id,
+        graph_api_version: settings?.graph_api_version ?? "v19.0",
+      })
+        .then(async () => {
+          setEmbedStatus("Connected via Embedded Signup ✅");
+          await load();
+        })
+        .catch((e: any) => {
           setEmbedStatus(null);
-          setEmbedError("Embedded Signup did not return an auth code. Check your Meta app OAuth settings.");
-          return;
-        }
-        setPendingCode(code);
-      },
-      {
-        config_id: configId,
-        response_type: "code",
-        override_default_response_type: true,
-        extras: {
-          sessionInfoVersion: 3,
-          ...(settings.whatsapp_solution_id
-            ? { setup: { solutionID: settings.whatsapp_solution_id } }
-            : {}),
-        },
-      }
-    );
+          setEmbedError(e?.message ?? "Failed to save token from Embedded Signup");
+        });
+
+      return;
+    }
+
+    setEmbedStatus(null);
+    setEmbedError("Embedded Signup did not return an auth code. Check redirect URI and JS SDK OAuth settings.");
+  },
+  {
+    config_id: configId,
+    redirect_uri: window.location.origin + "/setup", // ✅ IMPORTANT
+    response_type: "code",
+    override_default_response_type: true,
+    extras: {
+      sessionInfoVersion: 3,
+      ...(settings.whatsapp_solution_id ? { setup: { solutionID: settings.whatsapp_solution_id } } : {}),
+    },
+  }
+);
+
   }
 
   async function saveSettings(patch: Partial<CompanySettings>) {
