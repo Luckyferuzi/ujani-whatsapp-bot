@@ -743,22 +743,33 @@ try {
           continue;
           }
 
-          // If user sent a WhatsApp Catalog cart/order, convert it to our internal cart and continue with checkout
+// If user sent a WhatsApp Catalog cart/order, convert it to our internal cart and continue with checkout
 if (type === "order" && Array.isArray(msg.order?.product_items) && msg.order.product_items.length > 0) {
-  // Replace the cart with what they selected in the catalog
   clearCart(from);
 
   const productItems = msg.order.product_items as any[];
-  const skus = productItems.map((it) => String(it?.product_retailer_id ?? "").trim()).filter(Boolean);
 
+  // Unique requested SKUs from catalog
+  const requestedSkus = Array.from(
+    new Set(
+      productItems
+        .map((it) => String(it?.product_retailer_id ?? "").trim())
+        .filter(Boolean)
+    )
+  );
+
+  // Load matching products from our DB
   const rows = await db("products")
-    .whereIn("sku", skus)
+    .whereIn("sku", requestedSkus)
     .select<{ sku: string; name: string; price_tzs: number }[]>("sku", "name", "price_tzs");
 
   const bySku = new Map(rows.map((r) => [r.sku, r]));
 
+  // Build cart using only matched products
   for (const it of productItems) {
     const sku = String(it?.product_retailer_id ?? "").trim();
+    if (!sku) continue;
+
     const qty = Math.max(1, Math.floor(Number(it?.quantity ?? 1)));
     const p = bySku.get(sku);
     if (!p) continue;
@@ -772,6 +783,22 @@ if (type === "order" && Array.isArray(msg.order?.product_items) && msg.order.pro
   }
 
   const cartNow = getCart(from);
+
+  // Detect missing SKUs (catalog had them, our DB doesn't)
+  const missingSkus = requestedSkus.filter((sku) => !bySku.has(sku));
+
+  if (missingSkus.length > 0) {
+    const shown = missingSkus.slice(0, 5).join(", ");
+    const more = missingSkus.length > 5 ? " ..." : "";
+
+    await sendBotText(
+      from,
+      lang === "sw"
+        ? `⚠️ Baadhi ya bidhaa ulizochagua kwenye Catalog hazipo kwenye mfumo wetu bado: ${shown}${more}\nUnaweza kuagiza hizo kwa chat kwa kubonyeza *Oda kwa Chat* au kuandika *MENU*.`
+        : `⚠️ Some items you selected from the catalog are not available in our system yet: ${shown}${more}\nYou can order those via chat by pressing *Order by Chat* or typing *MENU*.`
+    );
+  }
+
   if (!cartNow.length) {
     await sendBotText(
       from,
@@ -793,6 +820,7 @@ if (type === "order" && Array.isArray(msg.order?.product_items) && msg.order.pro
   await showCart(from, lang);
   continue;
 }
+
 
           // DEV INTRO (send once for brand-new customers, then continue normal bot flow)
 const devIntro = getDevIntroText(lang);
@@ -913,24 +941,74 @@ async function showEntryMenu(user: string, lang: Lang) {
   ]);
 }
 
+async function pickCatalogThumbnailSku(): Promise<string | null> {
+  const presence = await getJsonSetting<any>("whatsapp_presence", {});
+
+  // 1) Manual override (fast + stable)
+  const override = String(presence.catalog_thumbnail_sku ?? "").trim();
+  if (override) return override;
+
+  // 2) Best seller in last 30 days (by qty), active products only
+  try {
+    const best = await db("order_items as oi")
+      .join("orders as o", "o.id", "oi.order_id")
+      .join("products as p", "p.sku", "oi.sku")
+      .whereNull("o.deleted_at")
+      .where("p.is_active", true)
+      .whereRaw("o.created_at >= now() - interval '30 days'")
+      .groupBy("oi.sku")
+      .select("oi.sku")
+      .sum({ qty: "oi.qty" })
+      .orderBy("qty", "desc")
+      .first<{ sku: string }>();
+
+    const sku = String(best?.sku ?? "").trim();
+    if (sku) return sku;
+  } catch (e) {
+    console.warn("[catalog] best-seller thumbnail query failed:", e);
+  }
+
+  // 3) Fallback: any active product
+  const any = await db("products")
+    .where({ is_active: true })
+    .orderBy("id", "asc")
+    .first<{ sku: string }>("sku");
+
+  return any?.sku ? String(any.sku).trim() : null;
+}
+
 async function showCatalog(user: string, lang: Lang) {
   const presence = await getJsonSetting<any>("whatsapp_presence", {});
   const body =
     (presence.catalog_intro ||
       (lang === "sw"
-        ? "Bonyeza *View catalog* kuona bidhaa. Ukipenda kuagiza kwa chat, bonyeza *Oda kwa Chat*."
-        : "Tap *View catalog* to browse. Or press *Order by Chat* to order here.")) as string;
+        ? "Bonyeza *View catalog* kuona bidhaa. Ukipenda kuagiza kwa chat, bonyeza *Oda kwa Chat* au andika *MENU*."
+        : "Tap *View catalog* to browse. Or press *Order by Chat* / type *MENU* to order here.")) as string;
+
+  const phoneNumberId = getRememberedPhoneNumberId(user) ?? null;
+  const thumbSku = await pickCatalogThumbnailSku();
 
   try {
-    // Preferred: native WhatsApp catalog card
-    await sendCatalogMessage(user, body, { phoneNumberId: getRememberedPhoneNumberId(user) ?? null });
+    // Preferred: native WhatsApp catalog message (with thumbnail)
+    await sendCatalogMessage(user, body, {
+      phoneNumberId,
+      thumbnailProductRetailerId: thumbSku,
+    });
   } catch (e) {
-    // Fallback: CTA URL button if catalog_message fails
-    const waDigits = (presence.catalog_wa_number || "").toString().replace(/[^\d]/g, "");
+    // Fallback: CTA URL button (requires WA business number digits)
+    const waDigits = String(presence.catalog_wa_number || "")
+      .replace(/[^\d]/g, "")
+      .trim();
+
     const url = waDigits ? `https://wa.me/c/${waDigits}` : null;
 
     if (!url) {
-      await sendBotText(user, lang === "sw" ? "Catalog haijapatikana kwa sasa." : "Catalog is not available right now.");
+      await sendBotText(
+        user,
+        lang === "sw"
+          ? "Catalog haijapatikana kwa sasa. Tafadhali andika *MENU* kuagiza kwa chat."
+          : "Catalog is not available right now. Please type *MENU* to order via chat."
+      );
       return;
     }
 
@@ -939,11 +1017,10 @@ async function showCatalog(user: string, lang: Lang) {
       body,
       lang === "sw" ? "Fungua Catalog" : "Open Catalog",
       url,
-      { phoneNumberId: getRememberedPhoneNumberId(user) ?? null }
+      { phoneNumberId }
     );
   }
 }
-
 
 async function showMainMenu(user: string, lang: Lang) {
   const model = await buildMainMenu((key: string) => t(lang, key));
