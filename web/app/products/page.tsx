@@ -2,14 +2,17 @@
 
 import { Fragment,useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { api, get, post } from "@/lib/api";
 import { socket } from "@/lib/socket";
 import { toast } from "sonner";
+import { authPostForm } from "@/lib/auth";
 
 type Product = {
   id: number;
   sku: string; // exists in backend; kept for search only (not shown)
   name: string;
+  image_url?: string | null;
   price_tzs: number;
   description: string;
   description_en: string | null;
@@ -28,6 +31,8 @@ type ProductForm = {
   stock_qty: string;
   description: string;
   description_en: string;
+  image_url: string;
+  publish_to_catalog: boolean;
   is_installment: boolean;
   is_active: boolean;
 };
@@ -38,6 +43,8 @@ const emptyForm: ProductForm = {
   stock_qty: "",
   description: "",
   description_en: "",
+  image_url: "",
+  publish_to_catalog: false,
   is_installment: false,
   is_active: true,
 };
@@ -194,6 +201,8 @@ const filteredIdToIndex = useMemo(() => {
       name: p.name ?? "",
       price_tzs: String(p.price_tzs ?? ""),
       stock_qty: p.stock_qty != null ? String(p.stock_qty) : "0",
+      image_url: p.image_url ? String(p.image_url) : "",
+publish_to_catalog: false,
       description: p.description ?? "",
       description_en: p.description_en ?? "",
       is_installment: !!p.is_installment,
@@ -277,6 +286,15 @@ const filteredIdToIndex = useMemo(() => {
     }
   }
 
+  async function uploadProductImage(file: File) {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const out = await authPostForm<{ url: string }>("/files/product-image", formData);
+  setForm((f) => ({ ...f, image_url: out.url }));
+  toast.success("Product image uploaded.");
+}
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
@@ -308,6 +326,8 @@ const filteredIdToIndex = useMemo(() => {
         name,
         price_tzs: Math.floor(priceNumeric),
         stock_qty: Math.floor(stockNumeric),
+        image_url: form.image_url || null,
+publish_to_catalog: !!form.publish_to_catalog,
         description: form.description ?? "",
         description_en: form.description_en ?? "",
         is_installment: !!form.is_installment,
@@ -623,6 +643,25 @@ function exportSelectedCsv() {
           <button type="button" className="pr-btn" onClick={exportCsv} disabled={loading}>
             Export CSV
           </button>
+
+          <button
+  type="button"
+  className="pr-btn"
+  onClick={async () => {
+    try {
+      const out = await post<{ imported: number; updated: number }>("/api/catalog/import");
+      toast.success("Imported from catalog.", {
+        description: `created: ${out.imported}, updated: ${out.updated}`,
+      });
+      void loadProducts();
+    } catch (e: any) {
+      toast.error("Failed to import from catalog.", { description: e?.message ?? "Try again." });
+    }
+  }}
+  disabled={loading}
+>
+  ⇅ Import Catalog
+</button>
 
           <button type="button" className="pr-btn pr-btn-primary" onClick={openNew}>
             + New product
@@ -1045,6 +1084,57 @@ function exportSelectedCsv() {
                     placeholder="0"
                   />
                 </div>
+
+                <div className="pr-field" style={{ minWidth: "unset", gridColumn: "1 / -1" }}>
+  <div className="pr-label">Product image (for Catalog)</div>
+
+  <input
+    className="pr-input"
+    type="file"
+    accept="image/*"
+    onChange={async (e) => {
+      const f = e.target.files?.[0];
+      if (!f) return;
+      try {
+        await uploadProductImage(f);
+      } catch (err: any) {
+        toast.error("Image upload failed.", { description: err?.message ?? "Try again." });
+      } finally {
+        e.currentTarget.value = "";
+      }
+    }}
+  />
+
+  {form.image_url ? (
+    <div style={{ marginTop: 10, display: "flex", gap: 12, alignItems: "center" }}>
+      
+      <Image
+        src={form.image_url}
+        alt="product"
+        width={80}
+        height={80}
+        style={{ objectFit: "cover", borderRadius: 10 }}
+      />
+      <div style={{ fontSize: 12, opacity: 0.8, wordBreak: "break-all" }}>{form.image_url}</div>
+    </div>
+  ) : (
+    <div style={{ marginTop: 6, fontSize: 12, opacity: 0.7 }}>
+      Upload is required if you want to publish to WhatsApp Catalog.
+    </div>
+  )}
+</div>
+
+<div className="pr-field" style={{ minWidth: "unset" }}>
+  <div className="pr-label">WhatsApp Catalog</div>
+  <label className="pr-flag" style={{ display: "inline-flex", gap: 8 }}>
+    <input
+      type="checkbox"
+      checked={form.publish_to_catalog}
+      onChange={(e) => setForm((f) => ({ ...f, publish_to_catalog: e.target.checked }))}
+    />
+    <span>Publish / update in Catalog on save</span>
+  </label>
+</div>
 
                 <div className="pr-field" style={{ minWidth: "unset" }}>
                   <div className="pr-label">Flags</div>

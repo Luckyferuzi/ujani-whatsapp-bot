@@ -72,3 +72,36 @@ publicMediaRoutes.get("/media/:token", async (req, res) => {
 
   return res.status(200).send(row.data);
 });
+
+/**
+ * POST /files/product-image
+ * multipart/form-data: file=<image>
+ * Stores bytes in DB and returns a public URL (usable for WhatsApp Catalog).
+ */
+filesRoutes.post("/product-image", requireSession, upload.single("file"), async (req, res) => {
+  const f = req.file;
+  if (!f) return res.status(400).json({ error: "missing_file" });
+
+  const token = randomBytes(24).toString("hex"); // public-safe id
+  const sha256 = createHash("sha256").update(f.buffer).digest("hex");
+
+  const user = (req as any).user as { id: number };
+
+  await db("media_files").insert({
+    token,
+    created_by_user_id: user?.id ?? null,
+    purpose: "product_image",
+    file_name: f.originalname ?? null,
+    mime_type: f.mimetype,
+    size_bytes: f.size,
+    sha256,
+    data: f.buffer,
+  });
+
+  const base =
+    (process.env.PUBLIC_BASE_URL || "").replace(/\/$/, "") ||
+    `${req.protocol}://${req.get("host")}`;
+
+  const url = `${base}/public/media/${token}`;
+  return res.json({ url, token });
+});

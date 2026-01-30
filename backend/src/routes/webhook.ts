@@ -11,6 +11,8 @@ import {
   verifySignature,
   rememberCustomerPhoneNumberId,
   getRememberedPhoneNumberId,
+  sendCatalogMessage,
+sendCtaUrlMessage,
 } from '../whatsapp.js';
 import { feeForDarDistance } from '../delivery.js';
 import {
@@ -741,6 +743,57 @@ try {
           continue;
           }
 
+          // If user sent a WhatsApp Catalog cart/order, convert it to our internal cart and continue with checkout
+if (type === "order" && Array.isArray(msg.order?.product_items) && msg.order.product_items.length > 0) {
+  // Replace the cart with what they selected in the catalog
+  clearCart(from);
+
+  const productItems = msg.order.product_items as any[];
+  const skus = productItems.map((it) => String(it?.product_retailer_id ?? "").trim()).filter(Boolean);
+
+  const rows = await db("products")
+    .whereIn("sku", skus)
+    .select<{ sku: string; name: string; price_tzs: number }[]>("sku", "name", "price_tzs");
+
+  const bySku = new Map(rows.map((r) => [r.sku, r]));
+
+  for (const it of productItems) {
+    const sku = String(it?.product_retailer_id ?? "").trim();
+    const qty = Math.max(1, Math.floor(Number(it?.quantity ?? 1)));
+    const p = bySku.get(sku);
+    if (!p) continue;
+
+    addToCart(from, {
+      sku,
+      name: p.name,
+      qty,
+      unitPrice: Number(p.price_tzs ?? 0),
+    });
+  }
+
+  const cartNow = getCart(from);
+  if (!cartNow.length) {
+    await sendBotText(
+      from,
+      lang === "sw"
+        ? "Nimepokea oda kutoka Catalog lakini sijaweza kulinganisha bidhaa kwenye mfumo. Tafadhali bonyeza *Oda kwa Chat* au andika *MENU*."
+        : "I received a catalog order but couldn’t match products in the system. Press *Order by Chat* or type *MENU*."
+    );
+    await showEntryMenu(from, lang);
+    continue;
+  }
+
+  await sendBotText(
+    from,
+    lang === "sw"
+      ? "✅ Nimepokea bidhaa ulizochagua kutoka Catalog. Hapa chini ni muhtasari wa kikapu chako:"
+      : "✅ I received the items you selected from the catalog. Here is your cart summary:"
+  );
+
+  await showCart(from, lang);
+  continue;
+}
+
           // DEV INTRO (send once for brand-new customers, then continue normal bot flow)
 const devIntro = getDevIntroText(lang);
 if (isNewCustomer && devIntro) {
@@ -823,7 +876,7 @@ if ((!s || s.state === "IDLE") && !activeFlow) {
     !text ||
     ["hi", "hello", "mambo", "start", "anza", "menu", "menyu"].includes(txt)
   ) {
-    await showMainMenu(from, lang);
+    await showEntryMenu(from, lang);
     continue;
   }
 }
@@ -849,6 +902,49 @@ if ((!s || s.state === "IDLE") && !activeFlow) {
 /* -------------------------------------------------------------------------- */
 /*                                   Screens                                  */
 /* -------------------------------------------------------------------------- */
+
+async function showEntryMenu(user: string, lang: Lang) {
+  const presence = await getJsonSetting<any>("whatsapp_presence", {});
+  const body = (presence.menu_intro || t(lang, "menu.entry_body")) as string;
+
+  await sendButtonsMessageSafe(user, body, [
+    { id: "ACTION_OPEN_CATALOG", title: t(lang, "menu.open_catalog") },
+    { id: "ACTION_ORDER_BY_CHAT", title: t(lang, "menu.order_by_chat") },
+  ]);
+}
+
+async function showCatalog(user: string, lang: Lang) {
+  const presence = await getJsonSetting<any>("whatsapp_presence", {});
+  const body =
+    (presence.catalog_intro ||
+      (lang === "sw"
+        ? "Bonyeza *View catalog* kuona bidhaa. Ukipenda kuagiza kwa chat, bonyeza *Oda kwa Chat*."
+        : "Tap *View catalog* to browse. Or press *Order by Chat* to order here.")) as string;
+
+  try {
+    // Preferred: native WhatsApp catalog card
+    await sendCatalogMessage(user, body, { phoneNumberId: getRememberedPhoneNumberId(user) ?? null });
+  } catch (e) {
+    // Fallback: CTA URL button if catalog_message fails
+    const waDigits = (presence.catalog_wa_number || "").toString().replace(/[^\d]/g, "");
+    const url = waDigits ? `https://wa.me/c/${waDigits}` : null;
+
+    if (!url) {
+      await sendBotText(user, lang === "sw" ? "Catalog haijapatikana kwa sasa." : "Catalog is not available right now.");
+      return;
+    }
+
+    await sendCtaUrlMessage(
+      user,
+      body,
+      lang === "sw" ? "Fungua Catalog" : "Open Catalog",
+      url,
+      { phoneNumberId: getRememberedPhoneNumberId(user) ?? null }
+    );
+  }
+}
+
+
 async function showMainMenu(user: string, lang: Lang) {
   const model = await buildMainMenu((key: string) => t(lang, key));
 
@@ -1127,6 +1223,17 @@ if (N.startsWith("RESTOCK_YES:") || N.startsWith("RESTOCK_NO:")) {
 }
 
     // --- Agent handover actions (talk to agent / back to bot) ---
+  if (id === "ACTION_OPEN_CATALOG") {
+  await showCatalog(user, lang);
+  return;
+}
+
+if (id === "ACTION_ORDER_BY_CHAT") {
+  await showMainMenu(user, lang);
+  return;
+}
+
+
   if (id === 'ACTION_BACK') return showMainMenu(user, lang);
 
   if (id === 'ACTION_TALK_TO_AGENT') {
@@ -1173,7 +1280,7 @@ if (N.startsWith("RESTOCK_YES:") || N.startsWith("RESTOCK_NO:")) {
 
     emit('conversation.updated', { id: conversationId, agent_allowed: false });
 
-    return showMainMenu(user, lang);
+    return showEntryMenu(user, lang);
   }
 
   /* --------- Location / service selection FIRST (robust to truncation) -------- */

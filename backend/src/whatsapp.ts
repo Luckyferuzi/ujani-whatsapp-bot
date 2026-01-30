@@ -5,8 +5,10 @@ import {
   getAppSecretEffective,
   getGraphApiVersionEffective,
   getPhoneNumberIdEffective,
-  getWhatsAppTokenEffective,
+getWhatsAppTokenEffective,
+getWabaIdEffective,
 } from './runtime/companySettings.js';
+
 
 /* -------------------------------------------------------------------------- */
 /*                              Environment helpers                           */
@@ -235,6 +237,162 @@ export async function sendButtonsMessage(
     },
   };
   await apiFetch(`${phoneId}/messages`, payload);
+}
+
+/* -------------------------------------------------------------------------- */
+/*                         Catalog & CTA URL messages                         */
+/* -------------------------------------------------------------------------- */
+
+export async function sendCatalogMessage(
+  to: string,
+  body: string,
+  opts?: { phoneNumberId?: string | null; thumbnailProductRetailerId?: string | null }
+) {
+  const phoneId = resolvePhoneNumberId(opts?.phoneNumberId ?? null, to);
+  if (!phoneId) {
+    console.warn("[whatsapp] PHONE_NUMBER_ID missing; cannot sendCatalogMessage");
+    return;
+  }
+
+  const payload: any = {
+    messaging_product: "whatsapp",
+    to,
+    type: "interactive",
+    interactive: {
+      type: "catalog_message",
+      body: { text: body || " " },
+      action: {
+        name: "catalog_message",
+        parameters: {},
+      },
+    },
+  };
+
+  const thumb = (opts?.thumbnailProductRetailerId ?? "").toString().trim();
+  if (thumb) {
+    payload.interactive.action.parameters.thumbnail_product_retailer_id = thumb;
+  }
+
+  await apiFetch(`${phoneId}/messages`, payload);
+}
+
+/**
+ * CTA URL button message. WhatsApp supports only a single URL button.
+ */
+export async function sendCtaUrlMessage(
+  to: string,
+  body: string,
+  displayText: string,
+  url: string,
+  opts?: { phoneNumberId?: string | null }
+) {
+  const phoneId = resolvePhoneNumberId(opts?.phoneNumberId ?? null, to);
+  if (!phoneId) {
+    console.warn("[whatsapp] PHONE_NUMBER_ID missing; cannot sendCtaUrlMessage");
+    return;
+  }
+
+  const payload: any = {
+    messaging_product: "whatsapp",
+    to,
+    type: "interactive",
+    interactive: {
+      type: "cta_url",
+      body: { text: body || " " },
+      action: {
+        name: "cta_url",
+        parameters: {
+          display_text: displayText,
+          url,
+        },
+      },
+    },
+  };
+
+  await apiFetch(`${phoneId}/messages`, payload);
+}
+
+/* -------------------------------------------------------------------------- */
+/*                           Catalog (Graph API) helpers                       */
+/* -------------------------------------------------------------------------- */
+
+export type CatalogProduct = {
+  id?: string;
+  retailer_id?: string;
+  name?: string;
+  description?: string;
+  image_url?: string;
+  availability?: string;
+  price?: string;
+  currency?: string;
+};
+
+export async function getConnectedCatalogId(
+  wabaId?: string | null
+): Promise<string | null> {
+  const id = (wabaId ?? getWabaIdEffective() ?? "").toString().trim();
+  if (!id) return null;
+
+  const res = await apiGet(`${id}/product_catalogs?fields=id,name`);
+  const data = Array.isArray(res?.data) ? res.data : [];
+  const first = data[0];
+  const catalogId = (first?.id ?? "").toString().trim();
+  return catalogId || null;
+}
+
+export async function listCatalogProducts(
+  catalogId: string
+): Promise<CatalogProduct[]> {
+  const id = (catalogId ?? "").toString().trim();
+  if (!id) return [];
+
+  const res = await apiGet(
+    `${id}/products?fields=id,retailer_id,name,description,price,currency,availability,image_url`
+  );
+  return Array.isArray(res?.data) ? (res.data as CatalogProduct[]) : [];
+}
+
+/**
+ * Create or update a catalog product (recommended: retailer_id == local SKU).
+ */
+export async function upsertCatalogProduct(
+  catalogId: string,
+  input: {
+    retailer_id: string;
+    name: string;
+    description?: string;
+    image_url: string;
+    price_tzs: number;
+    currency?: string;
+    availability?: "in stock" | "out of stock";
+    allow_upsert?: boolean;
+  }
+) {
+  const id = (catalogId ?? "").toString().trim();
+  if (!id) throw new Error("missing_catalog_id");
+
+  const retailerId = (input.retailer_id ?? "").toString().trim();
+  if (!retailerId) throw new Error("missing_retailer_id");
+
+  const currency = (input.currency ?? "TZS").toString().trim() || "TZS";
+  const priceNum = Math.max(0, Math.floor(Number(input.price_tzs) || 0));
+
+  const payload: any = {
+    retailer_id: retailerId,
+    name: String(input.name || "").trim(),
+    description: input.description ? String(input.description).trim() : undefined,
+    image_url: String(input.image_url || "").trim(),
+    availability: input.availability ?? "in stock",
+    currency,
+    price: `${priceNum}.00`,
+    allow_upsert: input.allow_upsert !== false,
+  };
+
+  Object.keys(payload).forEach((k) => {
+    if (payload[k] === undefined || payload[k] === "") delete payload[k];
+  });
+
+  return apiFetch(`${id}/products`, payload);
 }
 
 export async function markAsRead(

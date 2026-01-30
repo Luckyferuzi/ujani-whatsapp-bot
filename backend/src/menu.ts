@@ -67,6 +67,8 @@ export type ActionId =
   | 'ACTION_TALK_TO_AGENT'
   | 'ACTION_CHANGE_LANGUAGE'
   | 'ACTION_BACK'
+    | 'ACTION_OPEN_CATALOG'
+  | 'ACTION_ORDER_BY_CHAT'
   | 'ACTION_FAQ'
   | `PRODUCT_${string}`
   | `BUY_${string}`
@@ -284,12 +286,14 @@ export async function buildMainMenu(
       },
       {
         title: t("menu.actions_section"),
-        rows: [
-          { id: "ACTION_VIEW_CART", title: t("menu.view_cart") },
-          { id: "ACTION_CHECKOUT", title: t("menu.checkout") },
-          { id: "ACTION_TRACK_BY_NAME", title: t("menu.track_by_name") },
-          { id: "ACTION_TALK_TO_AGENT", title: t("menu.talk_to_agent") },
-        ],
+rows: [
+  { id: "ACTION_OPEN_CATALOG", title: t("menu.open_catalog") },
+  { id: "ACTION_VIEW_CART", title: t("menu.view_cart") },
+  { id: "ACTION_CHECKOUT", title: t("menu.checkout") },
+  { id: "ACTION_TRACK_BY_NAME", title: t("menu.track_by_name") },
+  { id: "ACTION_TALK_TO_AGENT", title: t("menu.talk_to_agent") },
+],
+
       },
       {
         title: t("menu.settings_section"),

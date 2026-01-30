@@ -1,7 +1,13 @@
 // backend/src/routes/inbox.ts
 import e, { Router, type Request, type Response } from "express";
 import db from "../db/knex.js";
-import { sendText, downloadMedia } from "../whatsapp.js";
+import {
+  sendText,
+  downloadMedia,
+  getConnectedCatalogId,
+  listCatalogProducts,
+  upsertCatalogProduct,
+} from "../whatsapp.js";
 import { emit } from "../sockets.js";
 import { getOrdersForCustomer, listOutstandingOrdersForCustomer, createOrderWithPayment, createManualOrderFromSkus, insertOutboundMessage } from "../db/queries.js";
 import { t, Lang } from "../i18n.js";
@@ -1413,6 +1419,98 @@ inboxRoutes.get(
     return res.json({ items });
   }
 );
+
+/* -------------------------------------------------------------------------- */
+/*                         WhatsApp Catalog (Admin)                            */
+/* -------------------------------------------------------------------------- */
+
+// GET /api/catalog/products -> list catalog products from Meta (does not touch local DB)
+inboxRoutes.get("/catalog/products", async (_req, res) => {
+  try {
+    const catalogId = await getConnectedCatalogId();
+    if (!catalogId) {
+      return res.status(400).json({ error: "no_connected_catalog" });
+    }
+
+    const items = await listCatalogProducts(catalogId);
+    return res.json({ catalog_id: catalogId, items });
+  } catch (err: any) {
+    console.error("GET /catalog/products failed", err);
+    return res.status(500).json({
+      error: err?.message ?? "Failed to load catalog products",
+    });
+  }
+});
+
+// POST /api/catalog/import -> import / upsert catalog products into local DB
+inboxRoutes.post("/catalog/import", async (_req, res) => {
+  try {
+    const catalogId = await getConnectedCatalogId();
+    if (!catalogId) {
+      return res.status(400).json({ error: "no_connected_catalog" });
+    }
+
+    const items = await listCatalogProducts(catalogId);
+
+    let created = 0;
+    let updated = 0;
+
+    for (const it of items as any[]) {
+      const sku = String(it?.retailer_id || "").trim();
+      if (!sku) continue;
+
+      const name = String(it?.name || sku).trim();
+      const priceRaw = String(it?.price || "").trim();
+      const priceNum = Number((priceRaw.match(/[0-9]+(?:\.[0-9]+)?/)?.[0]) ?? 0);
+      const priceTzs = Number.isFinite(priceNum) && priceNum > 0 ? Math.floor(priceNum) : 0;
+
+      const description = String(it?.description || "").trim();
+      const image_url = it?.image_url ? String(it.image_url).trim() : null;
+
+      const exists = await db("products").where({ sku }).first("id");
+
+      if (exists) {
+        await db("products")
+          .where({ sku })
+          .update({
+            name,
+            price_tzs: priceTzs || db.raw("products.price_tzs"),
+            description: description || db.raw("products.description"),
+            image_url: image_url ?? db.raw("products.image_url"),
+            updated_at: db.fn.now(),
+          });
+        updated++;
+      } else {
+        await db("products").insert({
+          sku,
+          name,
+          price_tzs: priceTzs || 0,
+          image_url,
+          short_description: "",
+          description: description || "",
+          usage_instructions: "",
+          warnings: "",
+          short_description_en: null,
+          description_en: null,
+          is_installment: false,
+          is_active: true,
+          stock_qty: 0,
+          created_at: db.fn.now(),
+          updated_at: db.fn.now(),
+        });
+        created++;
+      }
+    }
+
+    return res.json({ catalog_id: catalogId, imported: created, updated });
+  } catch (err: any) {
+    console.error("POST /catalog/import failed", err);
+    return res.status(500).json({
+      error: err?.message ?? "Failed to import catalog products",
+    });
+  }
+});
+
 // GET /api/products  -> list all products for admin
 inboxRoutes.get("/products", async (req, res) => {
   try {
@@ -1463,9 +1561,11 @@ inboxRoutes.get("/products/:id", async (req, res) => {
         "p.name",
         "p.price_tzs",
         "p.stock_qty",
+        "p.image_url",
         "p.short_description",
         "p.short_description_en",
         "p.description",
+        "p.image_url",
         "p.description_en",
         "p.is_installment",
         "p.is_active",
@@ -1513,6 +1613,8 @@ inboxRoutes.post("/products", async (req, res) => {
       price_tzs,
       short_description,
       short_description_en,
+      image_url,
+publish_to_catalog,
       description,
       description_en,
       usage_instructions,
@@ -1542,6 +1644,21 @@ inboxRoutes.post("/products", async (req, res) => {
         ? 0
         : Number(stock_qty);
 
+        const publish = !!publish_to_catalog;
+const imageUrl = image_url ? String(image_url).trim() : null;
+
+let catalogId: string | null = null;
+if (publish) {
+  if (!imageUrl) {
+    return res.status(400).json({ error: "image_url_required_for_catalog" });
+  }
+  catalogId = await getConnectedCatalogId();
+  if (!catalogId) {
+    return res.status(400).json({ error: "no_connected_catalog" });
+  }
+}
+
+
     // if sku is not provided, auto-generate one
     let finalSku = (sku ?? "").toString().trim();
     if (!finalSku) {
@@ -1567,7 +1684,7 @@ inboxRoutes.post("/products", async (req, res) => {
 
           // Full Swahili description (required, default to empty string)
           description: description ? String(description).trim() : "",
-
+          image_url: imageUrl,
           // Optional English description
           description_en: description_en
             ? String(description_en).trim()
@@ -1611,7 +1728,26 @@ inboxRoutes.post("/products", async (req, res) => {
 
     emit("product.created", { product: created });
 
-    return res.status(201).json({ product: created });
+    let catalog: any = null;
+if (publish && catalogId) {
+  try {
+    await upsertCatalogProduct(catalogId, {
+      retailer_id: finalSku,
+      name: String(name).trim(),
+      description: description ? String(description).trim() : "",
+      image_url: imageUrl!,
+      price_tzs: price,
+      availability: stockNum > 0 ? "in stock" : "out of stock",
+      allow_upsert: true,
+    });
+    catalog = { ok: true };
+  } catch (e: any) {
+    catalog = { ok: false, error: e?.message ?? String(e) };
+  }
+}
+
+
+    return res.status(201).json({ product: created, catalog });
   } catch (err: any) {
     console.error("POST /products failed", err);
     if (err?.code === "23505") {
@@ -1633,6 +1769,8 @@ inboxRoutes.put("/products/:id", async (req, res) => {
       sku,
       name,
       price_tzs,
+      image_url,
+      publish_to_catalog,
       short_description,
       short_description_en,
       description,
@@ -1646,54 +1784,110 @@ inboxRoutes.put("/products/:id", async (req, res) => {
       discount_is_active,
     } = req.body ?? {};
 
+    // Load current row once (needed for restock + catalog effective image)
+    const before = await db("products")
+      .where({ id })
+      .select<{
+        id: number;
+        sku: string;
+        stock_qty: number | null;
+        image_url: string | null;
+      }[]>("id", "sku", "stock_qty", "image_url")
+      .first();
+
+    if (!before) {
+      return res.status(404).json({ error: "Product not found" });
+    }
+
+    const prevStock = Number(before.stock_qty ?? 0);
+
     const patch: Record<string, any> = {};
-    // Load current stock for restock transition detection (<=0 -> >0)
-const before = await db("products")
-  .where({ id })
-  .select<{ stock_qty: number | null }[]>("stock_qty")
-  .first();
-const prevStock = Number(before?.stock_qty ?? 0);
 
+    if (sku !== undefined) {
+      const v = String(sku).trim();
+      if (!v) return res.status(400).json({ error: "Invalid sku" });
+      patch.sku = v;
+    }
 
-    if (sku !== undefined) patch.sku = String(sku).trim();
-    if (name !== undefined) patch.name = String(name).trim();
-    if (price_tzs !== undefined) patch.price_tzs = Number(price_tzs);
-    if (short_description !== undefined)
+    if (name !== undefined) {
+      const v = String(name).trim();
+      if (!v) return res.status(400).json({ error: "Invalid name" });
+      patch.name = v;
+    }
+
+    if (price_tzs !== undefined) {
+      const n = Number(price_tzs);
+      if (!Number.isFinite(n) || n < 0) {
+        return res.status(400).json({ error: "Invalid price_tzs (must be >= 0)" });
+      }
+      patch.price_tzs = Math.floor(n);
+    }
+
+    if (image_url !== undefined) {
+      patch.image_url = image_url ? String(image_url).trim() : null;
+    }
+
+    if (short_description !== undefined) {
       patch.short_description = String(short_description).trim();
-    if (short_description_en !== undefined)
+    }
+
+    if (short_description_en !== undefined) {
       patch.short_description_en = short_description_en
         ? String(short_description_en).trim()
         : null;
-    if (description !== undefined)
+    }
+
+    if (description !== undefined) {
       patch.description = description ? String(description).trim() : "";
-    if (description_en !== undefined)
-      patch.description_en = description_en
-        ? String(description_en).trim()
-        : null;
-    if (is_installment !== undefined)
-      patch.is_installment = !!is_installment;
-    if (is_active !== undefined)
-      patch.is_active = !!is_active;
+    }
+
+    if (description_en !== undefined) {
+      patch.description_en = description_en ? String(description_en).trim() : null;
+    }
+
+    if (is_installment !== undefined) patch.is_installment = !!is_installment;
+    if (is_active !== undefined) patch.is_active = !!is_active;
 
     if (stock_qty !== undefined) {
       const stockNum = Number(stock_qty);
       if (!Number.isFinite(stockNum) || stockNum < 0) {
-        return res
-          .status(400)
-          .json({ error: "Invalid stock_qty (must be >= 0)" });
+        return res.status(400).json({ error: "Invalid stock_qty (must be >= 0)" });
       }
       patch.stock_qty = Math.floor(stockNum);
     }
 
-    // if we are only changing discount, allow empty product patch
+    // Allow discount-only update, BUT also allow "publish_to_catalog only" update
+    const publish = !!publish_to_catalog;
+
     if (
       Object.keys(patch).length === 0 &&
       discount_type === undefined &&
       discount_amount === undefined &&
       discount_name === undefined &&
-      discount_is_active === undefined
+      discount_is_active === undefined &&
+      !publish
     ) {
       return res.status(400).json({ error: "No fields to update" });
+    }
+
+    // If publishing to catalog, we must have an effective image_url (Meta requirement)
+    let catalogId: string | null = null;
+    let effectiveImageUrl: string | null = null;
+
+    if (publish) {
+      const fromPatch =
+        patch.image_url !== undefined ? patch.image_url : undefined;
+
+      const img = (fromPatch ?? before.image_url) ? String(fromPatch ?? before.image_url).trim() : "";
+      if (!img) {
+        return res.status(400).json({ error: "image_url_required_for_catalog" });
+      }
+      effectiveImageUrl = img;
+
+      catalogId = await getConnectedCatalogId();
+      if (!catalogId) {
+        return res.status(400).json({ error: "no_connected_catalog" });
+      }
     }
 
     patch.updated_at = new Date();
@@ -1720,7 +1914,7 @@ const prevStock = Number(before?.stock_qty ?? 0);
           discount_name && String(discount_name).trim().length > 0
             ? String(discount_name).trim()
             : "Offer",
-        type: discount_type,
+        type: String(discount_type).trim(),
         amount: Math.floor(discountAmountNum),
         is_active: !!discount_is_active,
       };
@@ -1740,27 +1934,47 @@ const prevStock = Number(before?.stock_qty ?? 0);
         });
       }
     } else {
-      // No discount configured -> remove any existing discount row
       await db("product_discounts").where({ product_id: id }).del();
     }
 
     emit("product.updated", { product: updated });
-    // If this update brought stock back (<=0 -> >0), notify opt-in customers.
-const didRestock =
-  Object.prototype.hasOwnProperty.call(patch, "stock_qty") &&
-  prevStock <= 0 &&
-  Number((updated as any).stock_qty ?? 0) > 0;
 
-if (didRestock) {
-  notifyRestockSubscribers(req, {
-    id: Number((updated as any).id),
-    name: String((updated as any).name ?? ""),
-  }).catch((err) => {
-    console.error("[restock] notifyRestockSubscribers failed", err);
-  });
-}
+    // Restock notifications (<=0 -> >0)
+    const didRestock =
+      Object.prototype.hasOwnProperty.call(patch, "stock_qty") &&
+      prevStock <= 0 &&
+      Number((updated as any).stock_qty ?? 0) > 0;
 
-    return res.json({ product: updated });
+    if (didRestock) {
+      notifyRestockSubscribers(req, {
+        id: Number((updated as any).id),
+        name: String((updated as any).name ?? ""),
+      }).catch((err) => {
+        console.error("[restock] notifyRestockSubscribers failed", err);
+      });
+    }
+
+    // Publish/update in WhatsApp Catalog if requested
+    let catalog: any = null;
+    if (publish && catalogId) {
+      try {
+        const row = updated as any;
+        await upsertCatalogProduct(catalogId, {
+          retailer_id: String(row.sku ?? before.sku).trim(),
+          name: String(row.name ?? "").trim(),
+          description: String(row.description ?? "").trim(),
+          image_url: effectiveImageUrl || String(row.image_url ?? "").trim(),
+          price_tzs: Number(row.price_tzs ?? 0),
+          availability: Number(row.stock_qty ?? 0) > 0 ? "in stock" : "out of stock",
+          allow_upsert: true,
+        });
+        catalog = { ok: true };
+      } catch (e: any) {
+        catalog = { ok: false, error: e?.message ?? String(e) };
+      }
+    }
+
+    return res.json({ product: updated, catalog });
   } catch (err: any) {
     console.error("PUT /products/:id failed", err);
     if (err?.code === "23505") {
