@@ -45,13 +45,26 @@ export const webhook = Router();
  * Send a text message from the bot and ALSO log it as an outbound message
  * so that it appears in the Inbox thread.
  */
+
+function getDevIntroText(lang: Lang): string | null {
+  const enabled = (process.env.DEV_INTRO_ENABLED ?? "true").toLowerCase() !== "false";
+  if (!enabled) return null;
+
+  const msg =
+    (lang === "sw" ? process.env.DEV_INTRO_TEXT_SW : process.env.DEV_INTRO_TEXT_EN) ??
+    process.env.DEV_INTRO_TEXT;
+
+  const text = (msg ?? "").trim();
+  return text.length ? text : null;
+}
+
 async function sendBotText(user: string, body: string, phoneNumberId?: string | null) {
   // 1) Send to WhatsApp (use the correct business number if known)
   await sendText(user, body, { phoneNumberId: phoneNumberId ?? null });
 
   // 2) Persist and emit for the inbox
   try {
-    const customerId = await upsertCustomerByWa(user, undefined, user);
+    const { id: customerId } = await upsertCustomerByWa(user, undefined, user);
     const conversationId = await getOrCreateConversationForPhone(
       customerId,
       phoneNumberId ?? null
@@ -171,7 +184,7 @@ async function sendListMessageSafe(p: SafeListPayload) {
 
   // 3) Log it as an outbound message for the admin inbox
   try {
-    const customerId = await upsertCustomerByWa(p.to, undefined, p.to);
+    const { id: customerId } = await upsertCustomerByWa(p.to, undefined, p.to);
     const conversationId = await getOrCreateConversationForPhone(
       customerId,
       getRememberedPhoneNumberId(p.to) ?? null
@@ -225,7 +238,7 @@ async function sendButtonsMessageSafe(
 
   // 3) Log it as an outbound message for the admin inbox
   try {
-    const customerId = await upsertCustomerByWa(to, undefined, to);
+    const { id: customerId } = await upsertCustomerByWa(to, undefined, to);
     const conversationId = await getOrCreateConversationForPhone(
       customerId,
       getRememberedPhoneNumberId(to) ?? null
@@ -529,7 +542,7 @@ webhook.post("/webhook", async (req: Request, res: Response) => {
               (matchingContact?.profile?.name as string | undefined) ??
               (contacts[0]?.profile?.name as string | undefined);
 
-            const customerId = await upsertCustomerByWa(to, profileName);
+            const { id: customerId } = await upsertCustomerByWa(to, profileName);
             const convoId = await getOrCreateConversationForPhone(
               customerId,
               businessPhoneNumberId
@@ -653,33 +666,32 @@ if (interactiveId) {
           const lat = hasLocation ? Number(msg.location?.latitude) : undefined;
           const lon = hasLocation ? Number(msg.location?.longitude) : undefined;
 
-          // --- DB persistence + realtime for every inbound message ---
-                  // --- DB persistence + realtime ---
 // --- DB persistence + realtime for every inbound message ---
-// --- DB persistence + realtime for every inbound message ---
+let isNewCustomer = false;
+
 try {
   // 1) Ensure customer + conversation exist (use WhatsApp profile name if available)
-  const customerId = await upsertCustomerByWa(
-    from,
-    profileName,
-    from
-  );
+  const up = await upsertCustomerByWa(from, profileName, from);
+  const customerId = up.id;
+  isNewCustomer = up.isNew;
+
   const conversationId = await getOrCreateConversationForPhone(
     customerId,
     businessPhoneNumberId
   );
-// 2) Pick a body to store (text, user's choice label, location coords, or media)
-let bodyForDb: string | null = text ?? null;
 
-// Interactive replies: store the label the customer saw (e.g. "Kuhusu bidhaa")
-if (!bodyForDb && interactiveId) {
-  if (interactiveTitle && interactiveTitle.trim().length > 0) {
-    bodyForDb = interactiveTitle.trim();
-  } else {
-    // Fallback for older / weird payloads
-    bodyForDb = `[interactive:${interactiveId}]`;
+  // 2) Pick a body to store (text, user's choice label, location coords, or media)
+  let bodyForDb: string | null = text ?? null;
+
+  // Interactive replies: store the label the customer saw (e.g. "Kuhusu bidhaa")
+  if (!bodyForDb && interactiveId) {
+    if (interactiveTitle && interactiveTitle.trim().length > 0) {
+      bodyForDb = interactiveTitle.trim();
+    } else {
+      // Fallback for older / weird payloads
+      bodyForDb = `[interactive:${interactiveId}]`;
+    }
   }
-}
 
   // Location pin
   if (
@@ -712,17 +724,14 @@ if (!bodyForDb && interactiveId) {
     bodyForDb
   );
 
-
   // 4) Update conversation activity + emit realtime
   await updateConversationLastUserMessageAt(conversationId);
-
 
   emit("message.created", { conversation_id: conversationId, message: inserted });
   emit("conversation.updated", {});
 } catch (err) {
   console.error("inbound persist error:", err);
 }
-
 
             // If this conversation is in agent mode, do not let the bot answer.
           // We still saved the message above and emitted events for the admin UI.
@@ -731,6 +740,13 @@ if (!bodyForDb && interactiveId) {
             console.log("[webhook] agent mode for", from, "— skipping bot reply");
           continue;
           }
+
+          // DEV INTRO (send once for brand-new customers, then continue normal bot flow)
+const devIntro = getDevIntroText(lang);
+if (isNewCustomer && devIntro) {
+  await sendBotText(from, devIntro, businessPhoneNumberId);
+}
+
 
           // --- end DB persistence + realtime ---
 
@@ -1114,7 +1130,7 @@ if (N.startsWith("RESTOCK_YES:") || N.startsWith("RESTOCK_NO:")) {
   if (id === 'ACTION_BACK') return showMainMenu(user, lang);
 
   if (id === 'ACTION_TALK_TO_AGENT') {
-    const customerId = await upsertCustomerByWa(user, undefined, user);
+    const { id: customerId } = await upsertCustomerByWa(user, undefined, user);
     const conversationId = await getOrCreateConversationForPhone(
       customerId,
       getRememberedPhoneNumberId(user) ?? null
@@ -1145,7 +1161,7 @@ if (N.startsWith("RESTOCK_YES:") || N.startsWith("RESTOCK_NO:")) {
   }
 
   if (id === 'ACTION_RETURN_TO_BOT') {
-    const customerId = await upsertCustomerByWa(user, undefined, user);
+    const { id: customerId } = await upsertCustomerByWa(user, undefined, user);
     const conversationId = await getOrCreateConversationForPhone(
       customerId,
       getRememberedPhoneNumberId(user) ?? null
@@ -1267,7 +1283,7 @@ if (N.startsWith("RESTOCK_YES:") || N.startsWith("RESTOCK_NO:")) {
 
   // --- NEW: customer asks to talk to an agent ---
 if (id === 'ACTION_TALK_TO_AGENT') {
-  const customerId = await upsertCustomerByWa(user, undefined, user);
+  const { id: customerId } = await upsertCustomerByWa(user, undefined, user);
   const conversationId = await getOrCreateConversationForPhone(
     customerId,
     getRememberedPhoneNumberId(user) ?? null
@@ -1284,7 +1300,7 @@ if (id === 'ACTION_TALK_TO_AGENT') {
 
   // --- NEW: customer goes back from agent to bot ---
   if (id === 'ACTION_RETURN_TO_BOT') {
-    const customerId = await upsertCustomerByWa(user, undefined, user);
+    const { id: customerId } = await upsertCustomerByWa(user, undefined, user);
     const conversationId = await getOrCreateConversationForPhone(
       customerId,
       getRememberedPhoneNumberId(user) ?? null
@@ -1669,7 +1685,7 @@ if (id.startsWith("ORDER_CANCEL_")) {
     );
 
     // Reuse the existing "talk to agent" logic:
-    const customerId = await upsertCustomerByWa(user, undefined, user);
+    const { id: customerId } = await upsertCustomerByWa(user, undefined, user);
     const conversationId = await getOrCreateConversationForPhone(
       customerId,
       getRememberedPhoneNumberId(user) ?? null
@@ -1924,7 +1940,7 @@ async function sendProductDetailsOptions(
 
 async function isAgentAllowed(waId: string): Promise<boolean> {
   // Reuse your existing helpers
-  const customerId = await upsertCustomerByWa(waId, undefined, waId);
+  const { id: customerId } = await upsertCustomerByWa(waId, undefined, waId);
   const conversationId = await getOrCreateConversationForPhone(
     customerId,
     getRememberedPhoneNumberId(waId) ?? null
@@ -2011,7 +2027,7 @@ async function onFlow(user: string, step: FlowStep, m: Incoming, lang: Lang) {
         // Persist order in DB
 // NEW: persist order + initial payment in Neon
 try {
-  const customerId = await upsertCustomerByWa(
+  const { id: customerId } = await upsertCustomerByWa(
     user,
     undefined,               // do not override WhatsApp profile name
     contact.phone ?? user    // still store phone if provided
@@ -2140,7 +2156,7 @@ try {
 
       // NEW: persist order + initial payment in Neon
       try {
-        const customerId = await upsertCustomerByWa(
+        const { id: customerId } = await upsertCustomerByWa(
           user,
           contact.name,
           contact.phone ?? user

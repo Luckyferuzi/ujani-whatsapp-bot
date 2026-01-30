@@ -273,7 +273,6 @@ export default function SetupPage() {
     }
 
     void run();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingCode, pendingIds]);
 
   async function loadFacebookSdk(appId: string, graphVersion: string): Promise<void> {

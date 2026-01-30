@@ -121,12 +121,11 @@ export async function findLatestOrderByCustomerName(name: string) {
   return { order, payment };
 }
 
-
 export async function upsertCustomerByWa(
   waId: string,
   name?: string | null,
   phone?: string | null
-) {
+): Promise<{ id: number; isNew: boolean }> {
   const existing = await db("customers").where({ wa_id: waId }).first();
 
   if (existing) {
@@ -144,7 +143,7 @@ export async function upsertCustomerByWa(
       await db("customers").where({ id: existing.id }).update(update);
     }
 
-    return existing.id as number;
+    return { id: existing.id as number, isNew: false };
   }
 
   const [inserted] = await db("customers")
@@ -155,9 +154,8 @@ export async function upsertCustomerByWa(
     })
     .returning<{ id: number }[]>("id");
 
-  return inserted.id;
+  return { id: inserted.id, isNew: true };
 }
-
 
 export async function getOrCreateConversation(customerId: number) {
   return getOrCreateConversationForPhone(customerId, null);
