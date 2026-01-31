@@ -110,6 +110,26 @@ companyRoutes.put("/company/settings", async (req, res) => {
   const current = await loadCompanySettingsToCache().catch(() => getCompanySettingsCached());
 
   const next = mergeSettings(current, parsed.data);
+  // Guardrail: Phone Number ID must never equal Meta App ID
+if (
+  next.phone_number_id &&
+  next.app_id &&
+  String(next.phone_number_id).trim() === String(next.app_id).trim()
+) {
+  return res.status(400).json({
+    error: "invalid_phone_number_id",
+    message:
+      "PHONE_NUMBER_ID cannot be the same as APP_ID. Use the WhatsApp Phone Number ID from WABA phone_numbers.",
+  });
+}
+
+// Basic format check (helps catch accidental pasted text)
+if (next.phone_number_id && !/^\d{8,}$/.test(String(next.phone_number_id).trim())) {
+  return res.status(400).json({
+    error: "invalid_phone_number_id",
+    message: "PHONE_NUMBER_ID must be digits only (Meta phone number id).",
+  });
+}
   await saveCompanySettings(next);
 
   // If WA credentials were involved, refresh business info (priority request)
@@ -171,9 +191,21 @@ companyRoutes.post("/setup/test-send", async (req, res) => {
     return res.status(400).json({ error: "invalid_payload" });
   }
 
-  await sendText(parsed.data.to, parsed.data.text);
-  return res.json({ ok: true });
+  try {
+    await sendText(parsed.data.to, parsed.data.text);
+    return res.json({ ok: true });
+  } catch (e: any) {
+    // Do NOT crash the server; return a helpful response to the UI
+    return res.status(400).json({
+      ok: false,
+      error: "whatsapp_send_failed",
+      message:
+        e?.message ??
+        "Failed to send WhatsApp message. Check WHATSAPP_TOKEN + PHONE_NUMBER_ID permissions.",
+    });
+  }
 });
+
 
 companyRoutes.post("/setup/complete", async (_req, res) => {
   const current = await loadCompanySettingsToCache().catch(() => getCompanySettingsCached());
