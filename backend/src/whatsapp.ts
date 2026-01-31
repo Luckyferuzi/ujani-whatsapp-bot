@@ -666,21 +666,36 @@ export async function getBusinessProfile(): Promise<WhatsAppBusinessProfile | nu
   const phoneId = getPhoneNumberId();
   if (!phoneId) return null;
 
-  const data = await apiGet(`${phoneId}/whatsapp_business_profile?fields=${PROFILE_FIELDS}`);
+  try {
+    const data = await apiGet(
+      `${phoneId}/whatsapp_business_profile?fields=${PROFILE_FIELDS}`
+    );
 
-  // Meta responses often come as { data: [ {...} ] }
-  const profile = Array.isArray(data?.data) ? data.data[0] : data;
-  if (!profile) return null;
+    // Meta responses often come as { data: [ {...} ] }
+    const profile = Array.isArray(data?.data) ? data.data[0] : data;
+    if (!profile) return null;
 
-  return {
-    about: profile.about ?? null,
-    address: profile.address ?? null,
-    description: profile.description ?? null,
-    email: profile.email ?? null,
-    profile_picture_url: profile.profile_picture_url ?? null,
-    websites: Array.isArray(profile.websites) ? profile.websites : [],
-    vertical: profile.vertical ?? null,
-  };
+    return {
+      about: profile.about ?? null,
+      address: profile.address ?? null,
+      description: profile.description ?? null,
+      email: profile.email ?? null,
+      profile_picture_url: profile.profile_picture_url ?? null,
+      websites: Array.isArray(profile.websites) ? profile.websites : [],
+      vertical: profile.vertical ?? null,
+    };
+  } catch (err: any) {
+    // Avoid crashing / noisy logs. Common causes:
+    // - PHONE_NUMBER_ID wrong
+    // - token missing permissions
+    // - token doesn't belong to this WABA / number
+    const msg = err?.message ?? String(err);
+
+    // If apiGet throws an Error with the full JSON string, keep it readable
+    console.warn("[whatsapp] getBusinessProfile failed:", msg);
+
+    return null;
+  }
 }
 
 export async function updateBusinessProfile(update: WhatsAppBusinessProfile): Promise<void> {
