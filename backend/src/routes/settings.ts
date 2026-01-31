@@ -11,6 +11,10 @@ type Presence = {
   menu_intro: string | null;
   menu_footer: string | null;
   catalog_button_text: string | null;
+    catalog_intro: string | null;
+  catalog_wa_number: string | null;        // digits only (e.g. 255696946717)
+  catalog_thumbnail_sku: string | null;    // optional manual thumbnail SKU
+
 
   about: string | null;
   description: string | null;
@@ -26,7 +30,9 @@ const DEFAULT_PRESENCE: Presence = {
   menu_intro: null,
   menu_footer: null,
   catalog_button_text: null,
-
+    catalog_intro: null,
+  catalog_wa_number: null,
+  catalog_thumbnail_sku: null,
   about: null,
   description: null,
   address: null,
@@ -40,6 +46,12 @@ function norm(v: unknown): string | null {
   if (typeof v !== "string") return null;
   const t = v.trim();
   return t.length ? t : null;
+}
+
+function normDigits(v: unknown): string | null {
+  if (typeof v !== "string") return null;
+  const d = v.replace(/[^\d]/g, "").trim();
+  return d.length ? d : null;
 }
 
 settingsRoutes.get("/whatsapp-presence", requireSession, async (_req, res) => {
@@ -63,7 +75,9 @@ settingsRoutes.patch("/whatsapp-presence", requireSession, requireAdmin, async (
     menu_intro: z.string().optional(),
     menu_footer: z.string().optional(),
     catalog_button_text: z.string().optional(),
-
+      catalog_intro: z.string().optional(),
+  catalog_wa_number: z.string().optional(),
+  catalog_thumbnail_sku: z.string().optional(),
     // WhatsApp Business Profile fields
     about: z.string().optional(),
     description: z.string().optional(),
@@ -91,6 +105,14 @@ settingsRoutes.patch("/whatsapp-presence", requireSession, requireAdmin, async (
     catalog_button_text:
       "catalog_button_text" in parsed.data ? norm(parsed.data.catalog_button_text) : current.catalog_button_text,
 
+    catalog_intro:
+  "catalog_intro" in parsed.data ? norm(parsed.data.catalog_intro) : (current as any).catalog_intro ?? null,
+
+catalog_wa_number:
+  "catalog_wa_number" in parsed.data ? normDigits(parsed.data.catalog_wa_number) : (current as any).catalog_wa_number ?? null,
+
+catalog_thumbnail_sku:
+  "catalog_thumbnail_sku" in parsed.data ? norm(parsed.data.catalog_thumbnail_sku) : (current as any).catalog_thumbnail_sku ?? null,
     about: "about" in parsed.data ? norm(parsed.data.about) : current.about,
     description: "description" in parsed.data ? norm(parsed.data.description) : current.description,
     address: "address" in parsed.data ? norm(parsed.data.address) : current.address,

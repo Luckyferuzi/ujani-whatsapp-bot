@@ -18,7 +18,9 @@ type Presence = {
   menu_intro: string | null;
   menu_footer: string | null;
   catalog_button_text: string | null;
-
+    catalog_intro?: string | null;
+  catalog_wa_number?: string | null;
+  catalog_thumbnail_sku?: string | null;
   // WhatsApp Business Profile (customers see in Business Info)
   about: string | null;
   description: string | null;
@@ -111,7 +113,9 @@ export default function SettingsPage() {
   const [menuIntro, setMenuIntro] = useState<string>("");
   const [menuFooter, setMenuFooter] = useState<string>("");
   const [catalogButtonText, setCatalogButtonText] = useState<string>("");
-
+  const [catalogIntro, setCatalogIntro] = useState<string>("");
+const [catalogWaNumber, setCatalogWaNumber] = useState<string>("");
+const [catalogThumbnailSku, setCatalogThumbnailSku] = useState<string>("");
   // WhatsApp Business Profile (controlled strings)
   const [about, setAbout] = useState<string>("");
   const [description, setDescription] = useState<string>("");
@@ -157,6 +161,9 @@ export default function SettingsPage() {
         setMenuIntro(p.saved.menu_intro ?? "");
         setMenuFooter(String(p.saved.menu_footer ?? ""));
         setCatalogButtonText(p.saved.catalog_button_text ?? "");
+        setCatalogIntro((p.saved as any).catalog_intro ?? "");
+setCatalogWaNumber((p.saved as any).catalog_wa_number ?? "");
+setCatalogThumbnailSku((p.saved as any).catalog_thumbnail_sku ?? "");
 
         // WA Business Profile fields
         setAbout(p.saved.about ?? "");
@@ -242,6 +249,9 @@ export default function SettingsPage() {
           menu_intro: menuIntro,
           menu_footer: menuFooter,
           catalog_button_text: catalogButtonText,
+          catalog_intro: catalogIntro,
+catalog_wa_number: catalogWaNumber,
+catalog_thumbnail_sku: catalogThumbnailSku,
         },
         false
       );
@@ -525,6 +535,40 @@ export default function SettingsPage() {
 
                   <div className="pr-field">
                     <div className="pr-label">Button text (Optional)</div>
+                    <div className="pr-field">
+  <div className="pr-label">Catalog intro (Optional)</div>
+  <div className="pr-hint">Ujumbe mfupi unaotoka kabla ya “View catalog”.</div>
+  <input
+    className="pr-input"
+    value={catalogIntro}
+    onChange={(e) => setCatalogIntro(e.target.value)}
+    disabled={!isAdmin}
+  />
+</div>
+
+<div className="pr-field">
+  <div className="pr-label">Catalog WA number (digits only)</div>
+  <div className="pr-hint">Hutumika kwa fallback link: wa.me/c/NUMBER. Example: 255696946717</div>
+  <input
+    className="pr-input"
+    value={catalogWaNumber}
+    onChange={(e) => setCatalogWaNumber(e.target.value)}
+    disabled={!isAdmin}
+    placeholder="255696946717"
+  />
+</div>
+
+<div className="pr-field">
+  <div className="pr-label">Catalog thumbnail SKU (Optional)</div>
+  <div className="pr-hint">Ikiwekwa, WhatsApp catalog message itaonyesha product hiyo kama thumbnail. (Retailer ID / SKU)</div>
+  <input
+    className="pr-input"
+    value={catalogThumbnailSku}
+    onChange={(e) => setCatalogThumbnailSku(e.target.value)}
+    disabled={!isAdmin}
+    placeholder="e.g. UJANI-KIBOKO"
+  />
+</div>
                     <div className="pr-hint">Maandishi ya button ambayo mteja atabonyeza kufungua list.</div>
                     <input
                       className="pr-input"
