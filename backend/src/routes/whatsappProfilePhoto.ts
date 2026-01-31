@@ -252,16 +252,20 @@ if (!f) return res.status(400).json({ error: "missing_file" });
       }),
     });
 
-    if (!updateResp.ok) {
-      return res.status(502).json({
-        ok: false,
-        applied: false,
-        handle,
-        error: "business_profile_update_failed",
-        message: "Upload succeeded but applying handle to WhatsApp profile failed.",
-        details: updateResp.json ?? updateResp.text,
-      });
-    }
+if (!updateResp.ok) {
+  // Don't fail the whole request — upload worked; apply may fail due to token/permission mismatch.
+  // Return 200 so the UI can show a warning instead of an error toast.
+  return res.status(200).json({
+    ok: true,
+    applied: false,
+    handle,
+    warning: "business_profile_update_failed",
+    message:
+      "Photo uploaded, but applying to WhatsApp profile failed. Check token permissions and that PHONE_NUMBER_ID belongs to this token/WABA.",
+    details: updateResp.json ?? updateResp.text,
+  });
+}
+
 
     return res.json({
       ok: true,
