@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { get, post, put } from "@/lib/api";
+import { API, get, post, put } from "@/lib/api";
 
 type CompanySettings = {
   company_name: string;
@@ -110,6 +110,11 @@ export default function SetupPage() {
   const [testText, setTestText] = useState("Hello from Ujani bot ✅");
 
   const isComplete = !!settings?.is_setup_complete;
+
+    const webhookCallbackUrl = useMemo(() => {
+    return API ? `${API}/webhook` : "";
+  }, []);
+
 
   const defaultPhoneRow = useMemo(() => {
     return phoneNumbers.find((x) => x.is_default) ?? null;
@@ -282,14 +287,14 @@ export default function SetupPage() {
       <div className="rounded-xl border p-5 space-y-4">
         <h2 className="text-lg font-extrabold">WhatsApp Cloud API credentials</h2>
 
-        <SecretInput
-          label="WHATSAPP_TOKEN"
-          value={waToken}
-          onChange={setWaToken}
-          revealed={revealToken}
-          onToggle={() => setRevealToken((x) => !x)}
-          hint="Use a permanent/system-user token. Temporary tokens will break."
-        />
+<SecretInput
+  label="ACCESS_TOKEN (WhatsApp Cloud API)"
+  value={waToken}
+  onChange={setWaToken}
+  revealed={revealToken}
+  onToggle={() => setRevealToken((x) => !x)}
+  hint="Saved in DB (overrides .env). Use a permanent System User token. You can also use WHATSAPP_TOKEN env, backend supports both."
+/>
 
         <div>
           <div className="flex items-center justify-between">
@@ -350,6 +355,28 @@ export default function SetupPage() {
           />
         </div>
 
+                <div className="mt-3 border border-ui-border rounded p-3">
+          <div className="text-sm font-semibold">Webhook configuration</div>
+          <div className="text-xs text-ui-muted mt-1">
+            In Meta → WhatsApp → Configuration:
+            set Callback URL to this server’s /webhook endpoint and Verify Token to the value above.
+          </div>
+
+          <div className="mt-2 flex items-center justify-between">
+            <label className="text-sm font-semibold">Callback URL</label>
+            {webhookCallbackUrl ? <CopyButton text={webhookCallbackUrl} /> : null}
+          </div>
+
+          <input
+            className="w-full mt-1 px-3 py-2 rounded border border-ui-border bg-gray-50"
+            value={webhookCallbackUrl}
+            readOnly
+          />
+
+          <div className="text-xs text-ui-muted mt-2">
+            Subscribe at least to: messages, message_statuses (so delivery/read status can update).
+          </div>
+        </div>
         <div>
           <label className="text-sm font-semibold">APP_ID</label>
           <input
@@ -369,7 +396,7 @@ export default function SetupPage() {
         />
 
         <div>
-          <label className="text-sm font-semibold">GRAPH_API_VERSION</label>
+          <label className="text-sm font-semibold">META_GRAPH_VERSION</label>
           <input
             className="w-full mt-1 px-3 py-2 rounded border border-ui-border"
             value={graphVer}

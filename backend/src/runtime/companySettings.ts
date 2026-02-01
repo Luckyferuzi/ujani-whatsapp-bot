@@ -79,7 +79,12 @@ export function getCompanySettingsCached(): CompanySettings {
 }
 
 export function getVerifyTokenEffective(): string | null {
-  return cached.verify_token || (process.env.VERIFY_TOKEN ?? null);
+  return (
+    cached.verify_token ||
+    process.env.VERIFY_TOKEN ||
+    process.env.WEBHOOK_VERIFY_TOKEN ||
+    null
+  );
 }
 
 export function getAppSecretEffective(): string | null {
@@ -93,21 +98,39 @@ export function getAppIdEffective(): string | null {
 export function getGraphApiVersionEffective(): string {
   return (
     cached.graph_api_version ||
+    process.env.META_GRAPH_VERSION ||
     process.env.GRAPH_API_VERSION ||
+    process.env.GRAPH_VERSION ||
     "v19.0"
   );
 }
 
 export function getWhatsAppTokenEffective(): string | null {
-  return cached.whatsapp_token || (process.env.WHATSAPP_TOKEN ?? null);
+  return (
+    cached.whatsapp_token ||
+    process.env.ACCESS_TOKEN ||
+    process.env.WHATSAPP_TOKEN ||
+    process.env.WABA_TOKEN ||
+    null
+  );
 }
 
 export function getPhoneNumberIdEffective(): string | null {
-  return cached.phone_number_id || (process.env.PHONE_NUMBER_ID ?? null);
+  return (
+    cached.phone_number_id ||
+    process.env.PHONE_NUMBER_ID ||
+    process.env.WHATSAPP_PHONE_NUMBER_ID ||
+    process.env.WABA_PHONE_ID ||
+    null
+  );
 }
-
 export function getWabaIdEffective(): string | null {
-  return cached.waba_id || (process.env.WABA_ID ?? null);
+  return (
+    cached.waba_id ||
+    process.env.WABA_ID ||
+    process.env.WHATSAPP_WABA_ID ||
+    null
+  );
 }
 
 export function getEmbeddedConfigIdEffective(): string | null {

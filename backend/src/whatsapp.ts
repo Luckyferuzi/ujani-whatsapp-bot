@@ -73,18 +73,10 @@ function resolvePhoneNumberId(explicit?: string | null, customerWaId?: string | 
 }
 
 const GRAPH_BASE = 'https://graph.facebook.com';
+
 function getGraphVer(): string {
-  const fromDb = getGraphApiVersionEffective();
-  if (fromDb) return fromDb;
-
-  // Fallbacks (so DB not set doesn’t break runtime)
-  return (
-    (env as any).GRAPH_API_VERSION ||
-    (env as any).GRAPH_VERSION ||
-    "v24.0"
-  );
+  return getGraphApiVersionEffective();
 }
-
 
 /* -------------------------------------------------------------------------- */
 /*                                HTTP client                                 */
@@ -152,6 +144,12 @@ if (!res.ok) {
 
 async function apiFetch(path: string, body: unknown) {
   const token = getToken();
+  if (!token) {
+    throw new Error(
+      "[whatsapp] Missing access token. Set ACCESS_TOKEN (or WHATSAPP_TOKEN) in Setup or .env."
+    );
+  }
+
   const url = `${GRAPH_BASE}/${getGraphVer()}/${path}`;
   const res = await fetch(url, {
     method: "POST",
@@ -194,9 +192,11 @@ export async function sendText(
 ) {
   const phoneId = resolvePhoneNumberId(opts?.phoneNumberId ?? null, to);
   if (!phoneId) {
-    console.warn('[whatsapp] PHONE_NUMBER_ID missing; cannot sendText');
-    return;
+    throw new Error(
+      "[whatsapp] PHONE_NUMBER_ID missing; cannot sendText. Set PHONE_NUMBER_ID in Setup or .env."
+    );
   }
+
   const payload = {
     messaging_product: 'whatsapp',
     to,
@@ -219,10 +219,11 @@ export async function sendListMessage(args: {
   sections: ListSection[];
   phoneNumberId?: string | null;
 }) {
-  const phoneId = resolvePhoneNumberId(args.phoneNumberId ?? null, args.to);
+  const phoneId = getPhoneNumberIdEffective();
   if (!phoneId) {
-    console.warn('[whatsapp] PHONE_NUMBER_ID missing; cannot sendListMessage');
-    return;
+    throw new Error(
+      "[whatsapp] PHONE_NUMBER_ID missing; cannot perform this WhatsApp API call. Set PHONE_NUMBER_ID in Setup or .env."
+    );
   }
 
   const header =
@@ -267,9 +268,11 @@ export async function sendButtonsMessage(
 ) {
   const phoneId = resolvePhoneNumberId(opts?.phoneNumberId ?? null, to);
   if (!phoneId) {
-    console.warn('[whatsapp] PHONE_NUMBER_ID missing; cannot sendButtonsMessage');
-    return;
+    throw new Error(
+      "[whatsapp] PHONE_NUMBER_ID missing; cannot sendText. Set PHONE_NUMBER_ID in Setup or .env."
+    );
   }
+
   const payload: any = {
     messaging_product: 'whatsapp',
     to,
@@ -299,9 +302,11 @@ export async function sendCatalogMessage(
 ) {
   const phoneId = resolvePhoneNumberId(opts?.phoneNumberId ?? null, to);
   if (!phoneId) {
-    console.warn("[whatsapp] PHONE_NUMBER_ID missing; cannot sendCatalogMessage");
-    return;
+    throw new Error(
+      "[whatsapp] PHONE_NUMBER_ID missing; cannot sendText. Set PHONE_NUMBER_ID in Setup or .env."
+    );
   }
+
 
   const payload: any = {
     messaging_product: "whatsapp",
@@ -337,9 +342,11 @@ export async function sendCtaUrlMessage(
 ) {
   const phoneId = resolvePhoneNumberId(opts?.phoneNumberId ?? null, to);
   if (!phoneId) {
-    console.warn("[whatsapp] PHONE_NUMBER_ID missing; cannot sendCtaUrlMessage");
-    return;
+    throw new Error(
+      "[whatsapp] PHONE_NUMBER_ID missing; cannot sendText. Set PHONE_NUMBER_ID in Setup or .env."
+    );
   }
+
 
   const payload: any = {
     messaging_product: "whatsapp",
@@ -449,11 +456,13 @@ export async function markAsRead(
   opts?: { phoneNumberId?: string | null }
 ) {
   if (!messageId) return;
-  const phoneId = resolvePhoneNumberId(opts?.phoneNumberId ?? null);
+  const phoneId = getPhoneNumberIdEffective();
   if (!phoneId) {
-    console.warn('[whatsapp] PHONE_NUMBER_ID missing; cannot markAsRead');
-    return;
+    throw new Error(
+      "[whatsapp] PHONE_NUMBER_ID missing; cannot perform this WhatsApp API call. Set PHONE_NUMBER_ID in Setup or .env."
+    );
   }
+
   const payload = {
     messaging_product: 'whatsapp',
     status: 'read',
@@ -476,10 +485,11 @@ export async function markAsRead(
  * - PAYMENT_3_LABEL / PAYMENT_3_NUMBER
  */
 export async function sendPaymentInstructions(to: string, total: number) {
-  const phoneId = getPhoneNumberId();
+  const phoneId = getPhoneNumberIdEffective();
   if (!phoneId) {
-    console.warn('[whatsapp] PHONE_NUMBER_ID missing; cannot send payment instructions');
-    return;
+    throw new Error(
+      "[whatsapp] PHONE_NUMBER_ID missing; cannot perform this WhatsApp API call. Set PHONE_NUMBER_ID in Setup or .env."
+    );
   }
 
   const lines: string[] = [];
@@ -633,9 +643,11 @@ export async function uploadMedia(
   contentType: string,
   opts?: { phoneNumberId?: string | null }
 ): Promise<string> {
-  const phoneId = resolvePhoneNumberId(opts?.phoneNumberId ?? null);
+  const phoneId = getPhoneNumberIdEffective();
   if (!phoneId) {
-    throw new Error("PHONE_NUMBER_ID missing; cannot upload media");
+    throw new Error(
+      "[whatsapp] PHONE_NUMBER_ID missing; cannot perform this WhatsApp API call. Set PHONE_NUMBER_ID in Setup or .env."
+    );
   }
 
   const token = getToken();
@@ -676,11 +688,13 @@ export async function sendMediaById(
   caption?: string,
   opts?: { phoneNumberId?: string | null }
 ) {
-  const phoneId = resolvePhoneNumberId(opts?.phoneNumberId ?? null);
+  const phoneId = resolvePhoneNumberId(opts?.phoneNumberId ?? null, to);
   if (!phoneId) {
-    console.warn("[whatsapp] PHONE_NUMBER_ID missing; cannot sendMediaById");
-    return;
+    throw new Error(
+      "[whatsapp] PHONE_NUMBER_ID missing; cannot sendText. Set PHONE_NUMBER_ID in Setup or .env."
+    );
   }
+
 
   const payload: any = {
     messaging_product: "whatsapp",
@@ -716,8 +730,12 @@ export type WhatsAppPhoneNumberSummary = {
 };
 
 export async function getPhoneNumberSummary(): Promise<WhatsAppPhoneNumberSummary | null> {
-  const phoneId = getPhoneNumberId();
-  if (!phoneId) return null;
+  const phoneId = getPhoneNumberIdEffective();
+  if (!phoneId) {
+    throw new Error(
+      "[whatsapp] PHONE_NUMBER_ID missing; cannot perform this WhatsApp API call. Set PHONE_NUMBER_ID in Setup or .env."
+    );
+  }
 
   try {
     const data = await apiGet(`${phoneId}?fields=display_phone_number,verified_name`);
@@ -763,8 +781,12 @@ function parseProfile(data: any): WhatsAppBusinessProfile | null {
 }
 
 export async function getBusinessProfile(): Promise<WhatsAppBusinessProfile | null> {
-  const phoneId = getPhoneNumberId();
-  if (!phoneId) return null;
+  const phoneId = getPhoneNumberIdEffective();
+  if (!phoneId) {
+    throw new Error(
+      "[whatsapp] PHONE_NUMBER_ID missing; cannot perform this WhatsApp API call. Set PHONE_NUMBER_ID in Setup or .env."
+    );
+  }
 
   const now = Date.now();
 
@@ -820,10 +842,11 @@ export async function getBusinessProfile(): Promise<WhatsAppBusinessProfile | nu
 }
 
 export async function updateBusinessProfile(update: WhatsAppBusinessProfile): Promise<void> {
-  const phoneId = getPhoneNumberId();
+  const phoneId = getPhoneNumberIdEffective();
   if (!phoneId) {
-    console.warn("[whatsapp] PHONE_NUMBER_ID missing; cannot update business profile");
-    return;
+    throw new Error(
+      "[whatsapp] PHONE_NUMBER_ID missing; cannot perform this WhatsApp API call. Set PHONE_NUMBER_ID in Setup or .env."
+    );
   }
 
   // Only send fields that are present (avoid overwriting with nulls unintentionally)
