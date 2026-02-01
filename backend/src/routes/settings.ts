@@ -53,27 +53,25 @@ function normDigits(v: unknown): string | null {
   const d = v.replace(/[^\d]/g, "").trim();
   return d.length ? d : null;
 }
-settingsRoutes.get("/whatsapp-presence", requireSession, async (_req, res) => {
+
+settingsRoutes.get("/whatsapp-presence", requireSession, async (req, res) => {
   const saved = await getJsonSetting<Presence>("whatsapp_presence", DEFAULT_PRESENCE);
 
-  // ✅ Reliable connectivity check (drives WA badge)
-  let live: any = null;
+  // ✅ This is the connectivity signal
   const summary = await getPhoneNumberSummary();
-  if (summary) {
-    live = summary; // UI will show "Connected"
-  } else {
-    live = { error: "not_connected" }; // UI will show "Not connected"
-  }
+  const live: any = summary ? summary : { error: "not_connected" };
 
-  // Optional: also try to fetch profile (best-effort; doesn’t control badge)
-  try {
-    const profile = await getBusinessProfile();
-    if (profile) live.profile = profile;
-  } catch {}
+  // Only fetch Business Profile if explicitly requested (prevents 131000 log spam)
+  const includeProfile = req.query.includeProfile === "1";
+  if (includeProfile) {
+    try {
+      const profile = await getBusinessProfile();
+      if (profile) live.profile = profile;
+    } catch {}
+  }
 
   return res.json({ saved, live });
 });
-
 
 settingsRoutes.patch("/whatsapp-presence", requireSession, requireAdmin, async (req, res) => {
   const schema = z.object({
@@ -156,12 +154,9 @@ catalog_thumbnail_sku:
     }
   }
 
-  let live: any = null;
-  try {
-    live = await getBusinessProfile();
-  } catch {
-    live = { error: "failed_to_fetch_live_profile" };
-  }
+const summary = await getPhoneNumberSummary();
+const live: any = summary ? summary : { error: "not_connected" };
 
-  return res.json({ ok: true, saved: next, applied, live });
+return res.json({ ok: true, saved: next, applied, live });
+
 });

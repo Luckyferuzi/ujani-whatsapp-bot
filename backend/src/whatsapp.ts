@@ -90,6 +90,16 @@ function getGraphVer(): string {
 /*                                HTTP client                                 */
 /* -------------------------------------------------------------------------- */
 
+const LAST_LOG_AT = new Map<string, number>();
+const LOG_THROTTLE_MS = 60_000;
+
+function logThrottled(key: string, ...args: any[]) {
+  const now = Date.now();
+  const last = LAST_LOG_AT.get(key) ?? 0;
+  if (now - last < LOG_THROTTLE_MS) return;
+  LAST_LOG_AT.set(key, now);
+  console.error(...args);
+}
 
 async function apiGet(path: string) {
   const token = getToken();
@@ -100,7 +110,6 @@ async function apiGet(path: string) {
       Authorization: `Bearer ${token}`,
     },
   });
-
 if (!res.ok) {
   const text = await res.text().catch(() => "");
   let payload: any = text;
@@ -111,15 +120,32 @@ if (!res.ok) {
     // keep raw text
   }
 
-  console.error("[whatsapp] GET error", res.status, payload);
+  const debugLink = res.headers.get("debug-link");
+  const errorMid = res.headers.get("error-mid");
 
-  throw new Error(
+  const key = `GET:${path}:${res.status}:${payload?.error?.code ?? "na"}`;
+  logThrottled(
+    key,
+    "[whatsapp] GET error",
+    res.status,
+    payload,
+    { debugLink, errorMid, url }
+  );
+
+  const err: any = new Error(
     `WhatsApp GET error ${res.status}: ${
       typeof payload === "string" ? payload : JSON.stringify(payload)
     }`
   );
-}
 
+  // ✅ attach structured info so callers can backoff intelligently
+  err.status = res.status;
+  err.payload = payload;
+  err.debugLink = debugLink;
+  err.errorMid = errorMid;
+
+  throw err;
+}
 
   return res.json() as Promise<any>;
 }
@@ -713,46 +739,84 @@ const PROFILE_FIELDS_PRIMARY =
 const PROFILE_FIELDS_SAFE =
   "about,address,description,email,websites";
 
+// Cache + backoff to avoid hammering Meta when it returns 131000
+let CACHED_PROFILE: WhatsAppBusinessProfile | null = null;
+let CACHED_PROFILE_AT = 0;
+
+let PROFILE_FAIL_UNTIL = 0;
+const PROFILE_CACHE_MS = 5 * 60 * 1000;   // 5 minutes
+const PROFILE_BACKOFF_MS = 5 * 60 * 1000; // 5 minutes
+
+function parseProfile(data: any): WhatsAppBusinessProfile | null {
+  const p = Array.isArray(data?.data) ? data.data[0] : data;
+  if (!p) return null;
+
+  return {
+    about: p.about ?? null,
+    address: p.address ?? null,
+    description: p.description ?? null,
+    email: p.email ?? null,
+    profile_picture_url: p.profile_picture_url ?? null,
+    websites: Array.isArray(p.websites) ? p.websites : [],
+    vertical: p.vertical ?? null,
+  };
+}
+
 export async function getBusinessProfile(): Promise<WhatsAppBusinessProfile | null> {
   const phoneId = getPhoneNumberId();
   if (!phoneId) return null;
 
-  try {
-let data: any;
+  const now = Date.now();
 
-try {
-  data = await apiGet(`${phoneId}/whatsapp_business_profile?fields=${PROFILE_FIELDS_PRIMARY}`);
-} catch (e) {
-  // fallback to safe fields (prevents WA: Unknown due to Meta 131000)
-  data = await apiGet(`${phoneId}/whatsapp_business_profile?fields=${PROFILE_FIELDS_SAFE}`);
-}
-
-
-    // Meta responses often come as { data: [ {...} ] }
-    const profile = Array.isArray(data?.data) ? data.data[0] : data;
-    if (!profile) return null;
-
-    return {
-      about: profile.about ?? null,
-      address: profile.address ?? null,
-      description: profile.description ?? null,
-      email: profile.email ?? null,
-      profile_picture_url: profile.profile_picture_url ?? null,
-      websites: Array.isArray(profile.websites) ? profile.websites : [],
-      vertical: profile.vertical ?? null,
-    };
-  } catch (err: any) {
-    // Avoid crashing / noisy logs. Common causes:
-    // - PHONE_NUMBER_ID wrong
-    // - token missing permissions
-    // - token doesn't belong to this WABA / number
-    const msg = err?.message ?? String(err);
-
-    // If apiGet throws an Error with the full JSON string, keep it readable
-    console.warn("[whatsapp] getBusinessProfile failed:", msg);
-
-    return null;
+  // 1) return fresh cache
+  if (CACHED_PROFILE && now - CACHED_PROFILE_AT < PROFILE_CACHE_MS) {
+    return CACHED_PROFILE;
   }
+
+  // 2) if Meta is failing, don't retry; return last known profile
+  if (now < PROFILE_FAIL_UNTIL) {
+    return CACHED_PROFILE;
+  }
+
+  // 3) try primary fields
+  try {
+    const data = await apiGet(
+      `${phoneId}/whatsapp_business_profile?fields=${PROFILE_FIELDS_PRIMARY}`
+    );
+    const prof = parseProfile(data);
+    if (prof) {
+      CACHED_PROFILE = prof;
+      CACHED_PROFILE_AT = now;
+      return prof;
+    }
+  } catch (err: any) {
+    const code = err?.payload?.error?.code;
+    if (code === 131000 || err?.status === 500) {
+      PROFILE_FAIL_UNTIL = now + PROFILE_BACKOFF_MS;
+      return CACHED_PROFILE;
+    }
+  }
+
+  // 4) fallback safe fields
+  try {
+    const data = await apiGet(
+      `${phoneId}/whatsapp_business_profile?fields=${PROFILE_FIELDS_SAFE}`
+    );
+    const prof = parseProfile(data);
+    if (prof) {
+      CACHED_PROFILE = prof;
+      CACHED_PROFILE_AT = now;
+      return prof;
+    }
+  } catch (err: any) {
+    const code = err?.payload?.error?.code;
+    if (code === 131000 || err?.status === 500) {
+      PROFILE_FAIL_UNTIL = now + PROFILE_BACKOFF_MS;
+      return CACHED_PROFILE;
+    }
+  }
+
+  return CACHED_PROFILE;
 }
 
 export async function updateBusinessProfile(update: WhatsAppBusinessProfile): Promise<void> {
