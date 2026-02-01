@@ -74,8 +74,17 @@ function resolvePhoneNumberId(explicit?: string | null, customerWaId?: string | 
 
 const GRAPH_BASE = 'https://graph.facebook.com';
 function getGraphVer(): string {
-  return getGraphApiVersionEffective();
+  const fromDb = getGraphApiVersionEffective();
+  if (fromDb) return fromDb;
+
+  // Fallbacks (so DB not set doesn’t break runtime)
+  return (
+    (env as any).GRAPH_API_VERSION ||
+    (env as any).GRAPH_VERSION ||
+    "v24.0"
+  );
 }
+
 
 /* -------------------------------------------------------------------------- */
 /*                                HTTP client                                 */
@@ -92,11 +101,25 @@ async function apiGet(path: string) {
     },
   });
 
-  if (!res.ok) {
-    const text = await res.text();
-    console.error("[whatsapp] GET error", res.status, text);
-    throw new Error(`WhatsApp GET error (${res.status})`);
+if (!res.ok) {
+  const text = await res.text().catch(() => "");
+  let payload: any = text;
+
+  try {
+    payload = text ? JSON.parse(text) : null;
+  } catch {
+    // keep raw text
   }
+
+  console.error("[whatsapp] GET error", res.status, payload);
+
+  throw new Error(
+    `WhatsApp GET error ${res.status}: ${
+      typeof payload === "string" ? payload : JSON.stringify(payload)
+    }`
+  );
+}
+
 
   return res.json() as Promise<any>;
 }
@@ -659,17 +682,51 @@ export type WhatsAppBusinessProfile = {
   vertical?: string | null;
 };
 
-const PROFILE_FIELDS =
+export type WhatsAppPhoneNumberSummary = {
+  ok: true;
+  id: string;
+  display_phone_number: string | null;
+  verified_name: string | null;
+};
+
+export async function getPhoneNumberSummary(): Promise<WhatsAppPhoneNumberSummary | null> {
+  const phoneId = getPhoneNumberId();
+  if (!phoneId) return null;
+
+  try {
+    const data = await apiGet(`${phoneId}?fields=display_phone_number,verified_name`);
+    return {
+      ok: true,
+      id: data?.id ?? phoneId,
+      display_phone_number: data?.display_phone_number ?? null,
+      verified_name: data?.verified_name ?? null,
+    };
+  } catch (err: any) {
+    console.warn("[whatsapp] getPhoneNumberSummary failed:", err?.message ?? String(err));
+    return null;
+  }
+}
+const PROFILE_FIELDS_PRIMARY =
   "about,address,description,email,profile_picture_url,websites,vertical";
+
+// Some Meta setups randomly 500 on these fields; safe fallback:
+const PROFILE_FIELDS_SAFE =
+  "about,address,description,email,websites";
 
 export async function getBusinessProfile(): Promise<WhatsAppBusinessProfile | null> {
   const phoneId = getPhoneNumberId();
   if (!phoneId) return null;
 
   try {
-    const data = await apiGet(
-      `${phoneId}/whatsapp_business_profile?fields=${PROFILE_FIELDS}`
-    );
+let data: any;
+
+try {
+  data = await apiGet(`${phoneId}/whatsapp_business_profile?fields=${PROFILE_FIELDS_PRIMARY}`);
+} catch (e) {
+  // fallback to safe fields (prevents WA: Unknown due to Meta 131000)
+  data = await apiGet(`${phoneId}/whatsapp_business_profile?fields=${PROFILE_FIELDS_SAFE}`);
+}
+
 
     // Meta responses often come as { data: [ {...} ] }
     const profile = Array.isArray(data?.data) ? data.data[0] : data;

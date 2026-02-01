@@ -2,7 +2,7 @@ import express from "express";
 import { z } from "zod";
 import { requireAdmin, requireSession } from "../middleware/sessionAuth.js";
 import { getJsonSetting, setJsonSetting } from "../db/settings.js";
-import { getBusinessProfile, updateBusinessProfile } from "../whatsapp.js";
+import { getBusinessProfile, updateBusinessProfile, getPhoneNumberSummary } from "../whatsapp.js";
 
 export const settingsRoutes = express.Router();
 
@@ -53,20 +53,27 @@ function normDigits(v: unknown): string | null {
   const d = v.replace(/[^\d]/g, "").trim();
   return d.length ? d : null;
 }
-
 settingsRoutes.get("/whatsapp-presence", requireSession, async (_req, res) => {
   const saved = await getJsonSetting<Presence>("whatsapp_presence", DEFAULT_PRESENCE);
 
-  // Fetch live profile from WhatsApp (best-effort)
+  // ✅ Reliable connectivity check (drives WA badge)
   let live: any = null;
-  try {
-    live = await getBusinessProfile();
-  } catch (e) {
-    live = { error: "failed_to_fetch_live_profile" };
+  const summary = await getPhoneNumberSummary();
+  if (summary) {
+    live = summary; // UI will show "Connected"
+  } else {
+    live = { error: "not_connected" }; // UI will show "Not connected"
   }
+
+  // Optional: also try to fetch profile (best-effort; doesn’t control badge)
+  try {
+    const profile = await getBusinessProfile();
+    if (profile) live.profile = profile;
+  } catch {}
 
   return res.json({ saved, live });
 });
+
 
 settingsRoutes.patch("/whatsapp-presence", requireSession, requireAdmin, async (req, res) => {
   const schema = z.object({
