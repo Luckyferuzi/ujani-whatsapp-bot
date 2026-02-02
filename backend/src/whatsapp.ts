@@ -95,6 +95,9 @@ function logThrottled(key: string, ...args: any[]) {
 
 async function apiGet(path: string) {
   const token = getToken();
+    if (!token) {
+    throw new Error("[whatsapp] Missing ACCESS_TOKEN/WHATSAPP_TOKEN in env");
+  }
   const url = `${GRAPH_BASE}/${getGraphVer()}/${path}`;
   const res = await fetch(url, {
     method: "GET",
@@ -190,12 +193,10 @@ export async function sendText(
   body: string,
   opts?: { phoneNumberId?: string | null }
 ) {
-  const phoneId = resolvePhoneNumberId(opts?.phoneNumberId ?? null, to);
-  if (!phoneId) {
-    throw new Error(
-      "[whatsapp] PHONE_NUMBER_ID missing; cannot sendText. Set PHONE_NUMBER_ID in Setup or .env."
-    );
-  }
+const phoneId = resolvePhoneNumberId(opts?.phoneNumberId ?? null, to);
+if (!phoneId) {
+  throw new Error("[whatsapp] Missing PHONE_NUMBER_ID in env");
+}
 
   const payload = {
     messaging_product: 'whatsapp',

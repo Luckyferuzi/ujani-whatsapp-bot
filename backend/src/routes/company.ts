@@ -26,6 +26,7 @@ import {
 } from "../db/queries.js";
 
 export const companyRoutes = Router();
+const SETUP_DISABLED_ENV_ONLY = true;
 
 const patchSchema = z
   .object({
@@ -101,6 +102,14 @@ companyRoutes.get("/company/settings", async (_req, res) => {
 });
 
 companyRoutes.put("/company/settings", async (req, res) => {
+  if (SETUP_DISABLED_ENV_ONLY) {
+  return res.status(400).json({
+    ok: false,
+    error: "setup_disabled_env_only",
+    message: "Setup is disabled. Configure WhatsApp only via backend/.env and restart the server.",
+  });
+}
+
   const parsed = patchSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
     return res.status(400).json({ error: "invalid_payload", details: parsed.error.flatten() });
@@ -179,6 +188,13 @@ companyRoutes.post("/company/whatsapp-numbers/default", async (req, res) => {
 });
 
 companyRoutes.post("/setup/test-send", async (req, res) => {
+  if (SETUP_DISABLED_ENV_ONLY) {
+  return res.status(400).json({
+    ok: false,
+    error: "setup_disabled_env_only",
+    message: "Setup is disabled. Configure WhatsApp only via backend/.env and restart the server.",
+  });
+}
   const schema = z
     .object({
       to: z.string().min(3),
@@ -208,6 +224,13 @@ companyRoutes.post("/setup/test-send", async (req, res) => {
 
 
 companyRoutes.post("/setup/complete", async (_req, res) => {
+  if (SETUP_DISABLED_ENV_ONLY) {
+  return res.status(400).json({
+    ok: false,
+    error: "setup_disabled_env_only",
+    message: "Setup is disabled. Configure WhatsApp only via backend/.env and restart the server.",
+  });
+}
   const current = await loadCompanySettingsToCache().catch(() => getCompanySettingsCached());
   const next = { ...current, is_setup_complete: true };
   await saveCompanySettings(next);
