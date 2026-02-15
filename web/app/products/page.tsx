@@ -24,6 +24,10 @@ type Product = {
 
 type ListResponse = { items: Product[] };
 type SingleResponse = { product: Product };
+type ProductSaveResponse = {
+  product: Product;
+  catalog?: { ok: boolean; error?: string | null } | null;
+};
 
 type ProductForm = {
   name: string;
@@ -336,10 +340,11 @@ publish_to_catalog: !!form.publish_to_catalog,
 
       const isNew = editingId == null;
 
+      let res: ProductSaveResponse;
       if (isNew) {
-        await post<SingleResponse>("/api/products", payload);
+        res = await post<ProductSaveResponse>("/api/products", payload);
       } else {
-        await api<SingleResponse>(`/api/products/${editingId}`, {
+        res = await api<ProductSaveResponse>(`/api/products/${editingId}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
@@ -347,6 +352,15 @@ publish_to_catalog: !!form.publish_to_catalog,
       }
 
       toast.success(isNew ? "Product created." : "Product updated.");
+      if (payload.publish_to_catalog) {
+        if (res?.catalog?.ok) {
+          toast.success("Catalog sync successful.");
+        } else {
+          toast.message("Saved to database, but catalog sync failed.", {
+            description: res?.catalog?.error ?? "Check catalog connection and product image URL.",
+          });
+        }
+      }
       setShowModal(false);
       setEditingId(null);
       setForm(emptyForm);
