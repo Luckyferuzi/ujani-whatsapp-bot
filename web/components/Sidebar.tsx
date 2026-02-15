@@ -19,7 +19,6 @@ const NAV_MAIN: NavItem[] = [
   { href: "/inbox", label: "Inbox", icon: "💬", moduleKey: "inbox" },
   { href: "/orders", label: "Orders", icon: "🧾", moduleKey: "orders" },
   { href: "/products", label: "Products", icon: "🛍️", moduleKey: "products" },
-  { href: "/flow", label: "Flow Builder", icon: "🧩", moduleKey: "flow" },
   { href: "/broadcast", label: "Broadcast", icon: "📣", moduleKey: "broadcast" },
   { href: "/stats", label: "Analytics", icon: "📊", moduleKey: "analytics" },
 ];

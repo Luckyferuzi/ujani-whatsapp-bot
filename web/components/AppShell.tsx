@@ -13,7 +13,6 @@ function getPageTitle(pathname: string | null) {
   if (p.startsWith("/inbox")) return "Inbox";
   if (p.startsWith("/orders")) return "Orders";
   if (p.startsWith("/products")) return "Products";
-  if (p.startsWith("/flow")) return "Flow Builder";
   if (p.startsWith("/broadcast")) return "Broadcast";
   if (p.startsWith("/stats")) return "Stats";
   if (p.startsWith("/expenses")) return "Expenses";

@@ -14,7 +14,6 @@
 //   app_settings -> dedicated tables keyed by tenant_id.
 
 import { getJsonSetting, setJsonSetting } from "../db/settings.js";
-const ENV_ONLY = true; // ✅ force all WhatsApp config to be read from .env only
 
 
 export type CompanySettings = {
@@ -81,9 +80,6 @@ export function getCompanySettingsCached(): CompanySettings {
 }
 
 export function getVerifyTokenEffective(): string | null {
-  if (ENV_ONLY) {
-    return process.env.WEBHOOK_VERIFY_TOKEN || process.env.VERIFY_TOKEN || null;
-  }
   return cached.verify_token || process.env.WEBHOOK_VERIFY_TOKEN || process.env.VERIFY_TOKEN || null;
 }
 
@@ -96,24 +92,15 @@ export function getAppIdEffective(): string | null {
 }
 
 export function getGraphApiVersionEffective(): string {
-  if (ENV_ONLY) {
-    return process.env.META_GRAPH_VERSION || process.env.GRAPH_API_VERSION || "v19.0";
-  }
   return cached.graph_api_version || process.env.META_GRAPH_VERSION || process.env.GRAPH_API_VERSION || "v19.0";
 }
 
 
 export function getWhatsAppTokenEffective(): string | null {
-  if (ENV_ONLY) {
-    return process.env.ACCESS_TOKEN || process.env.WHATSAPP_TOKEN || null;
-  }
   return cached.whatsapp_token || process.env.ACCESS_TOKEN || process.env.WHATSAPP_TOKEN || null;
 }
 
 export function getPhoneNumberIdEffective(): string | null {
-  if (ENV_ONLY) {
-    return process.env.PHONE_NUMBER_ID || null;
-  }
   return cached.phone_number_id || process.env.PHONE_NUMBER_ID || null;
 }
 

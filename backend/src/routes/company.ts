@@ -11,6 +11,7 @@
 
 import { Router } from "express";
 import { z } from "zod";
+import { env } from "../config.js";
 import {
   DEFAULT_COMPANY_SETTINGS,
   getCompanySettingsCached,
@@ -26,7 +27,6 @@ import {
 } from "../db/queries.js";
 
 export const companyRoutes = Router();
-const SETUP_DISABLED_ENV_ONLY = true;
 
 const patchSchema = z
   .object({
@@ -101,15 +101,51 @@ companyRoutes.get("/company/settings", async (_req, res) => {
   return res.json({ ok: true, settings: getCompanySettingsCached() });
 });
 
-companyRoutes.put("/company/settings", async (req, res) => {
-  if (SETUP_DISABLED_ENV_ONLY) {
-  return res.status(400).json({
-    ok: false,
-    error: "setup_disabled_env_only",
-    message: "Setup is disabled. Configure WhatsApp only via backend/.env and restart the server.",
-  });
-}
+// Lightweight sidebar metadata endpoint used by the web app.
+companyRoutes.get("/company/meta", async (_req, res) => {
+  try {
+    await loadCompanySettingsToCache();
+  } catch {
+    // fallback to cached/default values
+  }
 
+  const s = getCompanySettingsCached();
+  return res.json({
+    ok: true,
+    meta: {
+      company_name: s.company_name || "Ujani",
+      enabled_modules: Array.isArray(s.enabled_modules) ? s.enabled_modules : ["inbox"],
+    },
+  });
+});
+
+// Runtime flow config (non-secret operational values, mostly env-driven today).
+companyRoutes.get("/company/runtime-config", async (_req, res) => {
+  return res.json({
+    ok: true,
+    config: {
+      delivery: {
+        base_lat: env.BASE_LAT,
+        base_lng: env.BASE_LNG,
+        service_radius_km: env.SERVICE_RADIUS_KM,
+        require_location_pin: env.REQUIRE_LOCATION_PIN,
+        rate_per_km: env.DELIVERY_RATE_PER_KM,
+        round_to: env.DELIVERY_ROUND_TO,
+        default_distance_km: env.DEFAULT_DISTANCE_KM,
+      },
+      payment: {
+        lipa_namba_till: process.env.LIPA_NAMBA_TILL ?? "",
+        lipa_namba_name: process.env.LIPA_NAMBA_NAME ?? "",
+        voda_lnm_till: process.env.VODA_LNM_TILL ?? "",
+        voda_lnm_name: process.env.VODA_LNM_NAME ?? "",
+        voda_p2p_msisdn: process.env.VODA_P2P_MSISDN ?? "",
+        voda_p2p_name: process.env.VODA_P2P_NAME ?? "",
+      },
+    },
+  });
+});
+
+companyRoutes.put("/company/settings", async (req, res) => {
   const parsed = patchSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
     return res.status(400).json({ error: "invalid_payload", details: parsed.error.flatten() });
@@ -188,13 +224,6 @@ companyRoutes.post("/company/whatsapp-numbers/default", async (req, res) => {
 });
 
 companyRoutes.post("/setup/test-send", async (req, res) => {
-  if (SETUP_DISABLED_ENV_ONLY) {
-  return res.status(400).json({
-    ok: false,
-    error: "setup_disabled_env_only",
-    message: "Setup is disabled. Configure WhatsApp only via backend/.env and restart the server.",
-  });
-}
   const schema = z
     .object({
       to: z.string().min(3),
@@ -224,13 +253,6 @@ companyRoutes.post("/setup/test-send", async (req, res) => {
 
 
 companyRoutes.post("/setup/complete", async (_req, res) => {
-  if (SETUP_DISABLED_ENV_ONLY) {
-  return res.status(400).json({
-    ok: false,
-    error: "setup_disabled_env_only",
-    message: "Setup is disabled. Configure WhatsApp only via backend/.env and restart the server.",
-  });
-}
   const current = await loadCompanySettingsToCache().catch(() => getCompanySettingsCached());
   const next = { ...current, is_setup_complete: true };
   await saveCompanySettings(next);

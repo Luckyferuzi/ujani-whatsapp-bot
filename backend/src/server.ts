@@ -17,6 +17,9 @@ import { whatsappProfilePhotoRoutes } from "./routes/whatsappProfilePhoto.js";
 import { companyRoutes } from "./routes/company.js";
 import { embeddedSignupRoutes } from "./routes/embeddedSignup.js";
 import { loadCompanySettingsToCache } from "./runtime/companySettings.js";
+import { auditEventsRoutes } from "./routes/auditEvents.js";
+import { adminGovernanceRoutes } from "./routes/adminGovernance.js";
+import { requireAdmin, requireSession } from "./middleware/sessionAuth.js";
 
 const app = express();
 
@@ -68,11 +71,13 @@ app.use(
 
 app.use(webhook);
 app.use("/auth", authRoutes);
+app.use("/auth/admin", requireSession, requireAdmin, adminGovernanceRoutes);
 app.use("/files", filesRoutes);
 app.use("/settings", whatsappProfilePhotoRoutes);
 app.use("/public", publicMediaRoutes);
 app.use("/settings", settingsRoutes);
 app.use("/api", requireInboxAuth, companyRoutes);
+app.use("/api", requireInboxAuth, auditEventsRoutes);
 app.use("/api", requireInboxAuth, embeddedSignupRoutes);
 app.use("/api",requireInboxAuth, inboxRoutes);
 app.use("/api",requireInboxAuth, sendRoutes);

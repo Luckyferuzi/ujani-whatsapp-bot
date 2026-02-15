@@ -1,0 +1,531 @@
+diff -ruN backend/src/routes/company.ts backend/src/routes/company.ts
+--- backend/src/routes/company.ts	2026-01-31 17:05:16.000000000 +0000
++++ backend/src/routes/company.ts	2026-02-01 14:49:51.595281956 +0000
+@@ -15,9 +15,16 @@
+   DEFAULT_COMPANY_SETTINGS,
+   getCompanySettingsCached,
+   loadCompanySettingsToCache,
++  getAppIdEffective,
++  getAppSecretEffective,
++  getGraphApiVersionEffective,
++  getPhoneNumberIdEffective,
++  getVerifyTokenEffective,
++  getWabaIdEffective,
++  getWhatsAppTokenEffective,
+   saveCompanySettings,
+ } from "../runtime/companySettings.js";
+-import { getBusinessProfile, sendText } from "../whatsapp.js";
++import { getBusinessProfile, getPhoneNumberSummary, sendText } from "../whatsapp.js";
+ import { setJsonSetting } from "../db/settings.js";
+ import {
+   listWhatsAppPhoneNumbers,
+@@ -27,6 +34,19 @@
+ 
+ export const companyRoutes = Router();
+ 
++function maskSecret(v: string | null | undefined): string | null {
++  if (!v) return null;
++  const s = String(v);
++  if (s.length <= 10) return "********";
++  return `${s.slice(0, 6)}…${s.slice(-4)}`;
++}
++
++function effectiveSource(dbValue: string | null | undefined, envPresent: boolean) {
++  if (dbValue && String(dbValue).trim()) return "db";
++  if (envPresent) return "env";
++  return "none";
++}
++
+ const patchSchema = z
+   .object({
+     company_name: z.string().optional(),
+@@ -100,6 +120,65 @@
+   return res.json({ ok: true, settings: getCompanySettingsCached() });
+ });
+ 
++/**
++ * GET /api/setup/runtime-info
++ * Returns computed runtime info for the Setup UI (no secrets in plaintext).
++ */
++companyRoutes.get("/setup/runtime-info", async (req, res) => {
++  const cached = getCompanySettingsCached();
++
++  const publicBaseUrl =
++    (process.env.PUBLIC_BASE_URL || "").trim() ||
++    `${req.protocol}://${req.get("host")}`;
++
++  const envHasAccessToken =
++    !!(process.env.WHATSAPP_TOKEN || process.env.ACCESS_TOKEN || process.env.WABA_TOKEN);
++  const envHasPhoneId = !!(process.env.PHONE_NUMBER_ID || process.env.WHATSAPP_PHONE_NUMBER_ID || process.env.WABA_PHONE_ID);
++
++  return res.json({
++    ok: true,
++    public_base_url: publicBaseUrl,
++    webhook_url: `${publicBaseUrl.replace(/\/+$/, "")}/webhook`,
++    effective: {
++      VERIFY_TOKEN: {
++        source: effectiveSource(cached.verify_token, !!process.env.VERIFY_TOKEN),
++        present: !!getVerifyTokenEffective(),
++      },
++      ACCESS_TOKEN: {
++        source: effectiveSource(cached.whatsapp_token, envHasAccessToken),
++        present: !!getWhatsAppTokenEffective(),
++        masked: maskSecret(getWhatsAppTokenEffective()),
++      },
++      PHONE_NUMBER_ID: {
++        source: effectiveSource(cached.phone_number_id, envHasPhoneId),
++        present: !!getPhoneNumberIdEffective(),
++        value: getPhoneNumberIdEffective(),
++      },
++      WABA_ID: {
++        source: effectiveSource(cached.waba_id, !!process.env.WABA_ID),
++        present: !!getWabaIdEffective(),
++        value: getWabaIdEffective(),
++      },
++      APP_ID: {
++        source: effectiveSource(cached.app_id, !!process.env.APP_ID),
++        present: !!getAppIdEffective(),
++        value: getAppIdEffective(),
++      },
++      APP_SECRET: {
++        source: effectiveSource(cached.app_secret, !!process.env.APP_SECRET),
++        present: !!getAppSecretEffective(),
++        masked: maskSecret(getAppSecretEffective()),
++      },
++      META_GRAPH_VERSION: {
++        source: effectiveSource(cached.graph_api_version, !!(process.env.META_GRAPH_VERSION || process.env.GRAPH_API_VERSION || process.env.GRAPH_VERSION)),
++        present: true,
++        value: getGraphApiVersionEffective(),
++      },
++    },
++    inbox_access_key_present: !!process.env.INBOX_ACCESS_KEY,
++  });
++});
++
+ companyRoutes.put("/company/settings", async (req, res) => {
+   const parsed = patchSchema.safeParse(req.body ?? {});
+   if (!parsed.success) {
+@@ -178,6 +257,83 @@
+   return res.json({ ok: true, settings: next });
+ });
+ 
++/**
++ * GET /api/setup/runtime-info
++ * Returns non-sensitive runtime info so the Setup UI can show exactly what the
++ * backend will use (DB override vs env fallback).
++ */
++companyRoutes.get("/setup/runtime-info", async (req, res) => {
++  // Ensure cache is warm
++  const cached = await loadCompanySettingsToCache().catch(() => getCompanySettingsCached());
++
++  const publicBase =
++    (process.env.PUBLIC_BASE_URL ?? "").replace(/\/+$/, "") ||
++    `${req.protocol}://${req.get("host")}`;
++
++  const envTokenPresent = !!(
++    process.env.WHATSAPP_TOKEN ||
++    process.env.ACCESS_TOKEN ||
++    process.env.WABA_TOKEN
++  );
++  const envPhonePresent = !!(
++    process.env.PHONE_NUMBER_ID ||
++    process.env.WHATSAPP_PHONE_NUMBER_ID ||
++    process.env.WABA_PHONE_ID
++  );
++  const envVerifyPresent = !!process.env.VERIFY_TOKEN;
++  const envSecretPresent = !!process.env.APP_SECRET;
++  const envAppIdPresent = !!process.env.APP_ID;
++  const envWabaPresent = !!process.env.WABA_ID;
++  const envGraphPresent = !!(
++    process.env.META_GRAPH_VERSION ||
++    process.env.GRAPH_API_VERSION ||
++    process.env.GRAPH_VERSION
++  );
++
++  return res.json({
++    ok: true,
++    public_base_url: publicBase,
++    webhook_url: `${publicBase}/webhook`,
++    effective: {
++      VERIFY_TOKEN: {
++        source: effectiveSource(cached.verify_token, envVerifyPresent),
++        present: !!getVerifyTokenEffective(),
++      },
++      ACCESS_TOKEN: {
++        source: effectiveSource(cached.whatsapp_token, envTokenPresent),
++        present: !!getWhatsAppTokenEffective(),
++        masked: maskSecret(getWhatsAppTokenEffective()),
++      },
++      PHONE_NUMBER_ID: {
++        source: effectiveSource(cached.phone_number_id, envPhonePresent),
++        present: !!getPhoneNumberIdEffective(),
++        value: getPhoneNumberIdEffective(),
++      },
++      WABA_ID: {
++        source: effectiveSource(cached.waba_id, envWabaPresent),
++        present: !!getWabaIdEffective(),
++        value: getWabaIdEffective(),
++      },
++      APP_ID: {
++        source: effectiveSource(cached.app_id, envAppIdPresent),
++        present: !!getAppIdEffective(),
++        value: getAppIdEffective(),
++      },
++      APP_SECRET: {
++        source: effectiveSource(cached.app_secret, envSecretPresent),
++        present: !!getAppSecretEffective(),
++        masked: maskSecret(getAppSecretEffective()),
++      },
++      META_GRAPH_VERSION: {
++        source: effectiveSource(cached.graph_api_version, envGraphPresent),
++        present: true,
++        value: getGraphApiVersionEffective(),
++      },
++    },
++    inbox_access_key_present: !!process.env.INBOX_ACCESS_KEY,
++  });
++});
++
+ companyRoutes.post("/setup/test-send", async (req, res) => {
+   const schema = z
+     .object({
+@@ -206,6 +362,55 @@
+   }
+ });
+ 
++/**
++ * POST /api/setup/validate
++ * Performs a lightweight connectivity check and returns what Meta sees.
++ */
++companyRoutes.post("/setup/validate", async (_req, res) => {
++  try {
++    const summary = await getPhoneNumberSummary();
++    const profile = await getBusinessProfile();
++
++    if (!summary) {
++      return res.status(400).json({
++        ok: false,
++        error: "not_connected",
++        message:
++          "WhatsApp is not connected. Confirm ACCESS_TOKEN + PHONE_NUMBER_ID + META_GRAPH_VERSION, then re-test.",
++      });
++    }
++
++    return res.json({ ok: true, phone: summary, profile: profile ?? null });
++  } catch (e: any) {
++    return res.status(400).json({
++      ok: false,
++      error: "validate_failed",
++      message: e?.message ?? "validate failed",
++    });
++  }
++});
++
++/**
++ * POST /api/setup/clear-wa
++ * Clears DB-saved WhatsApp credentials so env fallback is used.
++ */
++companyRoutes.post("/setup/clear-wa", async (_req, res) => {
++  const current = await loadCompanySettingsToCache().catch(() => getCompanySettingsCached());
++  const next = {
++    ...current,
++    whatsapp_token: null,
++    phone_number_id: null,
++    waba_id: null,
++    verify_token: null,
++    app_secret: null,
++    app_id: null,
++    graph_api_version: null,
++    is_setup_complete: false,
++  };
++  await saveCompanySettings(next);
++  return res.json({ ok: true, settings: next });
++});
++
+ 
+ companyRoutes.post("/setup/complete", async (_req, res) => {
+   const current = await loadCompanySettingsToCache().catch(() => getCompanySettingsCached());
+diff -ruN backend/src/runtime/companySettings.ts backend/src/runtime/companySettings.ts
+--- backend/src/runtime/companySettings.ts	2026-01-25 17:04:08.000000000 +0000
++++ backend/src/runtime/companySettings.ts	2026-02-01 14:47:55.779548919 +0000
+@@ -93,17 +93,34 @@
+ export function getGraphApiVersionEffective(): string {
+   return (
+     cached.graph_api_version ||
++    // Allow common env aliases (some deployments use META_GRAPH_VERSION)
++    process.env.META_GRAPH_VERSION ||
+     process.env.GRAPH_API_VERSION ||
++    process.env.GRAPH_VERSION ||
+     "v19.0"
+   );
+ }
+ 
+ export function getWhatsAppTokenEffective(): string | null {
+-  return cached.whatsapp_token || (process.env.WHATSAPP_TOKEN ?? null);
++  return (
++    cached.whatsapp_token ||
++    process.env.WHATSAPP_TOKEN ||
++    // Allow common env aliases
++    process.env.ACCESS_TOKEN ||
++    process.env.WABA_TOKEN ||
++    null
++  );
+ }
+ 
+ export function getPhoneNumberIdEffective(): string | null {
+-  return cached.phone_number_id || (process.env.PHONE_NUMBER_ID ?? null);
++  return (
++    cached.phone_number_id ||
++    process.env.PHONE_NUMBER_ID ||
++    // Allow common env aliases
++    process.env.WHATSAPP_PHONE_NUMBER_ID ||
++    process.env.WABA_PHONE_ID ||
++    null
++  );
+ }
+ 
+ export function getWabaIdEffective(): string | null {
+diff -ruN web/app/setup/page.tsx web/app/setup/page.tsx
+--- web/app/setup/page.tsx	2026-01-31 16:48:52.000000000 +0000
++++ web/app/setup/page.tsx	2026-02-01 14:53:43.088551121 +0000
+@@ -35,6 +35,22 @@
+   is_default: boolean;
+ };
+ 
++type RuntimeInfo = {
++  ok: true;
++  public_base_url: string;
++  webhook_url: string;
++  inbox_access_key_present: boolean;
++  effective: Record<
++    string,
++    {
++      source: "db" | "env" | "none";
++      present: boolean;
++      masked?: string | null;
++      value?: string | null;
++    }
++  >;
++};
++
+ function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) {
+   return (
+     <button
+@@ -92,6 +108,7 @@
+   const [saving, setSaving] = useState(false);
+   const [settings, setSettings] = useState<CompanySettings | null>(null);
+   const [phoneNumbers, setPhoneNumbers] = useState<PhoneNumberRow[]>([]);
++  const [runtime, setRuntime] = useState<RuntimeInfo | null>(null);
+ 
+   // Local form state (manual-only)
+   const [companyName, setCompanyName] = useState("");
+@@ -123,9 +140,10 @@
+   async function load() {
+     setLoading(true);
+     try {
+-      const [r, pn] = await Promise.all([
++      const [r, pn, rt] = await Promise.all([
+         get<{ ok: true; settings: CompanySettings }>("/api/company/settings"),
+         get<{ items: any[] }>("/api/company/whatsapp-numbers").catch(() => ({ items: [] })),
++        get<RuntimeInfo>("/api/setup/runtime-info").catch(() => null as any),
+       ]);
+ 
+       setSettings(r.settings);
+@@ -138,6 +156,9 @@
+       })) as PhoneNumberRow[];
+       setPhoneNumbers(rows);
+ 
++      // Runtime info is best-effort; it helps prevent misconfiguration.
++      if (rt && (rt as any).ok) setRuntime(rt);
++
+       setCompanyName(r.settings.company_name ?? "");
+       setWaToken(r.settings.whatsapp_token ?? "");
+       setPhoneNumberId(r.settings.phone_number_id ?? "");
+@@ -151,6 +172,38 @@
+     }
+   }
+ 
++  async function validateConnection() {
++    setSaving(true);
++    try {
++      const out = await post<any>("/api/setup/validate", {});
++      alert(
++        out?.ok
++          ? `Connected ✅\n\nMeta phone: ${out?.phone?.display_phone_number ?? out?.phone?.id ?? ""}`
++          : "Not connected"
++      );
++      // Refresh runtime panel after validate
++      const rt = await get<RuntimeInfo>("/api/setup/runtime-info").catch(() => null);
++      setRuntime(rt);
++    } catch (e: any) {
++      alert(e?.message ?? "Validate failed");
++    } finally {
++      setSaving(false);
++    }
++  }
++
++  async function clearSavedCredentials() {
++    setSaving(true);
++    try {
++      await post("/api/setup/clear-wa", {});
++      await load();
++      alert("Cleared saved credentials ✅ (backend will fall back to .env if set)");
++    } catch (e: any) {
++      alert(e?.message ?? "Failed to clear");
++    } finally {
++      setSaving(false);
++    }
++  }
++
+   async function saveSettings() {
+     if (!settings) return;
+     setSaving(true);
+@@ -255,6 +308,21 @@
+           Manual WhatsApp Cloud API setup (Coexistence / Embedded Signup removed).
+         </p>
+ 
++        {runtime?.webhook_url ? (
++          <div className="mt-3 rounded-lg border border-ui-border p-3">
++            <div className="text-sm font-semibold">Webhook callback URL (use this in Meta)</div>
++            <div className="mt-1 flex flex-wrap items-center gap-2">
++              <code className="text-xs px-2 py-1 rounded bg-gray-50 border border-ui-border">
++                {runtime.webhook_url}
++              </code>
++              <CopyButton text={runtime.webhook_url} label="Copy URL" />
++            </div>
++            <div className="text-xs text-ui-muted mt-2">
++              Verify Token is the value you set in Meta Webhooks. It must match exactly.
++            </div>
++          </div>
++        ) : null}
++
+         {isComplete ? (
+           <div className="mt-3 text-sm">
+             ✅ Setup complete. If WhatsApp stops working after DB reset, re-enter token + phone_number_id here.
+@@ -282,13 +350,69 @@
+       <div className="rounded-xl border p-5 space-y-4">
+         <h2 className="text-lg font-extrabold">WhatsApp Cloud API credentials</h2>
+ 
++        <div className="rounded-lg border border-ui-border p-3">
++          <div className="text-sm font-semibold">Runtime (what the backend will actually use)</div>
++          <div className="text-xs text-ui-muted mt-1">
++            Source order: <b>DB (this page)</b> → <b>.env</b> → defaults.
++          </div>
++
++          <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
++            {runtime?.effective ? (
++              Object.entries(runtime.effective).map(([k, v]) => (
++                <div key={k} className="rounded border border-ui-border p-2">
++                  <div className="flex items-center justify-between gap-2">
++                    <span className="font-mono text-xs font-semibold">{k}</span>
++                    <span className="text-xs text-ui-muted">source: {v.source}</span>
++                  </div>
++                  <div className="mt-1 text-xs">
++                    {k === "ACCESS_TOKEN" || k === "APP_SECRET" ? (
++                      <span className="font-mono">{v.masked ?? "(not set)"}</span>
++                    ) : (
++                      <span className="font-mono">{v.value ?? (v.present ? "(set)" : "(not set)")}</span>
++                    )}
++                  </div>
++                </div>
++              ))
++            ) : (
++              <div className="text-xs text-ui-muted">Runtime info not available.</div>
++            )}
++          </div>
++
++          <div className="mt-3 flex flex-wrap gap-2">
++            <button
++              type="button"
++              className="px-3 py-2 rounded border border-ui-border hover:bg-gray-50"
++              disabled={saving}
++              onClick={() => void validateConnection()}
++            >
++              {saving ? "Working…" : "Validate connection"}
++            </button>
++
++            <button
++              type="button"
++              className="px-3 py-2 rounded border border-ui-border hover:bg-gray-50"
++              disabled={saving}
++              onClick={() => void clearSavedCredentials()}
++              title="Clears DB-saved WhatsApp credentials so env fallback is used"
++            >
++              {saving ? "Working…" : "Clear saved credentials"}
++            </button>
++          </div>
++
++          {!runtime?.inbox_access_key_present ? (
++            <div className="mt-2 text-xs text-red-600">
++              ⚠️ INBOX_ACCESS_KEY is not set on the backend. Your /api endpoints may be exposed.
++            </div>
++          ) : null}
++        </div>
++
+         <SecretInput
+-          label="WHATSAPP_TOKEN"
++          label="ACCESS_TOKEN"
+           value={waToken}
+           onChange={setWaToken}
+           revealed={revealToken}
+           onToggle={() => setRevealToken((x) => !x)}
+-          hint="Use a permanent/system-user token. Temporary tokens will break."
++          hint="WhatsApp Cloud API access token. Backend accepts: ACCESS_TOKEN or WHATSAPP_TOKEN. Use a permanent/system-user token; temporary tokens will break."
+         />
+ 
+         <div>
+@@ -304,6 +428,10 @@
+             placeholder="e.g. 123456789012345"
+           />
+ 
++          <div className="text-xs text-ui-muted mt-1">
++            This is the <b>Meta Phone Number ID</b> (digits), not the actual phone number.
++          </div>
++
+           {phoneNumbers.length > 0 ? (
+             <div className="mt-2 border border-ui-border rounded p-3">
+               <div className="text-xs text-ui-muted mb-2">Phone numbers seen by the backend:</div>
+@@ -338,6 +466,10 @@
+             onChange={(e) => setWabaId(e.target.value)}
+             placeholder="e.g. 123456789012345"
+           />
++
++          <div className="text-xs text-ui-muted mt-1">
++            Optional. Helps with some Meta lookups; sending usually only needs ACCESS_TOKEN + PHONE_NUMBER_ID.
++          </div>
+         </div>
+ 
+         <div>
+@@ -348,6 +480,10 @@
+             onChange={(e) => setVerifyToken(e.target.value)}
+             placeholder="Webhook verify token"
+           />
++
++          <div className="text-xs text-ui-muted mt-1">
++            Must match the Verify Token configured in Meta Webhooks for your WhatsApp app.
++          </div>
+         </div>
+ 
+         <div>
+@@ -366,16 +502,20 @@
+           onChange={setAppSecret}
+           revealed={revealSecret}
+           onToggle={() => setRevealSecret((x) => !x)}
++          hint="Recommended. If set, the backend will verify Meta webhook signatures (X-Hub-Signature-256)."
+         />
+ 
+         <div>
+-          <label className="text-sm font-semibold">GRAPH_API_VERSION</label>
++          <label className="text-sm font-semibold">META_GRAPH_VERSION</label>
+           <input
+             className="w-full mt-1 px-3 py-2 rounded border border-ui-border"
+             value={graphVer}
+             onChange={(e) => setGraphVer(e.target.value)}
+             placeholder="v19.0"
+           />
++          <div className="text-xs text-ui-muted mt-1">
++            The Graph API version used for all calls (example: <span className="font-mono">v19.0</span>). Backend accepts: META_GRAPH_VERSION or GRAPH_API_VERSION.
++          </div>
+         </div>
+ 
+         <div className="flex gap-2 pt-2">
