@@ -2,6 +2,135 @@
 import db from "./knex.js";
 import knex from "./knex.js";
 
+export type ReconcileStats = {
+  groups_merged: number;
+  customers_merged: number;
+  conversations_merged: number;
+  messages_moved: number;
+};
+
+function digitsOnly(value: string | null | undefined): string {
+  return String(value ?? "").replace(/\D/g, "").trim();
+}
+
+function pickBetterName(current?: string | null, incoming?: string | null): string | null {
+  const a = String(current ?? "").trim();
+  const b = String(incoming ?? "").trim();
+  if (!a && !b) return null;
+  if (!a) return b;
+  if (!b) return a;
+  // Keep the longer non-numeric style name when possible.
+  const aNumeric = /^\d+$/.test(a);
+  const bNumeric = /^\d+$/.test(b);
+  if (aNumeric && !bNumeric) return b;
+  if (!aNumeric && bNumeric) return a;
+  return b.length >= a.length ? b : a;
+}
+
+async function mergeCustomerRecordsTx(
+  trx: any,
+  canonicalId: number,
+  duplicateIds: number[]
+): Promise<{ customersMerged: number }> {
+  if (!duplicateIds.length) return { customersMerged: 0 };
+
+  // Move child relations.
+  await trx("conversations")
+    .whereIn("customer_id", duplicateIds)
+    .update({ customer_id: canonicalId });
+
+  await trx("orders")
+    .whereIn("customer_id", duplicateIds)
+    .update({ customer_id: canonicalId });
+
+  await trx("opt_ins")
+    .whereIn("customer_id", duplicateIds)
+    .update({ customer_id: canonicalId });
+
+  // Avoid unique collision on (customer_id, product_id).
+  for (const dupId of duplicateIds) {
+    const dupRows = await trx("restock_subscriptions")
+      .where({ customer_id: dupId })
+      .select("product_id");
+
+    const productIds = (dupRows as any[])
+      .map((r: any) => Number(r.product_id))
+      .filter((v: number) => Number.isFinite(v));
+    if (productIds.length > 0) {
+      await trx("restock_subscriptions")
+        .where({ customer_id: canonicalId })
+        .whereIn("product_id", productIds)
+        .del();
+    }
+  }
+
+  await trx("restock_subscriptions")
+    .whereIn("customer_id", duplicateIds)
+    .update({ customer_id: canonicalId });
+
+  await trx("customers").whereIn("id", duplicateIds).del();
+  return { customersMerged: duplicateIds.length };
+}
+
+async function consolidateConversationsForCustomerTx(
+  trx: any,
+  customerId: number,
+  preferredPhoneNumberId?: string | null
+): Promise<{ canonicalId: number | null; conversationsMerged: number; messagesMoved: number }> {
+  const rows = await trx("conversations")
+    .where({ customer_id: customerId })
+    .orderByRaw("COALESCE(last_user_message_at, created_at) DESC")
+    .orderBy("id", "desc")
+    .select("id", "phone_number_id", "agent_allowed", "last_user_message_at");
+
+  if (!rows.length) {
+    return { canonicalId: null, conversationsMerged: 0, messagesMoved: 0 };
+  }
+
+  const typedRows = rows as any[];
+  const canonical = typedRows[0];
+  const duplicateIds = typedRows.slice(1).map((r: any) => r.id);
+
+  if (duplicateIds.length > 0) {
+    const moved = await trx("messages")
+      .whereIn("conversation_id", duplicateIds)
+      .update({ conversation_id: canonical.id });
+
+    let latestLastUserAt = canonical.last_user_message_at;
+    let agentAllowed = !!canonical.agent_allowed;
+    let phoneNumberId = canonical.phone_number_id ?? null;
+
+    for (const row of typedRows.slice(1)) {
+      if (row.last_user_message_at && (!latestLastUserAt || row.last_user_message_at > latestLastUserAt)) {
+        latestLastUserAt = row.last_user_message_at;
+      }
+      if (row.agent_allowed) agentAllowed = true;
+      if (!phoneNumberId && row.phone_number_id) phoneNumberId = row.phone_number_id;
+    }
+
+    await trx("conversations")
+      .where({ id: canonical.id })
+      .update({
+        last_user_message_at: latestLastUserAt ?? null,
+        agent_allowed: agentAllowed,
+        phone_number_id: preferredPhoneNumberId ?? phoneNumberId ?? null,
+      });
+
+    await trx("conversations").whereIn("id", duplicateIds).del();
+    return {
+      canonicalId: canonical.id,
+      conversationsMerged: duplicateIds.length,
+      messagesMoved: Number(moved ?? 0),
+    };
+  } else if (preferredPhoneNumberId && canonical.phone_number_id !== preferredPhoneNumberId) {
+    await trx("conversations")
+      .where({ id: canonical.id })
+      .update({ phone_number_id: preferredPhoneNumberId });
+  }
+
+  return { canonicalId: canonical.id, conversationsMerged: 0, messagesMoved: 0 };
+}
+
 /* ------------------------------ Products ---------------------------------- */
 
 export interface ProductRow {
@@ -126,35 +255,69 @@ export async function upsertCustomerByWa(
   name?: string | null,
   phone?: string | null
 ): Promise<{ id: number; isNew: boolean }> {
-  const existing = await db("customers").where({ wa_id: waId }).first();
+  const normalizedWa = digitsOnly(waId);
+  const normalizedPhone = digitsOnly(phone ?? waId);
+  const finalWa = normalizedWa || String(waId ?? "").trim();
+  const finalPhone = normalizedPhone || String(phone ?? "").trim() || null;
+  const incomingName = String(name ?? "").trim() || null;
 
-  if (existing) {
-    const update: any = {};
+  return db.transaction(async (trx) => {
+    const candidates = await trx("customers")
+      .where((qb: any) => {
+        qb.where({ wa_id: waId });
+        if (finalWa) {
+          qb.orWhere({ wa_id: finalWa });
+          qb.orWhere({ wa_id: `+${finalWa}` });
+          qb.orWhereRaw("regexp_replace(coalesce(wa_id,''), '\\D', '', 'g') = ?", [finalWa]);
+        }
+        if (normalizedPhone) {
+          qb.orWhereRaw("regexp_replace(coalesce(phone,''), '\\D', '', 'g') = ?", [normalizedPhone]);
+        }
+      })
+      .orderBy("id", "asc")
+      .select("id", "wa_id", "name", "phone");
 
-    if (name && name.trim().length > 0 && name !== existing.name) {
-      update.name = name.trim();
+    if (candidates.length === 0) {
+      const [inserted] = await trx("customers")
+        .insert({
+          wa_id: finalWa,
+          name: incomingName,
+          phone: finalPhone,
+        })
+        .returning<{ id: number }[]>("id");
+      return { id: inserted.id, isNew: true };
     }
 
-    if (phone && phone.trim().length > 0 && phone !== existing.phone) {
-      update.phone = phone.trim();
+    // Pick canonical: oldest match, then merge all others into it.
+    const typedCandidates = candidates as any[];
+    const canonical = typedCandidates[0];
+    const duplicateIds = typedCandidates.slice(1).map((c: any) => c.id);
+    await mergeCustomerRecordsTx(trx, canonical.id, duplicateIds);
+    await consolidateConversationsForCustomerTx(trx, canonical.id);
+
+    const bestExistingName = typedCandidates.reduce<string | null>(
+      (acc, row: any) => pickBetterName(acc, row.name),
+      null
+    );
+    const nextName = pickBetterName(bestExistingName, incomingName);
+
+    const update: any = {};
+    if (finalWa && finalWa !== String(canonical.wa_id ?? "").trim()) {
+      update.wa_id = finalWa;
+    }
+    if (nextName !== (canonical.name ?? null)) {
+      update.name = nextName;
+    }
+    if (finalPhone && finalPhone !== String(canonical.phone ?? "").trim()) {
+      update.phone = finalPhone;
     }
 
     if (Object.keys(update).length > 0) {
-      await db("customers").where({ id: existing.id }).update(update);
+      await trx("customers").where({ id: canonical.id }).update(update);
     }
 
-    return { id: existing.id as number, isNew: false };
-  }
-
-  const [inserted] = await db("customers")
-    .insert({
-      wa_id: waId,
-      name: name?.trim() ?? null,
-      phone: phone?.trim() ?? null,
-    })
-    .returning<{ id: number }[]>("id");
-
-  return { id: inserted.id, isNew: true };
+    return { id: canonical.id, isNew: false };
+  });
 }
 
 export async function getOrCreateConversation(customerId: number) {
@@ -165,22 +328,72 @@ export async function getOrCreateConversationForPhone(
   customerId: number,
   phoneNumberId: string | null
 ) {
-  const existing = await db("conversations")
-    .where({ customer_id: customerId, phone_number_id: phoneNumberId })
-    .orderBy("id", "desc")
-    .first();
+  return db.transaction(async (trx) => {
+    const consolidated = await consolidateConversationsForCustomerTx(
+      trx,
+      customerId,
+      phoneNumberId ?? null
+    );
+    if (consolidated.canonicalId) return consolidated.canonicalId;
 
-  if (existing) return existing.id as number;
+    const [inserted] = await trx("conversations")
+      .insert({
+        customer_id: customerId,
+        phone_number_id: phoneNumberId,
+        agent_allowed: false,
+      })
+      .returning<{ id: number }[]>("id");
 
-  const [inserted] = await db("conversations")
-    .insert({
-      customer_id: customerId,
-      phone_number_id: phoneNumberId,
-      agent_allowed: false,
-    })
-    .returning<{ id: number }[]>("id");
+    return inserted.id;
+  });
+}
 
-  return inserted.id;
+export async function reconcileCustomersAndConversations(): Promise<ReconcileStats> {
+  return db.transaction(async (trx) => {
+    const stats: ReconcileStats = {
+      groups_merged: 0,
+      customers_merged: 0,
+      conversations_merged: 0,
+      messages_moved: 0,
+    };
+
+    const rows = await trx("customers")
+      .select("id", "wa_id", "phone", "name")
+      .orderBy("id", "asc");
+
+    const typedRows = rows as any[];
+    const byKey = new Map<string, any[]>();
+    for (const row of typedRows) {
+      const key = digitsOnly(row.wa_id) || digitsOnly(row.phone);
+      if (!key) continue;
+      const arr = byKey.get(key) ?? [];
+      arr.push(row);
+      byKey.set(key, arr);
+    }
+
+    for (const [, group] of byKey) {
+      if (group.length <= 1) continue;
+      const canonical = group[0];
+      const duplicateIds = group.slice(1).map((g) => g.id);
+      const mergeResult = await mergeCustomerRecordsTx(trx, canonical.id, duplicateIds);
+      const convoResult = await consolidateConversationsForCustomerTx(trx, canonical.id);
+
+      stats.groups_merged += 1;
+      stats.customers_merged += mergeResult.customersMerged;
+      stats.conversations_merged += convoResult.conversationsMerged;
+      stats.messages_moved += convoResult.messagesMoved;
+
+      const bestName = group.reduce<string | null>(
+        (acc, row) => pickBetterName(acc, row.name),
+        null
+      );
+      if (bestName && bestName !== (canonical.name ?? null)) {
+        await trx("customers").where({ id: canonical.id }).update({ name: bestName });
+      }
+    }
+
+    return stats;
+  });
 }
 
 /* ------------------------ WhatsApp phone numbers -------------------------- */

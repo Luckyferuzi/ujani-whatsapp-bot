@@ -25,6 +25,7 @@ import {
   getOrCreateConversationForPhone,
   insertOutboundMessage,
   listWhatsAppPhoneNumbers,
+  reconcileCustomersAndConversations,
   setDefaultWhatsAppPhoneNumber,
   upsertCustomerByWa,
   upsertWhatsAppPhoneNumber,
@@ -387,6 +388,19 @@ companyRoutes.get("/setup/diagnostics", async (_req, res) => {
       ok: false,
       error: "diagnostics_failed",
       message: e?.message ?? "Failed to build diagnostics.",
+    });
+  }
+});
+
+companyRoutes.post("/setup/reconcile-contacts", async (_req, res) => {
+  try {
+    const stats = await reconcileCustomersAndConversations();
+    return res.json({ ok: true, stats });
+  } catch (e: any) {
+    return res.status(500).json({
+      ok: false,
+      error: "reconcile_failed",
+      message: e?.message ?? "Failed to reconcile customer conversations.",
     });
   }
 });

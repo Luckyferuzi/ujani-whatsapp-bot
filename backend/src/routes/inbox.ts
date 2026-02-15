@@ -9,7 +9,7 @@ import {
   upsertCatalogProduct,
 } from "../whatsapp.js";
 import { emit } from "../sockets.js";
-import { getOrdersForCustomer, listOutstandingOrdersForCustomer, createOrderWithPayment, createManualOrderFromSkus, insertOutboundMessage } from "../db/queries.js";
+import { getOrdersForCustomer, listOutstandingOrdersForCustomer, createOrderWithPayment, createManualOrderFromSkus, insertOutboundMessage, reconcileCustomersAndConversations } from "../db/queries.js";
 import { t, Lang } from "../i18n.js";
 import { z } from "zod";
 
@@ -183,6 +183,11 @@ async function notifyRestockSubscribers(
 
 inboxRoutes.get("/conversations", async (_req, res) => {
   try {
+    // Keep inbox professional: merge duplicated customer records/threads by same number.
+    await reconcileCustomersAndConversations().catch((err) => {
+      console.warn("[inbox] reconciliation skipped due to error", err);
+    });
+
     const latestMessageAgg = db("messages as m")
       .select("m.conversation_id")
       .max("m.created_at as last_message_at")

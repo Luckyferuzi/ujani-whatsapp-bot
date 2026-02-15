@@ -71,6 +71,13 @@ type SetupDiagnostics = {
   issues: Array<{ level: "error" | "warn"; code: string; message: string }>;
 };
 
+type ReconcileStats = {
+  groups_merged: number;
+  customers_merged: number;
+  conversations_merged: number;
+  messages_moved: number;
+};
+
 export default function SetupPage() {
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
@@ -78,9 +85,11 @@ export default function SetupPage() {
   const [testing, setTesting] = useState(false);
   const [completing, setCompleting] = useState(false);
   const [checking, setChecking] = useState(false);
+  const [reconciling, setReconciling] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [okMsg, setOkMsg] = useState<string | null>(null);
   const [diag, setDiag] = useState<SetupDiagnostics | null>(null);
+  const [reconcileStats, setReconcileStats] = useState<ReconcileStats | null>(null);
 
   const [settings, setSettings] = useState<CompanySettings>({
     company_name: "",
@@ -197,6 +206,25 @@ export default function SetupPage() {
       setError(e?.message ?? "Failed to load diagnostics.");
     } finally {
       setChecking(false);
+    }
+  }
+
+  async function runReconcile() {
+    setReconciling(true);
+    setError(null);
+    setOkMsg(null);
+    try {
+      const res = await api<{ ok: true; stats: ReconcileStats }>("/api/setup/reconcile-contacts", {
+        method: "POST",
+      });
+      setReconcileStats(res.stats);
+      setOkMsg("Contact reconciliation completed.");
+      const d = await api<{ ok: true; diagnostics: SetupDiagnostics }>("/api/setup/diagnostics");
+      setDiag(d.diagnostics);
+    } catch (e: any) {
+      setError(e?.message ?? "Failed to reconcile contacts.");
+    } finally {
+      setReconciling(false);
     }
   }
 
@@ -382,10 +410,25 @@ export default function SetupPage() {
       <div className="rounded-xl border p-4 mt-4">
         <div className="flex items-center justify-between gap-3">
           <h2 className="font-semibold">Bot + Inbox Diagnostics</h2>
-          <button className="border rounded px-3 py-1 text-sm" onClick={() => void runDiagnostics()} disabled={checking}>
-            {checking ? "Checking..." : "Refresh checks"}
-          </button>
+          <div className="flex items-center gap-2">
+            <button className="border rounded px-3 py-1 text-sm" onClick={() => void runReconcile()} disabled={reconciling}>
+              {reconciling ? "Reconciling..." : "Reconcile Contacts & Chats"}
+            </button>
+            <button className="border rounded px-3 py-1 text-sm" onClick={() => void runDiagnostics()} disabled={checking}>
+              {checking ? "Checking..." : "Refresh checks"}
+            </button>
+          </div>
         </div>
+
+        {reconcileStats ? (
+          <div className="text-sm mt-3 border rounded p-3">
+            <div className="font-semibold mb-1">Last Reconcile Result</div>
+            <div>Number groups merged: {reconcileStats.groups_merged}</div>
+            <div>Duplicate customers merged: {reconcileStats.customers_merged}</div>
+            <div>Duplicate conversations merged: {reconcileStats.conversations_merged}</div>
+            <div>Messages moved to canonical threads: {reconcileStats.messages_moved}</div>
+          </div>
+        ) : null}
 
         {!diag ? (
           <p className="text-sm mt-2">No diagnostics yet.</p>
