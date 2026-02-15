@@ -735,14 +735,45 @@ try {
   console.error("inbound persist error:", err);
 }
 
-            // If this conversation is in agent mode, do not let the bot answer.
-          // We still saved the message above and emitted events for the admin UI.
+          // If this conversation is in agent mode, keep bot quiet unless customer
+          // explicitly asks to return (e.g. "hi", "menu", "start").
+          const rawTextForAgentGate = (text || "").trim();
+          const txtForAgentGate = rawTextForAgentGate.toLowerCase();
+          const returnToBotKeywords = new Set([
+            "hi",
+            "hello",
+            "mambo",
+            "start",
+            "anza",
+            "menu",
+            "menyu",
+            "bot",
+            "rudi",
+          ]);
+          const wantsReturnToBotFromText =
+            !interactiveId && returnToBotKeywords.has(txtForAgentGate);
+
           const agentAllowed = await isAgentAllowed(from);
           if (agentAllowed) {
-            console.log("[webhook] agent mode for", from, "— skipping bot reply");
-          continue;
-          }
+            if (!wantsReturnToBotFromText) {
+              console.log("[webhook] agent mode for", from, "- skipping bot reply");
+              continue;
+            }
 
+            const { id: customerId } = await upsertCustomerByWa(from, undefined, from);
+            const conversationId = await getOrCreateConversationForPhone(
+              customerId,
+              getRememberedPhoneNumberId(from) ?? null
+            );
+
+            await db("conversations")
+              .where({ id: conversationId })
+              .update({ agent_allowed: false });
+
+            emit("conversation.updated", { id: conversationId, agent_allowed: false });
+            await showEntryMenu(from, lang);
+            continue;
+          }
 // If user sent a WhatsApp Catalog cart/order, convert it to our internal cart and continue with checkout
 if (type === "order" && Array.isArray(msg.order?.product_items) && msg.order.product_items.length > 0) {
   clearCart(from);
@@ -2644,3 +2675,4 @@ function detailsSectionForSku(
   // Fallback: if something weird happens, just send the combined details
   return detailsForSku(lang, sku);
 }
+
