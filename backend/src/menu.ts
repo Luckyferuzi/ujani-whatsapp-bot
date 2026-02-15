@@ -152,10 +152,7 @@ export function getProductBySku(sku: string): Product | undefined {
  */
 export async function loadTopLevelProducts(): Promise<Product[]> {
   const rows = await listActiveProducts();
-  if (!rows || rows.length === 0) {
-    // fallback to static catalog so bot still works
-    return PRODUCTS;
-  }
+  if (!rows || rows.length === 0) return [];
 
   return rows.map((row) => {
     const p = row as ProductRow;
@@ -225,8 +222,7 @@ export async function getProductBySkuAsync(
       stockQty: p.stock_qty ?? undefined,
     };
   }
-  // fallback to static (no stock info, treated as unlimited)
-  return PRODUCTS.find((p) => p.sku === sku);
+  return undefined;
 }
 
 /**

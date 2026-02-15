@@ -1661,19 +1661,8 @@ publish_to_catalog,
         ? 0
         : Number(stock_qty);
 
-        const publish = !!publish_to_catalog;
-const imageUrl = image_url ? String(image_url).trim() : null;
-
-let catalogId: string | null = null;
-if (publish) {
-  if (!imageUrl) {
-    return res.status(400).json({ error: "image_url_required_for_catalog" });
-  }
-  catalogId = await getConnectedCatalogId();
-  if (!catalogId) {
-    return res.status(400).json({ error: "no_connected_catalog" });
-  }
-}
+    const publish = !!publish_to_catalog;
+    const imageUrl = image_url ? String(image_url).trim() : null;
 
 
     // if sku is not provided, auto-generate one
@@ -1746,22 +1735,30 @@ if (publish) {
     emit("product.created", { product: created });
 
     let catalog: any = null;
-if (publish && catalogId) {
-  try {
-    await upsertCatalogProduct(catalogId, {
-      retailer_id: finalSku,
-      name: String(name).trim(),
-      description: description ? String(description).trim() : "",
-      image_url: imageUrl!,
-      price_tzs: price,
-      availability: stockNum > 0 ? "in stock" : "out of stock",
-      allow_upsert: true,
-    });
-    catalog = { ok: true };
-  } catch (e: any) {
-    catalog = { ok: false, error: e?.message ?? String(e) };
-  }
-}
+    if (publish) {
+      const catalogId = await getConnectedCatalogId().catch(() => null);
+
+      if (!imageUrl) {
+        catalog = { ok: false, error: "image_url_required_for_catalog" };
+      } else if (!catalogId) {
+        catalog = { ok: false, error: "no_connected_catalog" };
+      } else {
+        try {
+          await upsertCatalogProduct(catalogId, {
+            retailer_id: finalSku,
+            name: String(name).trim(),
+            description: description ? String(description).trim() : "",
+            image_url: imageUrl,
+            price_tzs: price,
+            availability: stockNum > 0 ? "in stock" : "out of stock",
+            allow_upsert: true,
+          });
+          catalog = { ok: true };
+        } catch (e: any) {
+          catalog = { ok: false, error: e?.message ?? String(e) };
+        }
+      }
+    }
 
 
     return res.status(201).json({ product: created, catalog });
@@ -1887,24 +1884,15 @@ inboxRoutes.put("/products/:id", async (req, res) => {
       return res.status(400).json({ error: "No fields to update" });
     }
 
-    // If publishing to catalog, we must have an effective image_url (Meta requirement)
-    let catalogId: string | null = null;
+    // If publishing to catalog, prefer effective image_url but don't block DB update.
     let effectiveImageUrl: string | null = null;
-
     if (publish) {
       const fromPatch =
         patch.image_url !== undefined ? patch.image_url : undefined;
-
-      const img = (fromPatch ?? before.image_url) ? String(fromPatch ?? before.image_url).trim() : "";
-      if (!img) {
-        return res.status(400).json({ error: "image_url_required_for_catalog" });
-      }
-      effectiveImageUrl = img;
-
-      catalogId = await getConnectedCatalogId();
-      if (!catalogId) {
-        return res.status(400).json({ error: "no_connected_catalog" });
-      }
+      const img = (fromPatch ?? before.image_url)
+        ? String(fromPatch ?? before.image_url).trim()
+        : "";
+      effectiveImageUrl = img || null;
     }
 
     patch.updated_at = new Date();
@@ -1973,21 +1961,30 @@ inboxRoutes.put("/products/:id", async (req, res) => {
 
     // Publish/update in WhatsApp Catalog if requested
     let catalog: any = null;
-    if (publish && catalogId) {
-      try {
-        const row = updated as any;
-        await upsertCatalogProduct(catalogId, {
-          retailer_id: String(row.sku ?? before.sku).trim(),
-          name: String(row.name ?? "").trim(),
-          description: String(row.description ?? "").trim(),
-          image_url: effectiveImageUrl || String(row.image_url ?? "").trim(),
-          price_tzs: Number(row.price_tzs ?? 0),
-          availability: Number(row.stock_qty ?? 0) > 0 ? "in stock" : "out of stock",
-          allow_upsert: true,
-        });
-        catalog = { ok: true };
-      } catch (e: any) {
-        catalog = { ok: false, error: e?.message ?? String(e) };
+    if (publish) {
+      const catalogId = await getConnectedCatalogId().catch(() => null);
+      const row = updated as any;
+      const finalImage = effectiveImageUrl || String(row.image_url ?? "").trim();
+
+      if (!finalImage) {
+        catalog = { ok: false, error: "image_url_required_for_catalog" };
+      } else if (!catalogId) {
+        catalog = { ok: false, error: "no_connected_catalog" };
+      } else {
+        try {
+          await upsertCatalogProduct(catalogId, {
+            retailer_id: String(row.sku ?? before.sku).trim(),
+            name: String(row.name ?? "").trim(),
+            description: String(row.description ?? "").trim(),
+            image_url: finalImage,
+            price_tzs: Number(row.price_tzs ?? 0),
+            availability: Number(row.stock_qty ?? 0) > 0 ? "in stock" : "out of stock",
+            allow_upsert: true,
+          });
+          catalog = { ok: true };
+        } catch (e: any) {
+          catalog = { ok: false, error: e?.message ?? String(e) };
+        }
       }
     }
 

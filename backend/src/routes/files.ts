@@ -9,12 +9,21 @@ export const publicMediaRoutes = Router();
 
 const upload = multer({
   storage: multer.memoryStorage(), // IMPORTANT: no local files
-  limits: { fileSize: 2 * 1024 * 1024 }, // 2MB
+  limits: { fileSize: 8 * 1024 * 1024 }, // 8MB
   fileFilter: (_req, file, cb) => {
     if (file.mimetype?.startsWith("image/")) return cb(null, true);
     cb(new Error("invalid_file_type"));
   },
 });
+
+function multerErrorToResponse(err: any): { code: number; error: string } {
+  if (!err) return { code: 500, error: "upload_failed" };
+  if (err.code === "LIMIT_FILE_SIZE") return { code: 400, error: "file_too_large_max_8mb" };
+  if (String(err?.message ?? "").includes("invalid_file_type")) {
+    return { code: 400, error: "invalid_file_type_image_required" };
+  }
+  return { code: 400, error: "upload_failed" };
+}
 
 /**
  * POST /files/avatar
@@ -78,30 +87,44 @@ publicMediaRoutes.get("/media/:token", async (req, res) => {
  * multipart/form-data: file=<image>
  * Stores bytes in DB and returns a public URL (usable for WhatsApp Catalog).
  */
-filesRoutes.post("/product-image", requireSession, upload.single("file"), async (req, res) => {
-  const f = req.file;
-  if (!f) return res.status(400).json({ error: "missing_file" });
+filesRoutes.post("/product-image", requireSession, (req, res) => {
+  upload.single("file")(req, res, async (err: any) => {
+    if (err) {
+      const mapped = multerErrorToResponse(err);
+      return res.status(mapped.code).json({ error: mapped.error });
+    }
 
-  const token = randomBytes(24).toString("hex"); // public-safe id
-  const sha256 = createHash("sha256").update(f.buffer).digest("hex");
+    try {
+      const f = (req as any).file as Express.Multer.File | undefined;
+      if (!f) return res.status(400).json({ error: "missing_file" });
 
-  const user = (req as any).user as { id: number };
+      const token = randomBytes(24).toString("hex"); // public-safe id
+      const sha256 = createHash("sha256").update(f.buffer).digest("hex");
 
-  await db("media_files").insert({
-    token,
-    created_by_user_id: user?.id ?? null,
-    purpose: "product_image",
-    file_name: f.originalname ?? null,
-    mime_type: f.mimetype,
-    size_bytes: f.size,
-    sha256,
-    data: f.buffer,
+      const user = (req as any).user as { id: number };
+
+      await db("media_files").insert({
+        token,
+        created_by_user_id: user?.id ?? null,
+        purpose: "product_image",
+        file_name: f.originalname ?? null,
+        mime_type: f.mimetype,
+        size_bytes: f.size,
+        sha256,
+        data: f.buffer,
+      });
+
+      const base =
+        (process.env.PUBLIC_BASE_URL || "").replace(/\/$/, "") ||
+        `${req.protocol}://${req.get("host")}`;
+
+      const url = `${base}/public/media/${token}`;
+      return res.json({ url, token });
+    } catch (e: any) {
+      return res.status(500).json({
+        error: "product_image_upload_failed",
+        message: e?.message ?? "Failed to store product image.",
+      });
+    }
   });
-
-  const base =
-    (process.env.PUBLIC_BASE_URL || "").replace(/\/$/, "") ||
-    `${req.protocol}://${req.get("host")}`;
-
-  const url = `${base}/public/media/${token}`;
-  return res.json({ url, token });
 });
