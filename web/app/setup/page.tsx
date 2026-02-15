@@ -36,14 +36,51 @@ type RuntimeConfig = {
   };
 };
 
+type SetupDiagnostics = {
+  setup: {
+    missing_required: string[];
+    configured_phone_number_id: string | null;
+    configured_graph_version: string | null;
+  };
+  graph: {
+    phone_summary:
+      | {
+          ok: true;
+          id: string;
+          display_phone_number: string | null;
+          verified_name: string | null;
+        }
+      | null;
+  };
+  inbox: {
+    conversations: number;
+    messages_total: number;
+    messages_inbound: number;
+    messages_outbound: number;
+    last_inbound:
+      | {
+          at: string;
+          age_minutes: number | null;
+          from_wa_id: string | null;
+          from_phone: string | null;
+          phone_number_id: string | null;
+          body_preview: string;
+        }
+      | null;
+  };
+  issues: Array<{ level: "error" | "warn"; code: string; message: string }>;
+};
+
 export default function SetupPage() {
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [completing, setCompleting] = useState(false);
+  const [checking, setChecking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [okMsg, setOkMsg] = useState<string | null>(null);
+  const [diag, setDiag] = useState<SetupDiagnostics | null>(null);
 
   const [settings, setSettings] = useState<CompanySettings>({
     company_name: "",
@@ -74,6 +111,8 @@ export default function SetupPage() {
         ]);
         setSettings((prev) => ({ ...prev, ...s.settings }));
         setRuntime(r.config);
+        const d = await api<{ ok: true; diagnostics: SetupDiagnostics }>("/api/setup/diagnostics");
+        setDiag(d.diagnostics);
       } catch (e: any) {
         setError(e?.message ?? "Failed to load setup data.");
       } finally {
@@ -144,6 +183,20 @@ export default function SetupPage() {
       setError(e?.message ?? "Failed to complete setup.");
     } finally {
       setCompleting(false);
+    }
+  }
+
+  async function runDiagnostics() {
+    setChecking(true);
+    setError(null);
+    try {
+      const d = await api<{ ok: true; diagnostics: SetupDiagnostics }>("/api/setup/diagnostics");
+      setDiag(d.diagnostics);
+      setOkMsg("Diagnostics refreshed.");
+    } catch (e: any) {
+      setError(e?.message ?? "Failed to load diagnostics.");
+    } finally {
+      setChecking(false);
     }
   }
 
@@ -324,6 +377,61 @@ export default function SetupPage() {
             Status: {settings.is_setup_complete ? "Complete" : "Incomplete"}
           </span>
         </div>
+      </div>
+
+      <div className="rounded-xl border p-4 mt-4">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="font-semibold">Bot + Inbox Diagnostics</h2>
+          <button className="border rounded px-3 py-1 text-sm" onClick={() => void runDiagnostics()} disabled={checking}>
+            {checking ? "Checking..." : "Refresh checks"}
+          </button>
+        </div>
+
+        {!diag ? (
+          <p className="text-sm mt-2">No diagnostics yet.</p>
+        ) : (
+          <div className="space-y-3 mt-3">
+            <div className="text-sm">
+              <div>Conversations: {diag.inbox.conversations}</div>
+              <div>Messages: {diag.inbox.messages_total} (in: {diag.inbox.messages_inbound}, out: {diag.inbox.messages_outbound})</div>
+              <div>
+                Last inbound:{" "}
+                {diag.inbox.last_inbound
+                  ? `${diag.inbox.last_inbound.at} (${diag.inbox.last_inbound.age_minutes ?? 0} min ago)`
+                  : "none"}
+              </div>
+            </div>
+
+            <div className="text-sm">
+              <div>Configured Phone Number ID: {diag.setup.configured_phone_number_id || "-"}</div>
+              <div>Graph phone check: {diag.graph.phone_summary ? "OK" : "Not reachable / not configured"}</div>
+              {diag.graph.phone_summary ? (
+                <div>
+                  Verified Name: {diag.graph.phone_summary.verified_name || "-"} | Display Number:{" "}
+                  {diag.graph.phone_summary.display_phone_number || "-"}
+                </div>
+              ) : null}
+            </div>
+
+            {diag.setup.missing_required.length > 0 ? (
+              <div className="text-sm text-red-700">
+                Missing required: {diag.setup.missing_required.join(", ")}
+              </div>
+            ) : null}
+
+            {diag.issues.length > 0 ? (
+              <div className="text-sm">
+                {diag.issues.map((i) => (
+                  <div key={i.code} className={i.level === "error" ? "text-red-700" : "text-amber-700"}>
+                    [{i.level}] {i.message}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-sm text-green-700">No blocking issues detected.</div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
