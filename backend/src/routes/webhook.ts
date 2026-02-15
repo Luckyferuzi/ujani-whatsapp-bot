@@ -685,12 +685,22 @@ if (interactiveId) {
 
 // --- DB persistence + realtime for every inbound message ---
 let isNewCustomer = false;
+let isFirstInboundForCustomer = false;
 
 try {
   // 1) Ensure customer + conversation exist (use WhatsApp profile name if available)
   const up = await upsertCustomerByWa(from, profileName, from);
   const customerId = up.id;
   isNewCustomer = up.isNew;
+
+  // "New customer welcome" should depend on first inbound message ever,
+  // not on customer row creation (which can happen via admin/test sends).
+  const inboundBefore = await db("messages as m")
+    .join("conversations as c", "c.id", "m.conversation_id")
+    .where("c.customer_id", customerId)
+    .andWhere("m.direction", "inbound")
+    .first("m.id");
+  isFirstInboundForCustomer = !inboundBefore;
 
   const conversationId = await getOrCreateConversationForPhone(
     customerId,
@@ -879,8 +889,12 @@ if (type === "order" && Array.isArray(msg.order?.product_items) && msg.order.pro
 
           // DEV INTRO (send once for brand-new customers, then continue normal bot flow)
 const devIntro = getDevIntroText(lang);
-if (isNewCustomer && devIntro) {
-  await sendBotText(from, devIntro, businessPhoneNumberId);
+if (isFirstInboundForCustomer) {
+  if (devIntro) {
+    await sendBotText(from, devIntro, businessPhoneNumberId);
+  }
+  await showMainMenu(from, lang);
+  continue;
 }
 
 
@@ -959,12 +973,12 @@ if ((!s || s.state === "IDLE") && !activeFlow) {
     !text ||
     ["hi", "hello", "mambo", "start", "anza", "menu", "menyu"].includes(txt)
   ) {
-    console.log("[webhook] greeting/menu trigger -> showEntryMenu", {
+    console.log("[webhook] greeting/menu trigger -> showMainMenu", {
       from,
       txt,
       sessionState: s?.state ?? "none",
     });
-    await showEntryMenu(from, lang);
+    await showMainMenu(from, lang);
     continue;
   }
 }
@@ -1004,13 +1018,8 @@ if ((!s || s.state === "IDLE") && !activeFlow) {
 /* -------------------------------------------------------------------------- */
 
 async function showEntryMenu(user: string, lang: Lang) {
-  const presence = await getJsonSetting<any>("whatsapp_presence", {});
-  const body = (presence.menu_intro || t(lang, "menu.entry_body")) as string;
-
-  await sendButtonsMessageSafe(user, body, [
-    { id: "ACTION_OPEN_CATALOG", title: t(lang, "menu.open_catalog") },
-    { id: "ACTION_ORDER_BY_CHAT", title: t(lang, "menu.order_by_chat") },
-  ]);
+  // Entry menu is deprecated. Always show the full sectioned main menu.
+  return showMainMenu(user, lang);
 }
 
 async function pickCatalogThumbnailSku(): Promise<string | null> {
