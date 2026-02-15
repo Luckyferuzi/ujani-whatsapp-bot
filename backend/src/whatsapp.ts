@@ -387,7 +387,26 @@ export type CatalogProduct = {
 export async function getConnectedCatalogId(
   wabaId?: string | null
 ): Promise<string | null> {
-  const id = (wabaId ?? getWabaIdEffective() ?? "").toString().trim();
+  let id = (wabaId ?? getWabaIdEffective() ?? "").toString().trim();
+
+  // Fallback: discover WABA id from configured phone number id.
+  if (!id) {
+    const phoneId = getPhoneNumberIdEffective();
+    if (phoneId) {
+      try {
+        const phoneMeta = await apiGet(
+          `${phoneId}?fields=whatsapp_business_account`
+        );
+        const discovered = String(
+          phoneMeta?.whatsapp_business_account?.id ?? ""
+        ).trim();
+        if (discovered) id = discovered;
+      } catch {
+        // ignore; final null return handled by callers
+      }
+    }
+  }
+
   if (!id) return null;
 
   const res = await apiGet(`${id}/product_catalogs?fields=id,name`);

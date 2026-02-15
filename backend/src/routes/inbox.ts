@@ -1446,7 +1446,11 @@ inboxRoutes.get("/catalog/products", async (_req, res) => {
   try {
     const catalogId = await getConnectedCatalogId();
     if (!catalogId) {
-      return res.status(400).json({ error: "no_connected_catalog" });
+      return res.status(400).json({
+        error: "no_connected_catalog",
+        message:
+          "No connected catalog found. Ensure PHONE_NUMBER_ID is valid and WABA has a product catalog connected.",
+      });
     }
 
     const items = await listCatalogProducts(catalogId);
@@ -1464,7 +1468,11 @@ inboxRoutes.post("/catalog/import", async (_req, res) => {
   try {
     const catalogId = await getConnectedCatalogId();
     if (!catalogId) {
-      return res.status(400).json({ error: "no_connected_catalog" });
+      return res.status(400).json({
+        error: "no_connected_catalog",
+        message:
+          "No connected catalog found. Ensure PHONE_NUMBER_ID is valid and WABA has a product catalog connected.",
+      });
     }
 
     const items = await listCatalogProducts(catalogId);

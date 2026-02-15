@@ -290,13 +290,12 @@ publish_to_catalog: false,
     }
   }
 
-  async function uploadProductImage(file: File) {
+async function uploadProductImage(file: File) {
   const formData = new FormData();
   formData.append("file", file);
 
   const out = await authPostForm<{ url: string }>("/files/product-image", formData);
   setForm((f) => ({ ...f, image_url: out.url }));
-  toast.success("Product image uploaded.");
 }
 
   async function handleSubmit(e: React.FormEvent) {
