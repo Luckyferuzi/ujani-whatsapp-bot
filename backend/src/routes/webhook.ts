@@ -595,6 +595,12 @@ webhook.post("/webhook", async (req: Request, res: Response) => {
         }
 
         const messages = ch?.value?.messages ?? [];
+        if (!messages.length) {
+          console.log("[webhook] no messages in change payload", {
+            field,
+            businessPhoneNumberId,
+          });
+        }
 
         for (const msg of messages) {
     const from = msg?.from as string;
@@ -624,6 +630,15 @@ webhook.post("/webhook", async (req: Request, res: Response) => {
 
           const type = msg?.type as string | undefined;
           const text: string | undefined = type === 'text' ? (msg.text?.body as string) : undefined;
+
+          console.log("[webhook] inbound message received", {
+            from,
+            type: type ?? "unknown",
+            hasText: !!text,
+            textPreview: (text ?? "").slice(0, 120),
+            businessPhoneNumberId,
+            hasInteractive: type === "interactive",
+          });
 
           // Interactive reply id (and debug)
 // Interactive reply id + label (what the user actually clicked)
@@ -756,7 +771,11 @@ try {
           const agentAllowed = await isAgentAllowed(from);
           if (agentAllowed) {
             if (!wantsReturnToBotFromText) {
-              console.log("[webhook] agent mode for", from, "- skipping bot reply");
+              console.log("[webhook] bot skip: agent mode still ON", {
+                from,
+                txtForAgentGate,
+                interactiveId: interactiveId ?? null,
+              });
               continue;
             }
 
@@ -771,6 +790,11 @@ try {
               .update({ agent_allowed: false });
 
             emit("conversation.updated", { id: conversationId, agent_allowed: false });
+            console.log("[webhook] customer requested return-to-bot via text", {
+              from,
+              text: txtForAgentGate,
+              conversationId,
+            });
             await showEntryMenu(from, lang);
             continue;
           }
@@ -935,6 +959,11 @@ if ((!s || s.state === "IDLE") && !activeFlow) {
     !text ||
     ["hi", "hello", "mambo", "start", "anza", "menu", "menyu"].includes(txt)
   ) {
+    console.log("[webhook] greeting/menu trigger -> showEntryMenu", {
+      from,
+      txt,
+      sessionState: s?.state ?? "none",
+    });
     await showEntryMenu(from, lang);
     continue;
   }
@@ -943,8 +972,20 @@ if ((!s || s.state === "IDLE") && !activeFlow) {
 
           // 3) route
           if (activeFlow) {
+            console.log("[webhook] routing to onFlow", {
+              from,
+              flow: activeFlow,
+              textPreview: (text ?? "").slice(0, 120),
+              hasLocation,
+            });
             await onFlow(from, activeFlow, { text, hasLocation, lat, lon }, lang);
           } else {
+            console.log("[webhook] routing to onSessionMessage", {
+              from,
+              state: s?.state ?? "none",
+              textPreview: (text ?? "").slice(0, 120),
+              hasLocation,
+            });
             await onSessionMessage(from, { text, hasLocation, lat, lon }, lang);
           }
 

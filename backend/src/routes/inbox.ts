@@ -183,9 +183,16 @@ async function notifyRestockSubscribers(
 
 inboxRoutes.get("/conversations", async (_req, res) => {
   try {
+    const latestMessageAgg = db("messages as m")
+      .select("m.conversation_id")
+      .max("m.created_at as last_message_at")
+      .groupBy("m.conversation_id")
+      .as("lm");
+
     // Base: conversations + customer info
     const items = await db("conversations as c")
       .join("customers as u", "u.id", "c.customer_id")
+      .leftJoin(latestMessageAgg, "lm.conversation_id", "c.id")
       .select(
         "c.id",
         "c.phone_number_id",
@@ -194,10 +201,15 @@ inboxRoutes.get("/conversations", async (_req, res) => {
         "u.lang",
         "c.agent_allowed",
         "c.last_user_message_at",
-        "c.customer_id"
+        "c.customer_id",
+        db.raw(
+          "COALESCE(lm.last_message_at, c.last_user_message_at, c.created_at) as last_activity_at"
+        )
       )
-      // initial sort (we'll do final sort in-memory)
-      .orderBy("c.last_user_message_at", "desc")
+      // Important: sort before limiting by true activity (inbound OR outbound)
+      .orderByRaw(
+        "COALESCE(lm.last_message_at, c.last_user_message_at, c.created_at) DESC"
+      )
       .limit(100);
 
     if (items.length === 0) {
@@ -274,7 +286,7 @@ for (const r of restockCounts as any[]) {
   restockCountByCustomer[Number(row.customer_id)] ?? 0;
       row.last_message_text = meta.last_message_text;
       row.last_message_at =
-        meta.last_message_at ?? row.last_user_message_at ?? null;
+        meta.last_message_at ?? row.last_user_message_at ?? row.last_activity_at ?? null;
     }
 
     // Final sort by last activity (incoming OR outgoing)
@@ -2608,4 +2620,3 @@ inboxRoutes.post("/customers/broadcast", async (req: Request, res: Response) => 
     });
   }
 });
-
