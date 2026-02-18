@@ -381,7 +381,7 @@ async function showPaymentOptions(user: string, lang: Lang, total: number) {
     t(lang, 'flow.payment_choose'),
     ...opts.map(o => `• *${o.label}*: ${o.value}`),
   ];
-  await sendBotText(user, lines.join('\n'));
+  await sendLongTextSafe(user, lines.join('\n'));
 
   // Selectable list
   await sendListMessageSafe({
@@ -1187,7 +1187,7 @@ async function showCart(user: string, lang: Lang) {
   }
   lines.push("");
   lines.push(t(lang, "cart.summary_total", { total: fmtTZS(total) }));
-  await sendBotText(user, lines.join("\n"));
+  await sendLongTextSafe(user, lines.join("\n"));
 
   await sendButtonsMessageSafe(user, t(lang, "cart.choose_action"), [
     { id: "ACTION_CHECKOUT", title: t(lang, "menu.checkout") },
@@ -1296,7 +1296,7 @@ async function showOrderDetailsAndActions(
   );
 
   // 🔹 Send & log the details so admin sees them
-  await sendBotText(user, lines.join("\n"));
+  await sendLongTextSafe(user, lines.join("\n"));
 
   // 🔹 Build buttons based on status
   const buttons: Button[] = [];
@@ -1738,7 +1738,7 @@ if (id === 'ACTION_TALK_TO_AGENT') {
     );
 
     // 1) Send + log order details so admin sees them
-      await sendBotText(user, lines.join("\n"));
+      await sendLongTextSafe(user, lines.join("\n"));
 
 
     // 2) Decide which actions to show based on status
@@ -2051,8 +2051,8 @@ if (id.startsWith("ORDER_CANCEL_")) {
 
 
   if (id === "ACTION_FAQ") {
-  await sendBotText(user, t(lang, "faq.intro"));
-  await sendBotText(user, t(lang, "faq.list"));
+  await sendLongTextSafe(user, t(lang, "faq.intro"));
+  await sendLongTextSafe(user, t(lang, "faq.list"));
   return showMainMenu(user, lang);;
 }
 
@@ -2629,7 +2629,7 @@ case "TRACK_ASK_NAME": {
     );
   }
 
-  await sendBotText(user, lines.join("\n"));
+  await sendLongTextSafe(user, lines.join("\n"));
 
   setFlow(user, null);
   return;
