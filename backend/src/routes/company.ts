@@ -15,11 +15,18 @@ import { env } from "../config.js";
 import {
   DEFAULT_COMPANY_SETTINGS,
   getPhoneNumberIdEffective,
+  getWabaIdEffective,
+  getCatalogEnabledEffective,
   getCompanySettingsCached,
   loadCompanySettingsToCache,
   saveCompanySettings,
 } from "../runtime/companySettings.js";
-import { getBusinessProfile, getPhoneNumberSummary, sendText } from "../whatsapp.js";
+import {
+  getBusinessProfile,
+  getConnectedCatalogId,
+  getPhoneNumberSummary,
+  sendText,
+} from "../whatsapp.js";
 import { setJsonSetting } from "../db/settings.js";
 import {
   getOrCreateConversationForPhone,
@@ -56,6 +63,7 @@ const patchSchema = z
     app_secret: z.string().nullable().optional(),
     app_id: z.string().nullable().optional(),
     graph_api_version: z.string().nullable().optional(),
+    catalog_enabled: z.boolean().optional(),
 
     whatsapp_embedded_config_id: z.string().nullable().optional(),
     whatsapp_solution_id: z.string().nullable().optional(),
@@ -122,6 +130,7 @@ companyRoutes.get("/company/meta", async (_req, res) => {
     meta: {
       company_name: s.company_name || "Ujani",
       enabled_modules: Array.isArray(s.enabled_modules) ? s.enabled_modules : ["inbox"],
+      catalog_enabled: !!s.catalog_enabled,
     },
   });
 });
@@ -388,6 +397,69 @@ companyRoutes.get("/setup/diagnostics", async (_req, res) => {
       ok: false,
       error: "diagnostics_failed",
       message: e?.message ?? "Failed to build diagnostics.",
+    });
+  }
+});
+
+companyRoutes.get("/setup/catalog-diagnostics", async (_req, res) => {
+  try {
+    const s = await loadCompanySettingsToCache().catch(() => getCompanySettingsCached());
+    const catalogEnabled = getCatalogEnabledEffective();
+    const configuredWabaId = getWabaIdEffective();
+    const configuredPhoneId = getPhoneNumberIdEffective();
+
+    const [phoneSummary, catalogId] = await Promise.all([
+      getPhoneNumberSummary().catch(() => null),
+      getConnectedCatalogId(configuredWabaId ?? null).catch(() => null),
+    ]);
+
+    const issues: Array<{ level: "error" | "warn"; code: string; message: string }> = [];
+    if (!catalogEnabled) {
+      issues.push({
+        level: "warn",
+        code: "catalog_disabled",
+        message: "Catalog mode is disabled in settings.",
+      });
+    }
+    if (!configuredPhoneId) {
+      issues.push({
+        level: "error",
+        code: "missing_phone_number_id",
+        message: "PHONE_NUMBER_ID is missing.",
+      });
+    }
+    if (!configuredWabaId) {
+      issues.push({
+        level: "warn",
+        code: "missing_waba_id",
+        message: "WABA_ID is missing; using auto-discovery from PHONE_NUMBER_ID.",
+      });
+    }
+    if (!catalogId) {
+      issues.push({
+        level: "error",
+        code: "no_connected_catalog",
+        message: "No connected product catalog found for this WhatsApp business.",
+      });
+    }
+
+    return res.json({
+      ok: true,
+      diagnostics: {
+        catalog_enabled: catalogEnabled,
+        configured_phone_number_id: s.phone_number_id ?? null,
+        configured_waba_id: s.waba_id ?? null,
+        graph_phone_summary: phoneSummary,
+        connected_catalog_id: catalogId,
+        healthy: catalogEnabled && !!catalogId && !!configuredPhoneId,
+        issues,
+      },
+    });
+  } catch (e: any) {
+    return res.status(500).json({
+      ok: false,
+      error: "catalog_diagnostics_failed",
+      message: e?.message ?? "Failed to run catalog diagnostics.",
     });
   }
 });

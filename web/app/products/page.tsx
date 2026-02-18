@@ -28,6 +28,7 @@ type ProductSaveResponse = {
   product: Product;
   catalog?: { ok: boolean; error?: string | null } | null;
 };
+type CompanySettingsMeta = { ok: true; settings: { catalog_enabled?: boolean } };
 
 type ProductForm = {
   name: string;
@@ -92,6 +93,7 @@ const [bulkAnchorIndex, setBulkAnchorIndex] = useState<number | null>(null);
 
   // Quick stock update in details panel
   const [stockEdit, setStockEdit] = useState<string>("");
+  const [catalogEnabled, setCatalogEnabled] = useState(false);
 
   async function loadProducts() {
     setLoading(true);
@@ -121,6 +123,17 @@ const [bulkAnchorIndex, setBulkAnchorIndex] = useState<number | null>(null);
 
   useEffect(() => {
     void loadProducts();
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const s = await get<CompanySettingsMeta>("/api/company/settings");
+        setCatalogEnabled(!!s?.settings?.catalog_enabled);
+      } catch {
+        setCatalogEnabled(false);
+      }
+    })();
   }, []);
 
   // Auto-refresh when backend notifies products/stock changed
@@ -330,7 +343,7 @@ async function uploadProductImage(file: File) {
         price_tzs: Math.floor(priceNumeric),
         stock_qty: Math.floor(stockNumeric),
         image_url: form.image_url || null,
-publish_to_catalog: !!form.publish_to_catalog,
+publish_to_catalog: catalogEnabled && !!form.publish_to_catalog,
         description: form.description ?? "",
         description_en: form.description_en ?? "",
         is_installment: !!form.is_installment,
@@ -351,7 +364,7 @@ publish_to_catalog: !!form.publish_to_catalog,
       }
 
       toast.success(isNew ? "Product created." : "Product updated.");
-      if (payload.publish_to_catalog) {
+      if (catalogEnabled && payload.publish_to_catalog) {
         if (res?.catalog?.ok) {
           toast.success("Catalog sync successful.");
         } else {
@@ -661,6 +674,10 @@ function exportSelectedCsv() {
   type="button"
   className="pr-btn"
   onClick={async () => {
+    if (!catalogEnabled) {
+      toast.message("Catalog is disabled in Setup.");
+      return;
+    }
     try {
       const out = await post<{ imported: number; updated: number }>("/api/catalog/import");
       toast.success("Imported from catalog.", {
@@ -671,7 +688,7 @@ function exportSelectedCsv() {
       toast.error("Failed to import from catalog.", { description: e?.message ?? "Try again." });
     }
   }}
-  disabled={loading}
+  disabled={loading || !catalogEnabled}
 >
   ⇅ Import Catalog
 </button>
@@ -1142,10 +1159,15 @@ function exportSelectedCsv() {
   <label className="pr-flag" style={{ display: "inline-flex", gap: 8 }}>
     <input
       type="checkbox"
+      disabled={!catalogEnabled}
       checked={form.publish_to_catalog}
       onChange={(e) => setForm((f) => ({ ...f, publish_to_catalog: e.target.checked }))}
     />
-    <span>Publish / update in Catalog on save</span>
+    <span>
+      {catalogEnabled
+        ? "Publish / update in Catalog on save"
+        : "Catalog disabled in Setup"}
+    </span>
   </label>
 </div>
 

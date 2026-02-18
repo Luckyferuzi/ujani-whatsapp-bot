@@ -13,6 +13,7 @@ type CompanySettings = {
   app_secret: string | null;
   app_id: string | null;
   graph_api_version: string | null;
+  catalog_enabled: boolean;
   is_setup_complete: boolean;
 };
 
@@ -71,6 +72,15 @@ type SetupDiagnostics = {
   issues: Array<{ level: "error" | "warn"; code: string; message: string }>;
 };
 
+type CatalogDiagnostics = {
+  catalog_enabled: boolean;
+  configured_phone_number_id: string | null;
+  configured_waba_id: string | null;
+  connected_catalog_id: string | null;
+  healthy: boolean;
+  issues: Array<{ level: "error" | "warn"; code: string; message: string }>;
+};
+
 type ReconcileStats = {
   groups_merged: number;
   customers_merged: number;
@@ -89,6 +99,7 @@ export default function SetupPage() {
   const [error, setError] = useState<string | null>(null);
   const [okMsg, setOkMsg] = useState<string | null>(null);
   const [diag, setDiag] = useState<SetupDiagnostics | null>(null);
+  const [catalogDiag, setCatalogDiag] = useState<CatalogDiagnostics | null>(null);
   const [reconcileStats, setReconcileStats] = useState<ReconcileStats | null>(null);
 
   const [settings, setSettings] = useState<CompanySettings>({
@@ -100,6 +111,7 @@ export default function SetupPage() {
     app_secret: "",
     app_id: "",
     graph_api_version: "v19.0",
+    catalog_enabled: false,
     is_setup_complete: false,
   });
 
@@ -122,6 +134,8 @@ export default function SetupPage() {
         setRuntime(r.config);
         const d = await api<{ ok: true; diagnostics: SetupDiagnostics }>("/api/setup/diagnostics");
         setDiag(d.diagnostics);
+        const cd = await api<{ ok: true; diagnostics: CatalogDiagnostics }>("/api/setup/catalog-diagnostics");
+        setCatalogDiag(cd.diagnostics);
       } catch (e: any) {
         setError(e?.message ?? "Failed to load setup data.");
       } finally {
@@ -145,6 +159,7 @@ export default function SetupPage() {
         app_secret: settings.app_secret || null,
         app_id: settings.app_id || null,
         graph_api_version: settings.graph_api_version || "v19.0",
+        catalog_enabled: !!settings.catalog_enabled,
       };
       const res = await api<{ ok: true; settings: CompanySettings }>("/api/company/settings", {
         method: "PUT",
@@ -201,6 +216,8 @@ export default function SetupPage() {
     try {
       const d = await api<{ ok: true; diagnostics: SetupDiagnostics }>("/api/setup/diagnostics");
       setDiag(d.diagnostics);
+      const cd = await api<{ ok: true; diagnostics: CatalogDiagnostics }>("/api/setup/catalog-diagnostics");
+      setCatalogDiag(cd.diagnostics);
       setOkMsg("Diagnostics refreshed.");
     } catch (e: any) {
       setError(e?.message ?? "Failed to load diagnostics.");
@@ -290,6 +307,17 @@ export default function SetupPage() {
                 onChange={(e) => setSettings((s) => ({ ...s, waba_id: e.target.value }))}
               />
             </div>
+          </div>
+
+          <div>
+            <label className="inline-flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={!!settings.catalog_enabled}
+                onChange={(e) => setSettings((s) => ({ ...s, catalog_enabled: e.target.checked }))}
+              />
+              <span>Enable WhatsApp Catalog features</span>
+            </label>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -473,6 +501,24 @@ export default function SetupPage() {
             ) : (
               <div className="text-sm text-green-700">No blocking issues detected.</div>
             )}
+          </div>
+        )}
+      </div>
+
+      <div className="rounded-xl border p-4 mt-4">
+        <h2 className="font-semibold">Catalog Health</h2>
+        {!catalogDiag ? (
+          <p className="text-sm mt-2">No catalog diagnostics yet.</p>
+        ) : (
+          <div className="text-sm mt-2 space-y-1">
+            <div>Catalog enabled: {catalogDiag.catalog_enabled ? "Yes" : "No"}</div>
+            <div>Connected catalog id: {catalogDiag.connected_catalog_id || "-"}</div>
+            <div>Catalog status: {catalogDiag.healthy ? "Healthy" : "Not ready"}</div>
+            {catalogDiag.issues.map((i) => (
+              <div key={i.code} className={i.level === "error" ? "text-red-700" : "text-amber-700"}>
+                [{i.level}] {i.message}
+              </div>
+            ))}
           </div>
         )}
       </div>

@@ -36,6 +36,7 @@ export type CompanySettings = {
   app_secret: string | null;
   app_id: string | null;
   graph_api_version: string | null;
+  catalog_enabled: boolean;
 
   // Embedded Signup / Coexistence
   whatsapp_embedded_config_id: string | null;
@@ -65,6 +66,7 @@ export const DEFAULT_COMPANY_SETTINGS: CompanySettings = {
   app_secret: null,
   app_id: null,
   graph_api_version: "v19.0",
+  catalog_enabled: false,
 
   whatsapp_embedded_config_id: null,
   whatsapp_solution_id: null,
@@ -111,6 +113,14 @@ export function getWabaIdEffective(): string | null {
     process.env.WHATSAPP_WABA_ID ||
     null
   );
+}
+
+export function getCatalogEnabledEffective(): boolean {
+  const fromDb = cached.catalog_enabled;
+  if (typeof fromDb === "boolean") return fromDb;
+
+  const raw = String(process.env.CATALOG_ENABLED ?? "false").toLowerCase().trim();
+  return raw === "1" || raw === "true" || raw === "yes" || raw === "on";
 }
 
 export function getEmbeddedConfigIdEffective(): string | null {

@@ -12,6 +12,7 @@ import { emit } from "../sockets.js";
 import { getOrdersForCustomer, listOutstandingOrdersForCustomer, createOrderWithPayment, createManualOrderFromSkus, insertOutboundMessage, reconcileCustomersAndConversations } from "../db/queries.js";
 import { t, Lang } from "../i18n.js";
 import { z } from "zod";
+import { getCatalogEnabledEffective } from "../runtime/companySettings.js";
 
 
 export const inboxRoutes = Router();
@@ -1444,6 +1445,9 @@ inboxRoutes.get(
 // GET /api/catalog/products -> list catalog products from Meta (does not touch local DB)
 inboxRoutes.get("/catalog/products", async (_req, res) => {
   try {
+    if (!getCatalogEnabledEffective()) {
+      return res.status(403).json({ error: "catalog_disabled" });
+    }
     const catalogId = await getConnectedCatalogId();
     if (!catalogId) {
       return res.status(400).json({
@@ -1466,6 +1470,9 @@ inboxRoutes.get("/catalog/products", async (_req, res) => {
 // POST /api/catalog/import -> import / upsert catalog products into local DB
 inboxRoutes.post("/catalog/import", async (_req, res) => {
   try {
+    if (!getCatalogEnabledEffective()) {
+      return res.status(403).json({ error: "catalog_disabled" });
+    }
     const catalogId = await getConnectedCatalogId();
     if (!catalogId) {
       return res.status(400).json({
@@ -1669,7 +1676,7 @@ publish_to_catalog,
         ? 0
         : Number(stock_qty);
 
-    const publish = !!publish_to_catalog;
+    const publish = getCatalogEnabledEffective() && !!publish_to_catalog;
     const imageUrl = image_url ? String(image_url).trim() : null;
 
 
@@ -1879,7 +1886,7 @@ inboxRoutes.put("/products/:id", async (req, res) => {
     }
 
     // Allow discount-only update, BUT also allow "publish_to_catalog only" update
-    const publish = !!publish_to_catalog;
+    const publish = getCatalogEnabledEffective() && !!publish_to_catalog;
 
     if (
       Object.keys(patch).length === 0 &&
