@@ -83,6 +83,42 @@ async function sendBotText(user: string, body: string, phoneNumberId?: string | 
     console.error("[webhook] failed to log bot message:", err);
   }
 }
+
+const MAX_TEXT_CHARS = 1200;
+
+function splitLongText(body: string, maxLen = MAX_TEXT_CHARS): string[] {
+  const text = String(body ?? "").trim();
+  if (!text) return [];
+  if (text.length <= maxLen) return [text];
+
+  const chunks: string[] = [];
+  let remaining = text;
+
+  while (remaining.length > maxLen) {
+    let cut = remaining.lastIndexOf("\n\n", maxLen);
+    if (cut < Math.floor(maxLen * 0.6)) cut = remaining.lastIndexOf("\n", maxLen);
+    if (cut < Math.floor(maxLen * 0.6)) cut = remaining.lastIndexOf(" ", maxLen);
+    if (cut < Math.floor(maxLen * 0.6)) cut = maxLen;
+
+    const part = remaining.slice(0, cut).trim();
+    if (part) chunks.push(part);
+    remaining = remaining.slice(cut).trim();
+  }
+
+  if (remaining) chunks.push(remaining);
+  return chunks;
+}
+
+async function sendLongTextSafe(
+  user: string,
+  body: string,
+  phoneNumberId?: string | null
+) {
+  const chunks = splitLongText(body, MAX_TEXT_CHARS);
+  for (const chunk of chunks) {
+    await sendBotText(user, chunk, phoneNumberId ?? null);
+  }
+}
 /* -------------------------------------------------------------------------- */
 /*                    WhatsApp list/button safety wrappers                    */
 /* -------------------------------------------------------------------------- */
@@ -2072,7 +2108,7 @@ if (id.startsWith("ORDER_CANCEL_")) {
         "\n\nOfa hii ni ya muda maalum, bei inaweza kurudi ya kawaida muda wowote.";
     }
 
-    await sendBotText(user, message);
+    await sendLongTextSafe(user, message);
 
 
     // After showing the chosen details, show normal product actions again
