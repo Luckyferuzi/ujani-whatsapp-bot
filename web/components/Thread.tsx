@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Fragment,
   useEffect,
   useRef,
   useState,
@@ -12,9 +13,11 @@ import { api, API } from "@/lib/api";
 import { formatPhonePretty } from "@/lib/phone";
 import { socket } from "@/lib/socket";
 import type { Convo } from "./ConversationList";
+import { useRouter } from "next/navigation";
 
 type ThreadProps = {
   convo: Convo;
+  onOpenContext?: () => void;
 };
 
 function formatTime(iso: string) {
@@ -31,6 +34,16 @@ function minutesBetween(aIso: string, bIso: string): number {
   const b = new Date(bIso).getTime();
   if (!Number.isFinite(a) || !Number.isFinite(b)) return Number.POSITIVE_INFINITY;
   return Math.abs(b - a) / (1000 * 60);
+}
+
+function formatDayLabel(iso: string) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString("sw-TZ", {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+  });
 }
 
 const GROUP_GAP_MINUTES = 6;
@@ -473,7 +486,8 @@ function renderBody(
   return <div className="thread-text">{body}</div>;
 }
 
-export default function Thread({ convo }: ThreadProps) {
+export default function Thread({ convo, onOpenContext }: ThreadProps) {
+  const router = useRouter();
   const [messages, setMessages] = useState<Msg[]>([]);
   const [loading, setLoading] = useState(false);
   const [agentAllowed, setAgentAllowed] = useState<boolean>(convo.agent_allowed);
@@ -736,8 +750,13 @@ export default function Thread({ convo }: ThreadProps) {
       {/* HEADER */}
       <div className="thread-header">
         <div className="thread-header-main">
-          <div className="thread-title" title={title}>
-            {title}
+          <div className="thread-title-row">
+            <div className="thread-title" title={title}>
+              {title}
+            </div>
+            <span className={"thread-mode-chip" + (agentAllowed ? " thread-mode-chip--agent" : " thread-mode-chip--bot")}>
+              {agentAllowed ? "Human handover" : "Bot managed"}
+            </span>
           </div>
           <div className="thread-subtitle">
             {formatPhonePretty(convo.phone)}
@@ -751,26 +770,38 @@ export default function Thread({ convo }: ThreadProps) {
               </span>
             )}
           </div>
+          <div className="thread-header-actions">
+            <button
+              type="button"
+              className="thread-header-action"
+              onClick={() => router.push(`/orders?phone=${encodeURIComponent(convo.phone)}`)}
+            >
+              Open orders
+            </button>
+            {onOpenContext ? (
+              <button type="button" className="thread-header-action thread-header-action--mobile" onClick={onOpenContext}>
+                Context
+              </button>
+            ) : null}
+          </div>
         </div>
-
-<button
-  type="button"
-  className={"thread-agent-toggle" + (agentAllowed ? " thread-agent-toggle--on" : "")}
-  onClick={toggleAgentMode}
-  disabled={toggling}
-  title={agentAllowed ? "Agent Mode ON" : "Bot Mode ON"}
-  aria-label={agentAllowed ? "Switch to Bot Mode" : "Switch to Agent Mode"}
->
-  <span className="thread-agent-toggle-left">
-    <span className="thread-agent-toggle-icon" aria-hidden="true">
-      {agentAllowed ? "🧑‍💼" : "🤖"}
-    </span>
-    <span className="thread-agent-toggle-text">
-      {agentAllowed ? "Agent Mode" : "Bot Mode"}
-    </span>
-  </span>
-</button>
-
+        <button
+          type="button"
+          className={"thread-agent-toggle" + (agentAllowed ? " thread-agent-toggle--on" : "")}
+          onClick={toggleAgentMode}
+          disabled={toggling}
+          title={agentAllowed ? "Agent Mode ON" : "Bot Mode ON"}
+          aria-label={agentAllowed ? "Switch to Bot Mode" : "Switch to Agent Mode"}
+        >
+          <span className="thread-agent-toggle-left">
+            <span className="thread-agent-toggle-icon" aria-hidden="true">
+              {agentAllowed ? "🧑‍💼" : "🤖"}
+            </span>
+            <span className="thread-agent-toggle-text">
+              {agentAllowed ? "Agent Mode" : "Bot Mode"}
+            </span>
+          </span>
+        </button>
 
       </div>
 
@@ -783,6 +814,11 @@ export default function Thread({ convo }: ThreadProps) {
         ) : (
           <div className="thread-messages" ref={messagesRef} onScroll={handleScroll}>
             {messages.map((m, idx) => {
+              const prevByDate = idx > 0 ? messages[idx - 1] : null;
+              const currentDay = m.created_at?.slice(0, 10);
+              const previousDay = prevByDate?.created_at?.slice(0, 10);
+              const showDayDivider = idx === 0 || currentDay !== previousDay;
+
               const role = getRole(m);
               const inbound = role === "customer";
               const outbound = !inbound;
@@ -830,35 +866,42 @@ export default function Thread({ convo }: ThreadProps) {
                 (role === "bot" ? " thread-message--bot" : "");
 
               return (
-                <div
-                  key={m.id}
-                  ref={isFirstUnread ? firstUnreadRef : null}
-                  className={msgClass}
-                >
-                  {showBotLabel && <div className="thread-role-label">Bot</div>}
+                <Fragment key={m.id}>
+                  {showDayDivider ? (
+                    <div className="thread-day-divider">
+                      <span>{formatDayLabel(m.created_at)}</span>
+                    </div>
+                  ) : null}
 
-                  <div className={bubbleClass}>
-                    {renderBody(
-                      m,
-                      productNames,
-                      handleResendMedia,
-                      handleDeleteMedia,
-                      activeMediaActionsId,
-                      handleToggleMediaActions
-                    )}
+                  <div
+                    ref={isFirstUnread ? firstUnreadRef : null}
+                    className={msgClass}
+                  >
+                    {showBotLabel && <div className="thread-role-label">Bot</div>}
 
-                    {showMeta && (
-                      <div className="thread-meta">
-                        <span className="thread-time">{formatTime(m.created_at)}</span>
-                        {outbound && m.status === "read" && (
-                          <span className="thread-ticks" aria-label="read">
-                            ✓✓
-                          </span>
-                        )}
-                      </div>
-                    )}
+                    <div className={bubbleClass}>
+                      {renderBody(
+                        m,
+                        productNames,
+                        handleResendMedia,
+                        handleDeleteMedia,
+                        activeMediaActionsId,
+                        handleToggleMediaActions
+                      )}
+
+                      {showMeta && (
+                        <div className="thread-meta">
+                          <span className="thread-time">{formatTime(m.created_at)}</span>
+                          {outbound && m.status === "read" && (
+                            <span className="thread-ticks" aria-label="read">
+                              ✓✓
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
+                </Fragment>
               );
             })}
 
@@ -869,6 +912,11 @@ export default function Thread({ convo }: ThreadProps) {
 
       {/* COMPOSER */}
       <div className="thread-footer">
+        {!agentAllowed ? (
+          <div className="thread-composer-notice">
+            Bot mode is active. Switch to Agent Mode before sending a manual reply.
+          </div>
+        ) : null}
         <div className="thread-input-row">
           <button
             type="button"

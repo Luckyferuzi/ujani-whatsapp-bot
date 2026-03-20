@@ -28,6 +28,10 @@ Expose your server publicly (e.g. `ngrok http 3000`) and set the webhook URL in 
 - `src/whatsapp.ts` — `sendText()` helper to call Graph API.
 - `src/config.ts` — env parsing & validation (Zod).
 
+### Runtime checks
+- `GET /healthz` — liveness
+- `GET /readyz` — database + config readiness
+
 ## Test the flow
 1. Send a WhatsApp message to your Business number from a test number.
 2. The bot replies to "menu", "hi", "mambo", "habari", etc.

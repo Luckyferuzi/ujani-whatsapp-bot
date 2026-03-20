@@ -2,18 +2,17 @@
 
 // Base URL of your backend API, e.g.
 // NEXT_PUBLIC_API_BASE=https://ujani-whatsapp-bot.onrender.com
-export const API = (process.env.NEXT_PUBLIC_API_BASE ?? "").replace(/\/+$/, "");
-const INBOX_KEY = process.env.NEXT_PUBLIC_INBOX_ACCESS_KEY ?? "";
+import { assertWebApiBase, getWebRuntimeEnv } from "./env";
+
+export const API = getWebRuntimeEnv().apiBase;
+const INBOX_KEY = getWebRuntimeEnv().inboxAccessKey;
 
 // Small helper type so consumers can see HTTP status if needed
 export type ApiError = Error & { status?: number };
 
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (!API) {
-    throw new Error(
-      "NEXT_PUBLIC_API_BASE is missing. " +
-        "Set it in your environment, e.g. NEXT_PUBLIC_API_BASE=https://ujani-whatsapp-bot.onrender.com"
-    );
+    assertWebApiBase();
   }
 
   const url = API + path;

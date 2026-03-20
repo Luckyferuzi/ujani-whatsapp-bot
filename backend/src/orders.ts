@@ -1,6 +1,56 @@
 // src/orders.ts
 // In-memory orders & helpers used by the webhook flow.
 
+export const ORDER_STATUS_VALUES = [
+  "pending",
+  "verifying",
+  "preparing",
+  "out_for_delivery",
+  "delivered",
+  "cancelled",
+] as const;
+
+export type DbOrderStatus = (typeof ORDER_STATUS_VALUES)[number];
+export type OrderPaymentMode = "prepay" | "cod";
+
+const ALLOWED_ORDER_STATUS_TRANSITIONS: Record<DbOrderStatus, DbOrderStatus[]> = {
+  pending: ["verifying", "preparing", "cancelled"],
+  verifying: ["pending", "preparing", "cancelled"],
+  preparing: ["out_for_delivery", "delivered", "cancelled"],
+  out_for_delivery: ["delivered", "cancelled"],
+  delivered: [],
+  cancelled: [],
+};
+
+export function isDbOrderStatus(value: string | null | undefined): value is DbOrderStatus {
+  return ORDER_STATUS_VALUES.includes((value ?? "") as DbOrderStatus);
+}
+
+export function canTransitionOrderStatus(
+  from: string | null | undefined,
+  to: string | null | undefined
+): boolean {
+  if (!isDbOrderStatus(from) || !isDbOrderStatus(to)) return false;
+  if (from === to) return true;
+  return ALLOWED_ORDER_STATUS_TRANSITIONS[from].includes(to);
+}
+
+export function assertOrderStatusTransition(
+  from: string | null | undefined,
+  to: string | null | undefined
+): DbOrderStatus {
+  if (!isDbOrderStatus(to)) {
+    throw new Error(`invalid_order_status:${String(to ?? "")}`);
+  }
+  if (!isDbOrderStatus(from)) {
+    throw new Error(`invalid_order_status:${String(from ?? "")}`);
+  }
+  if (!canTransitionOrderStatus(from, to)) {
+    throw new Error(`invalid_order_transition:${from}->${to}`);
+  }
+  return to;
+}
+
 export type OrderItem = {
   sku: string;
   name: string;

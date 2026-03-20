@@ -1,5 +1,6 @@
 // web/lib/auth.ts
 import { API } from "./api";
+import { assertWebApiBase } from "./env";
 
 export type AuthUser = {
   id: number;
@@ -26,9 +27,7 @@ const LAST_ACTIVITY_KEY = "ujani_auth_last_activity";
 
 async function authPost(path: string, body: unknown): Promise<AuthResponse> {
   if (!API) {
-    throw new Error(
-      "NEXT_PUBLIC_API_BASE is missing. Set NEXT_PUBLIC_API_BASE in your environment."
-    );
+    assertWebApiBase();
   }
 
   const res = await fetch(API + path, {
@@ -124,7 +123,7 @@ function requireToken(): string {
 
 async function authedJson<T>(path: string, init: RequestInit): Promise<T> {
   if (!API) {
-    throw new Error("NEXT_PUBLIC_API_BASE is missing.");
+    assertWebApiBase();
   }
   const token = requireToken();
 
@@ -174,7 +173,7 @@ export function authPatchJson<T>(path: string, body: unknown): Promise<T> {
 
 export async function authPostForm<T>(path: string, form: FormData): Promise<T> {
   if (!API) {
-    throw new Error("NEXT_PUBLIC_API_BASE is missing.");
+    assertWebApiBase();
   }
 
   const token = getAuthToken(); // ✅ uses ujani_auth_token

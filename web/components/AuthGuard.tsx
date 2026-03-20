@@ -40,8 +40,14 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
 
   if (!ready || !checked) {
     return (
-      <div className="flex items-center justify-center min-h-[40vh] text-ui-dim text-sm">
-        Inapakia...
+      <div className="shell-loading">
+        <div className="shell-loading-card">
+          <div className="shell-loading-mark">UJ</div>
+          <div className="shell-loading-copy">
+            <div className="shell-loading-title">Loading workspace</div>
+            <div className="shell-loading-subtitle">Preparing the Ujani business console...</div>
+          </div>
+        </div>
       </div>
     );
   }

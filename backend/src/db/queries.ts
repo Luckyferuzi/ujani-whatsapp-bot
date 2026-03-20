@@ -1,6 +1,24 @@
 // backend/src/db/queries.ts
+import crypto from "crypto";
 import db from "./knex.js";
 import knex from "./knex.js";
+import {
+  buildConversationLifecycleTimeline,
+  describeBusinessEvent,
+  type TimelineItem,
+} from "../customerContext.js";
+import {
+  assertOrderStatusTransition,
+  canTransitionOrderStatus,
+  type DbOrderStatus,
+} from "../orders.js";
+import {
+  accumulatePaymentAmount,
+  assertPaymentStatusTransition,
+  canTransitionPaymentStatus,
+  computeRemainingPayment,
+  type PaymentStatus,
+} from "../payments.js";
 
 export type ReconcileStats = {
   groups_merged: number;
@@ -25,6 +43,287 @@ function pickBetterName(current?: string | null, incoming?: string | null): stri
   if (aNumeric && !bNumeric) return b;
   if (!aNumeric && bNumeric) return a;
   return b.length >= a.length ? b : a;
+}
+
+function paymentSatisfiedStatuses() {
+  return ["paid", "completed"];
+}
+
+function hashValue(value: string): string {
+  return crypto.createHash("sha256").update(value).digest("hex");
+}
+
+export type OrderEventType =
+  | "conversation.started"
+  | "conversation.resumed"
+  | "order.created"
+  | "order.status_changed"
+  | "order.payment_mode_updated"
+  | "payment.proof_submitted"
+  | "payment.status_changed";
+
+export type InternalNoteScope = "conversation" | "order" | "customer";
+
+export type InternalNoteRow = {
+  id: number;
+  scope: InternalNoteScope;
+  conversation_id: number | null;
+  order_id: number | null;
+  customer_id: number | null;
+  body: string;
+  created_by_user_id: number | null;
+  created_by_email: string | null;
+  created_at: string;
+};
+
+export type AppendOrderEventInput = {
+  orderId?: number | null;
+  paymentId?: number | null;
+  customerId?: number | null;
+  conversationId?: number | null;
+  messageId?: number | null;
+  eventType: OrderEventType;
+  actorType?: "system" | "customer" | "admin";
+  actorUserId?: number | null;
+  actorEmail?: string | null;
+  source?: string | null;
+  dedupeKey?: string | null;
+  payload?: any;
+};
+
+async function appendOrderEventUsing(trx: any, input: AppendOrderEventInput) {
+  const payloadJson = input.payload ?? {};
+
+  try {
+    const [inserted] = await trx("order_events")
+      .insert({
+        order_id: input.orderId ?? null,
+        payment_id: input.paymentId ?? null,
+        customer_id: input.customerId ?? null,
+        conversation_id: input.conversationId ?? null,
+        message_id: input.messageId ?? null,
+        event_type: input.eventType,
+        actor_type: input.actorType ?? "system",
+        actor_user_id: input.actorUserId ?? null,
+        actor_email: input.actorEmail ?? null,
+        source: input.source ?? null,
+        dedupe_key: input.dedupeKey ?? null,
+        payload_json: payloadJson,
+      })
+      .returning("*");
+
+    return { event: inserted, duplicate: false as const };
+  } catch (error: any) {
+    if (
+      input.dedupeKey &&
+      (error?.code === "23505" || String(error?.message ?? "").includes("dedupe_key"))
+    ) {
+      const existing = await trx("order_events")
+        .where({ dedupe_key: input.dedupeKey })
+        .first();
+      return { event: existing ?? null, duplicate: true as const };
+    }
+    throw error;
+  }
+}
+
+export async function appendOrderEvent(input: AppendOrderEventInput) {
+  return appendOrderEventUsing(db, input);
+}
+
+export async function listOrderEventsForOrder(orderId: number, limit = 100) {
+  return db("order_events")
+    .where({ order_id: orderId })
+    .orderBy("created_at", "desc")
+    .limit(limit);
+}
+
+export function normalizeInternalNoteBody(body: string): string {
+  return String(body ?? "").replace(/\s+/g, " ").trim();
+}
+
+function mapEventRowToTimelineItem(row: any): TimelineItem {
+  const described = describeBusinessEvent({
+    eventType: String(row.event_type ?? ""),
+    payload: row.payload_json ?? {},
+  });
+
+  return {
+    id: `event:${row.id}`,
+    kind: "event",
+    event_type: String(row.event_type ?? ""),
+    title: described.title,
+    description: described.description,
+    created_at: new Date(row.created_at).toISOString(),
+    actor_label: row.actor_email ?? row.actor_type ?? null,
+    actor_type: row.actor_type ?? null,
+    conversation_id: row.conversation_id ?? null,
+    order_id: row.order_id ?? null,
+    payment_id: row.payment_id ?? null,
+    customer_id: row.customer_id ?? null,
+  };
+}
+
+function mapNoteRowToTimelineItem(row: InternalNoteRow): TimelineItem {
+  const described = describeBusinessEvent({
+    eventType: "internal.note_added",
+    scope: row.scope,
+  });
+
+  return {
+    id: `note:${row.id}`,
+    kind: "note",
+    event_type: "internal.note_added",
+    title: described.title,
+    description: row.body,
+    created_at: new Date(row.created_at).toISOString(),
+    actor_label: row.created_by_email ?? "Internal",
+    actor_type: "admin",
+    conversation_id: row.conversation_id ?? null,
+    order_id: row.order_id ?? null,
+    customer_id: row.customer_id ?? null,
+    scope: row.scope,
+  };
+}
+
+export async function createInternalNote(args: {
+  scope: InternalNoteScope;
+  body: string;
+  conversationId?: number | null;
+  orderId?: number | null;
+  customerId?: number | null;
+  actorUserId?: number | null;
+  actorEmail?: string | null;
+}) {
+  const normalizedBody = normalizeInternalNoteBody(args.body);
+  if (!normalizedBody) {
+    throw new Error("note_body_required");
+  }
+
+  const [inserted] = await db("internal_notes")
+    .insert({
+      scope: args.scope,
+      conversation_id: args.conversationId ?? null,
+      order_id: args.orderId ?? null,
+      customer_id: args.customerId ?? null,
+      body: normalizedBody,
+      created_by_user_id: args.actorUserId ?? null,
+      created_by_email: args.actorEmail ?? null,
+    })
+    .returning("*");
+
+  return inserted as InternalNoteRow;
+}
+
+export async function listInternalNotesForOrder(orderId: number, limit = 50) {
+  return (await db("internal_notes")
+    .where({ order_id: orderId })
+    .orWhere((qb) => {
+      qb.whereIn(
+        "customer_id",
+        db("orders").where({ id: orderId }).select("customer_id")
+      );
+    })
+    .orderBy("created_at", "desc")
+    .limit(limit)) as InternalNoteRow[];
+}
+
+export async function listTimelineForOrder(orderId: number, limit = 60): Promise<TimelineItem[]> {
+  const order = await db("orders")
+    .where({ id: orderId })
+    .select("id", "customer_id")
+    .first();
+
+  if (!order) return [];
+
+  const [eventRows, noteRows] = await Promise.all([
+    db("order_events")
+      .where({ order_id: orderId })
+      .orderBy("created_at", "desc")
+      .limit(limit),
+    db("internal_notes")
+      .where({ order_id: orderId })
+      .orWhere((qb) => {
+        qb.where({ customer_id: order.customer_id }).whereNull("order_id");
+      })
+      .orderBy("created_at", "desc")
+      .limit(limit),
+  ]);
+
+  return [...(eventRows as any[]).map(mapEventRowToTimelineItem), ...(noteRows as InternalNoteRow[]).map(mapNoteRowToTimelineItem)]
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    .slice(0, limit);
+}
+
+export async function listTimelineForConversation(
+  conversationId: number,
+  limit = 60
+): Promise<TimelineItem[]> {
+  const conversation = await db("conversations")
+    .where({ id: conversationId })
+    .select("id", "customer_id", "created_at")
+    .first();
+
+  if (!conversation) return [];
+
+  const [messages, orderRows, eventRows, noteRows] = await Promise.all([
+    db("messages")
+      .where({ conversation_id: conversationId })
+      .select("id", "direction", "type", "body", "created_at")
+      .orderBy("created_at", "asc")
+      .limit(500),
+    db("orders").where({ customer_id: conversation.customer_id }).select("id"),
+    db("order_events")
+      .where((qb) => {
+        qb.where({ conversation_id: conversationId }).orWhere({ customer_id: conversation.customer_id });
+      })
+      .orderBy("created_at", "desc")
+      .limit(limit),
+    db("internal_notes")
+      .where((qb) => {
+        qb.where({ conversation_id: conversationId }).orWhere({ customer_id: conversation.customer_id });
+      })
+      .orderBy("created_at", "desc")
+      .limit(limit),
+  ]);
+
+  const orderIds = (orderRows as any[]).map((row) => Number(row.id)).filter((value) => Number.isFinite(value));
+  let orderScopedEvents: any[] = [];
+  let orderScopedNotes: InternalNoteRow[] = [];
+
+  if (orderIds.length > 0) {
+    orderScopedEvents = await db("order_events")
+      .whereIn("order_id", orderIds)
+      .orderBy("created_at", "desc")
+      .limit(limit);
+
+    orderScopedNotes = (await db("internal_notes")
+      .whereIn("order_id", orderIds)
+      .orderBy("created_at", "desc")
+      .limit(limit)) as InternalNoteRow[];
+  }
+
+  const lifecycle = buildConversationLifecycleTimeline({
+    conversationId,
+    customerId: conversation.customer_id,
+    createdAt: conversation.created_at,
+    messages: messages as any[],
+  });
+
+  const deduped = new Map<string, TimelineItem>();
+  for (const item of lifecycle) {
+    deduped.set(item.id, item);
+  }
+  for (const row of [...(eventRows as any[]), ...orderScopedEvents]) {
+    deduped.set(`event:${row.id}`, mapEventRowToTimelineItem(row));
+  }
+  for (const row of [...(noteRows as InternalNoteRow[]), ...orderScopedNotes]) {
+    deduped.set(`note:${row.id}`, mapNoteRowToTimelineItem(row));
+  }
+
+  return [...deduped.values()]
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    .slice(0, limit);
 }
 
 async function mergeCustomerRecordsTx(
@@ -508,6 +807,15 @@ export async function insertInboundMessage(
   return inserted;
 }
 
+export async function findMessageByWaMessageId(waMessageId: string) {
+  if (!waMessageId) return null;
+  const row = await db("messages")
+    .where({ wa_message_id: waMessageId })
+    .select("id", "conversation_id", "wa_message_id", "direction", "type", "body", "status", "created_at")
+    .first();
+  return row ?? null;
+}
+
 export async function insertOutboundMessage(
   conversationId: number,
   type: string,
@@ -665,6 +973,8 @@ async function generateOrderCode(trx: any): Promise<string> {
 
 export async function createOrderWithPayment(input: CreateOrderInput) {
   return db.transaction(async (trx) => {
+    // Keep this write bundle atomic. The chatbot, inbox, and admin order views
+    // all assume orders, items, payments, and incomes stay in sync.
     // 0) Resolve products by SKU so we can store product_id on order_items
     const skus = Array.from(
       new Set(
@@ -749,11 +1059,286 @@ export async function createOrderWithPayment(input: CreateOrderInput) {
       });
     }
 
+    await trx("order_events").insert({
+      order_id: orderId,
+      payment_id: payment.id,
+      customer_id: input.customerId,
+      event_type: "order.created",
+      actor_type: "system",
+      source: "checkout",
+      dedupe_key: `order-created:${orderId}`,
+      payload_json: {
+        status: input.status ?? "pending",
+        delivery_mode: input.deliveryMode,
+        total_tzs: input.totalTzs,
+        fee_tzs: input.feeTzs,
+        payment_status: "awaiting",
+        item_count: input.items.length,
+        order_code: orderCode,
+      },
+    });
+
     return {
       orderId,
       orderCode,
       paymentId: payment.id,
     };
+  });
+}
+
+export async function findLatestPaymentForOrder(orderId: number, trx: any = db) {
+  return trx("payments")
+    .where({ order_id: orderId })
+    .orderBy("created_at", "desc")
+    .first();
+}
+
+export async function submitPaymentProof(args: {
+  orderId: number;
+  paymentId?: number | null;
+  customerId?: number | null;
+  conversationId?: number | null;
+  messageId?: number | null;
+  proofType: "text" | "image";
+  proofText?: string | null;
+  proofUrl?: string | null;
+  proofMessageId?: string | null;
+  source?: string | null;
+}) {
+  const normalizedProofText = String(args.proofText ?? "").trim();
+  const proofFingerprint = args.proofType === "text"
+    ? hashValue(normalizedProofText.toLowerCase())
+    : hashValue(String(args.proofUrl ?? args.proofMessageId ?? args.messageId ?? args.orderId));
+  const dedupeKey = `payment-proof:${args.orderId}:${args.proofType}:${proofFingerprint}`;
+
+  return db.transaction(async (trx) => {
+    const order = await trx("orders")
+      .where({ id: args.orderId })
+      .first("id", "customer_id", "status");
+
+    if (!order) {
+      throw new Error("order_not_found");
+    }
+
+    const payment =
+      (args.paymentId
+        ? await trx("payments").where({ id: args.paymentId }).first()
+        : await findLatestPaymentForOrder(args.orderId, trx)) ?? null;
+
+    if (!payment) {
+      throw new Error("payment_not_found");
+    }
+
+    const auditResult = await appendOrderEventUsing(trx, {
+      orderId: args.orderId,
+      paymentId: payment.id,
+      customerId: args.customerId ?? order.customer_id ?? null,
+      conversationId: args.conversationId ?? null,
+      messageId: args.messageId ?? null,
+      eventType: "payment.proof_submitted",
+      actorType: "customer",
+      source: args.source ?? "whatsapp",
+      dedupeKey,
+      payload: {
+        proof_type: args.proofType,
+        proof_message_id: args.proofMessageId ?? null,
+        proof_text_preview:
+          args.proofType === "text" ? normalizedProofText.slice(0, 120) : null,
+        proof_url: args.proofType === "image" ? args.proofUrl ?? null : null,
+      },
+    });
+
+    if (auditResult.duplicate) {
+      return {
+        duplicate: true as const,
+        order,
+        payment,
+      };
+    }
+
+    const paymentPatch: Record<string, any> = {
+      updated_at: trx.fn.now(),
+      proof_submitted_at: trx.fn.now(),
+      proof_message_id: args.proofMessageId ?? null,
+    };
+
+    if (args.proofType === "text") {
+      paymentPatch.proof_text = normalizedProofText;
+    }
+    if (args.proofType === "image" && args.proofUrl) {
+      paymentPatch.proof_url = args.proofUrl;
+    }
+    if (payment.status !== "paid") {
+      paymentPatch.status = "verifying";
+    }
+
+    await trx("payments").where({ id: payment.id }).update(paymentPatch);
+
+    if (canTransitionOrderStatus(order.status ?? "pending", "verifying")) {
+      await trx("orders")
+        .where({ id: args.orderId })
+        .update({ status: "verifying", updated_at: trx.fn.now() });
+    }
+
+    return {
+      duplicate: false as const,
+      order: {
+        ...order,
+        status: canTransitionOrderStatus(order.status ?? "pending", "verifying")
+          ? "verifying"
+          : order.status,
+      },
+      payment: {
+        ...payment,
+        ...paymentPatch,
+      },
+    };
+  });
+}
+
+export async function applyPaymentStatusUpdate(args: {
+  paymentId: number;
+  nextStatus: PaymentStatus;
+  amountToAddTzs?: number | null;
+  reason?: string | null;
+  actorUserId?: number | null;
+  actorEmail?: string | null;
+  source?: string | null;
+}) {
+  return db.transaction(async (trx) => {
+    const row = await trx("payments as p")
+      .leftJoin("orders as o", "o.id", "p.order_id")
+      .leftJoin("customers as u", "u.id", "o.customer_id")
+      .where("p.id", args.paymentId)
+      .select(
+        "p.id",
+        "p.status as payment_status",
+        "p.amount_tzs",
+        "p.order_id",
+        "o.status as order_status",
+        "o.total_tzs",
+        "o.order_code",
+        "o.customer_id",
+        "u.wa_id",
+        "u.lang"
+      )
+      .first();
+
+    if (!row) {
+      throw new Error("payment_not_found");
+    }
+
+    const currentStatus = String(row.payment_status ?? "awaiting");
+    assertPaymentStatusTransition(currentStatus, args.nextStatus);
+
+    const update: Record<string, any> = {
+      status: args.nextStatus,
+      status_reason: args.reason ?? null,
+      updated_at: trx.fn.now(),
+    };
+
+    let justAdded = 0;
+    if (args.nextStatus === "paid") {
+      const amountToAdd = Number(args.amountToAddTzs ?? 0);
+      if (!Number.isFinite(amountToAdd) || amountToAdd <= 0) {
+        throw new Error("amount_tzs_required_for_paid");
+      }
+
+      justAdded = amountToAdd;
+      update.amount_tzs = accumulatePaymentAmount(row.amount_tzs, amountToAdd);
+    }
+
+    if (
+      args.nextStatus !== "paid" &&
+      currentStatus === args.nextStatus &&
+      String(row.amount_tzs ?? 0) === String(update.amount_tzs ?? row.amount_tzs ?? 0)
+    ) {
+      return {
+        duplicate: true as const,
+        row,
+        justAdded,
+        newAmountTotal: Number(row.amount_tzs ?? 0) || 0,
+        remaining: computeRemainingPayment(row.total_tzs, row.amount_tzs),
+      };
+    }
+
+    await trx("payments").where({ id: args.paymentId }).update(update);
+
+    await appendOrderEventUsing(trx, {
+      orderId: row.order_id,
+      paymentId: args.paymentId,
+      customerId: row.customer_id,
+      eventType: "payment.status_changed",
+      actorType: args.actorEmail || args.actorUserId ? "admin" : "system",
+      actorUserId: args.actorUserId ?? null,
+      actorEmail: args.actorEmail ?? null,
+      source: args.source ?? "admin",
+      payload: {
+        previous_status: currentStatus,
+        next_status: args.nextStatus,
+        just_added_tzs: justAdded || null,
+        new_total_paid_tzs:
+          args.nextStatus === "paid"
+            ? update.amount_tzs
+            : Number(row.amount_tzs ?? 0) || 0,
+        reason: args.reason ?? null,
+      },
+    });
+
+    return {
+      duplicate: false as const,
+      row,
+      justAdded,
+      newAmountTotal:
+        args.nextStatus === "paid"
+          ? Number(update.amount_tzs ?? 0)
+          : Number(row.amount_tzs ?? 0) || 0,
+      remaining: computeRemainingPayment(
+        row.total_tzs,
+        args.nextStatus === "paid" ? update.amount_tzs : row.amount_tzs
+      ),
+    };
+  });
+}
+
+export async function applyOrderStatusAudit(args: {
+  orderId: number;
+  previousStatus: DbOrderStatus;
+  nextStatus: DbOrderStatus;
+  actorUserId?: number | null;
+  actorEmail?: string | null;
+  source?: string | null;
+  payload?: any;
+}) {
+  assertOrderStatusTransition(args.previousStatus, args.nextStatus);
+  return appendOrderEvent({
+    orderId: args.orderId,
+    eventType: "order.status_changed",
+    actorType: args.actorEmail || args.actorUserId ? "admin" : "system",
+    actorUserId: args.actorUserId ?? null,
+    actorEmail: args.actorEmail ?? null,
+    source: args.source ?? "admin",
+    payload: {
+      previous_status: args.previousStatus,
+      next_status: args.nextStatus,
+      ...(args.payload ?? {}),
+    },
+  });
+}
+
+export async function auditOrderPaymentModeUpdate(args: {
+  orderId: number;
+  paymentMode: "prepay" | "cod";
+  source?: string | null;
+}) {
+  return appendOrderEvent({
+    orderId: args.orderId,
+    eventType: "order.payment_mode_updated",
+    actorType: "customer",
+    source: args.source ?? "whatsapp",
+    payload: {
+      payment_mode: args.paymentMode,
+    },
   });
 }
 
@@ -872,7 +1457,7 @@ export async function listOutstandingOrdersForCustomer(
       "o.created_at",
       "o.order_code",
       db.raw(
-        "COALESCE(SUM(CASE WHEN p.status = 'completed' THEN p.amount_tzs ELSE 0 END), 0) as paid_amount"
+        "COALESCE(SUM(CASE WHEN p.status IN ('paid', 'completed') THEN p.amount_tzs ELSE 0 END), 0) as paid_amount"
       )
     );
 
@@ -900,4 +1485,10 @@ export async function updateOrderPaymentMode(
       payment_mode: paymentMode,
       updated_at: db.fn.now(),
     });
+
+  await auditOrderPaymentModeUpdate({
+    orderId,
+    paymentMode,
+    source: "whatsapp",
+  });
 }

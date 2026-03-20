@@ -4,6 +4,7 @@ import { Fragment, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { api, get } from "@/lib/api";
 import { toast } from "sonner";
+import { useCachedQuery } from "@/hooks/useCachedQuery";
 
 type IncomeStatus = "pending" | "approved" | "rejected";
 
@@ -50,7 +51,6 @@ function dateOnly(iso: string) {
 
 export default function IncomesPage() {
   const [items, setItems] = useState<IncomeRow[]>([]);
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
@@ -77,45 +77,44 @@ const [bulkAnchorIndex, setBulkAnchorIndex] = useState<number | null>(null);
     description: "",
   });
 
-  async function loadIncomes() {
-    setLoading(true);
-    setError(null);
-
-    try {
+  const queryKey = useMemo(() => `incomes:list:${statusFilter}`, [statusFilter]);
+  const {
+    data: incomesResponse,
+    error: incomesLoadError,
+    isLoading: loading,
+    isRefreshing,
+    refetch: refetchIncomes,
+  } = useCachedQuery(
+    queryKey,
+    async () => {
       const params = new URLSearchParams();
       params.set("limit", "200");
       if (statusFilter !== "all") params.set("status", statusFilter);
-
-      const res = await get<ListResponse>(`/api/incomes?${params.toString()}`);
-      setItems(res.items ?? []);
-      setBulkSelected((prev) => {
-  const next = new Set<number>();
-  for (const it of res.items ?? []) {
-    if (prev.has(it.id)) next.add(it.id);
-  }
-  return next;
-});
-
-
-      setSelectedId((prev) => {
-        if (prev == null) return null;
-        return (res.items ?? []).some((x) => x.id === prev) ? prev : null;
-      });
-    } catch (err: any) {
-      console.error(err);
-      setError("Imeshindikana kupakia mapato.");
-      toast.error("Imeshindikana kupakia mapato.", {
-        description: "Jaribu tena muda mfupi baadaye.",
-      });
-    } finally {
-      setLoading(false);
-    }
-  }
+      return get<ListResponse>(`/api/incomes?${params.toString()}`);
+    },
+    { staleMs: 20_000 }
+  );
 
   useEffect(() => {
-    void loadIncomes();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [statusFilter]);
+    const nextItems = incomesResponse?.items ?? [];
+    setItems(nextItems);
+    setBulkSelected((prev) => {
+      const next = new Set<number>();
+      for (const it of nextItems) {
+        if (prev.has(it.id)) next.add(it.id);
+      }
+      return next;
+    });
+    setSelectedId((prev) => (prev != null && nextItems.some((x) => x.id === prev) ? prev : null));
+  }, [incomesResponse]);
+
+  useEffect(() => {
+    if (!incomesLoadError) return;
+    setError("Imeshindikana kupakia mapato.");
+    toast.error("Imeshindikana kupakia mapato.", {
+      description: "Jaribu tena muda mfupi baadaye.",
+    });
+  }, [incomesLoadError]);
 
   const selected = useMemo(() => {
     return selectedId == null ? null : items.find((x) => x.id === selectedId) ?? null;
@@ -287,7 +286,7 @@ async function bulkSetStatus(status: IncomeStatus) {
     setBulkWorking(false);
     setBulkSelected(new Set());
     setBulkAnchorIndex(null);
-    void loadIncomes();
+    void refetchIncomes();
   }
 }
 
@@ -364,7 +363,7 @@ function exportSelectedCsv() {
       await api(`/api/incomes/${row.id}`, { method: "DELETE" });
       toast.success("Kipato kimefutwa.");
       if (selectedId === row.id) setSelectedId(null);
-      void loadIncomes();
+      void refetchIncomes();
     } catch (err: any) {
       console.error(err);
       toast.error("Imeshindikana kufuta kipato.");
@@ -436,7 +435,7 @@ function exportSelectedCsv() {
       setShowModal(false);
       setEditingId(null);
       setForm({ amount_tzs: "", description: "" });
-      void loadIncomes();
+      void refetchIncomes();
     } catch (err: any) {
       console.error(err);
       toast.error("Imeshindikana kuhifadhi kipato.");
@@ -493,12 +492,27 @@ function exportSelectedCsv() {
 
   return (
     <div className="incomes-page">
+      <section className="ic-report-hero">
+        <div className="ic-report-copy">
+          <div className="ic-report-kicker">Finance workspace</div>
+          <div className="ic-report-title">Income operations</div>
+          <div className="ic-report-text">
+            Review approved revenue, pending approvals, and manual income entries from one business-grade ledger.
+          </div>
+        </div>
+        <div className="ic-report-links">
+          <Link href="/stats" className="ic-report-link">Performance overview</Link>
+          <Link href="/expenses" className="ic-report-link">Expense ledger</Link>
+          <Link href="/orders" className="ic-report-link">Order desk</Link>
+        </div>
+      </section>
+
       {/* Topbar */}
       <div className="ic-topbar">
         <div>
           <div className="ic-title">Income</div>
           <div className="ic-subtitle">
-            Mapato ya biashara: order income + manual income. Chagua rekodi ili kuona details na kufanya approve/reject.
+            Business income from orders and manual entries, with quick approval and review controls.
           </div>
         </div>
 
@@ -576,6 +590,24 @@ function exportSelectedCsv() {
         </div>
       </div>
 
+      <div className="ic-summary-grid">
+        <div className="ic-summary-card">
+          <div className="ic-summary-label">Approved income</div>
+          <div className="ic-summary-value">{formatTzs(totals.approvedSum)} TZS</div>
+          <div className="ic-summary-sub">confirmed revenue across the current ledger load</div>
+        </div>
+        <div className="ic-summary-card">
+          <div className="ic-summary-label">Pending review</div>
+          <div className="ic-summary-value">{formatTzs(totals.pendingSum)} TZS</div>
+          <div className="ic-summary-sub">value still waiting for operator approval</div>
+        </div>
+        <div className="ic-summary-card">
+          <div className="ic-summary-label">Today approved</div>
+          <div className="ic-summary-value">{formatTzs(totals.todayApproved)} TZS</div>
+          <div className="ic-summary-sub">today's confirmed income recorded in the system</div>
+        </div>
+      </div>
+
       {/* Shell */}
       <div className="ic-shell">
         {/* Left: Table */}
@@ -584,7 +616,7 @@ function exportSelectedCsv() {
             <div>
               <div className="ic-card-title">Income records</div>
               <div className="ic-card-sub">
-                {loading ? "Loading…" : `${filtered.length} shown · ${items.length} total`}
+                {loading ? "Loading..." : `${filtered.length} shown · ${items.length} total${isRefreshing ? " · refreshing" : ""}`}
               </div>
             </div>
 

@@ -9,25 +9,40 @@ import {
   upsertCatalogProduct,
 } from "../whatsapp.js";
 import { emit } from "../sockets.js";
-import { getOrdersForCustomer, listOutstandingOrdersForCustomer, createOrderWithPayment, createManualOrderFromSkus, insertOutboundMessage, reconcileCustomersAndConversations } from "../db/queries.js";
+import {
+  applyOrderStatusAudit,
+  applyPaymentStatusUpdate,
+  createInternalNote,
+  createManualOrderFromSkus,
+  createOrderWithPayment,
+  getOrdersForCustomer,
+  insertOutboundMessage,
+  listInternalNotesForOrder,
+  listOutstandingOrdersForCustomer,
+  listTimelineForConversation,
+  listTimelineForOrder,
+  reconcileCustomersAndConversations,
+} from "../db/queries.js";
 import { t, Lang } from "../i18n.js";
 import { z } from "zod";
 import { getCatalogEnabledEffective } from "../runtime/companySettings.js";
+import {
+  ORDER_STATUS_VALUES,
+  canTransitionOrderStatus,
+  type DbOrderStatus,
+} from "../orders.js";
+import { computeRemainingPayment, type PaymentStatus } from "../payments.js";
 
 
 export const inboxRoutes = Router();
 
 const updateOrderStatusSchema = z.object({
-  status: z.enum([
-    "pending",
-    "preparing",
-    "verifying",
-    "out_for_delivery",
-    "delivered",
-    "cancelled",
-    // NOTE: "failed" intentionally NOT allowed here anymore
-  ]),
+  status: z.enum(ORDER_STATUS_VALUES),
   delivery_agent_phone: z.string().trim().optional(),
+});
+
+const createNoteSchema = z.object({
+  body: z.string().trim().min(1).max(2000),
 });
 
 // Serve WhatsApp media to the admin UI
@@ -502,6 +517,125 @@ inboxRoutes.get("/conversations/:id/orders", async (req, res) => {
   }
 });
 
+inboxRoutes.get("/conversations/:id/timeline", async (req, res) => {
+  const conversationId = Number(req.params.id);
+  if (!Number.isFinite(conversationId)) {
+    return res.status(400).json({ error: "Invalid conversation id" });
+  }
+
+  try {
+    const items = await listTimelineForConversation(conversationId, 80);
+    return res.json({ items });
+  } catch (err: any) {
+    console.error("GET /conversations/:id/timeline failed", err);
+    return res.status(500).json({ error: err?.message ?? "Failed to load timeline" });
+  }
+});
+
+inboxRoutes.post("/conversations/:id/notes", async (req, res) => {
+  const conversationId = Number(req.params.id);
+  if (!Number.isFinite(conversationId)) {
+    return res.status(400).json({ error: "Invalid conversation id" });
+  }
+
+  const parsed = createNoteSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Invalid note body" });
+  }
+
+  try {
+    const conversation = await db("conversations")
+      .where({ id: conversationId })
+      .select("id", "customer_id")
+      .first();
+
+    if (!conversation) {
+      return res.status(404).json({ error: "Conversation not found" });
+    }
+
+    const note = await createInternalNote({
+      scope: "conversation",
+      body: parsed.data.body,
+      conversationId,
+      customerId: conversation.customer_id ?? null,
+      actorUserId: (req as any).user?.id ?? null,
+      actorEmail: (req as any).user?.email ?? null,
+    });
+
+    return res.json({ note });
+  } catch (err: any) {
+    console.error("POST /conversations/:id/notes failed", err);
+    return res.status(500).json({ error: err?.message ?? "Failed to save note" });
+  }
+});
+
+inboxRoutes.get("/orders/:id/timeline", async (req, res) => {
+  const orderId = Number(req.params.id);
+  if (!Number.isFinite(orderId)) {
+    return res.status(400).json({ error: "Invalid order id" });
+  }
+
+  try {
+    const items = await listTimelineForOrder(orderId, 80);
+    return res.json({ items });
+  } catch (err: any) {
+    console.error("GET /orders/:id/timeline failed", err);
+    return res.status(500).json({ error: err?.message ?? "Failed to load timeline" });
+  }
+});
+
+inboxRoutes.get("/orders/:id/notes", async (req, res) => {
+  const orderId = Number(req.params.id);
+  if (!Number.isFinite(orderId)) {
+    return res.status(400).json({ error: "Invalid order id" });
+  }
+
+  try {
+    const items = await listInternalNotesForOrder(orderId, 50);
+    return res.json({ items });
+  } catch (err: any) {
+    console.error("GET /orders/:id/notes failed", err);
+    return res.status(500).json({ error: err?.message ?? "Failed to load notes" });
+  }
+});
+
+inboxRoutes.post("/orders/:id/notes", async (req, res) => {
+  const orderId = Number(req.params.id);
+  if (!Number.isFinite(orderId)) {
+    return res.status(400).json({ error: "Invalid order id" });
+  }
+
+  const parsed = createNoteSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Invalid note body" });
+  }
+
+  try {
+    const order = await db("orders")
+      .where({ id: orderId })
+      .select("id", "customer_id")
+      .first();
+
+    if (!order) {
+      return res.status(404).json({ error: "Order not found" });
+    }
+
+    const note = await createInternalNote({
+      scope: "order",
+      body: parsed.data.body,
+      orderId,
+      customerId: order.customer_id ?? null,
+      actorUserId: (req as any).user?.id ?? null,
+      actorEmail: (req as any).user?.email ?? null,
+    });
+
+    return res.json({ note });
+  } catch (err: any) {
+    console.error("POST /orders/:id/notes failed", err);
+    return res.status(500).json({ error: err?.message ?? "Failed to save note" });
+  }
+});
+
 
 
 
@@ -646,35 +780,25 @@ inboxRoutes.post("/payments/:id/status", async (req, res) => {
     const lang: Lang =
       row.lang === "en" || row.lang === "sw" ? (row.lang as Lang) : "sw";
 
-    let newAmountTotal: number | null = row.amount_tzs ?? null;
-    let justAdded: number | null = null;
+    const applied = await applyPaymentStatusUpdate({
+      paymentId: id,
+      nextStatus: status as PaymentStatus,
+      amountToAddTzs: status === "paid" ? body.amount_tzs ?? null : null,
+      actorUserId: (req as any).user?.id ?? null,
+      actorEmail: (req as any).user?.email ?? null,
+      source: "admin",
+    });
+
+    const newAmountTotal = applied.newAmountTotal;
+    const justAdded = applied.justAdded;
     const totalOrderAmount: number = Number(row.total_tzs ?? 0) || 0;
-
-    if (status === "paid") {
-      const amountFromBody = Number(body.amount_tzs ?? 0);
-      if (!Number.isFinite(amountFromBody) || amountFromBody <= 0) {
-        return res
-          .status(400)
-          .json({ error: "amount_tzs is required and must be > 0" });
-      }
-
-      const currentTotal = Number(row.amount_tzs ?? 0) || 0;
-      newAmountTotal = currentTotal + amountFromBody;
-      justAdded = amountFromBody;
-    }
-
-    const update: any = { status };
-    if (status === "paid" && newAmountTotal != null) {
-      update.amount_tzs = newAmountTotal;
-    }
-
-    await db("payments").where({ id }).update(update);
 
     // Let frontend know
     req.app.get("io")?.emit("payment.updated", {
       id,
       status,
       amount_tzs: newAmountTotal,
+      duplicate: applied.duplicate,
     });
 
     // If paid, send message with remaining balance
@@ -685,7 +809,7 @@ inboxRoutes.post("/payments/:id/status", async (req, res) => {
       justAdded != null &&
       totalOrderAmount > 0
     ) {
-      const remaining = totalOrderAmount - newAmountTotal!; // can be negative
+      const remaining = computeRemainingPayment(totalOrderAmount, newAmountTotal);
 
 const message = t(lang, "payment.confirm_with_remaining", {
   orderCode: row.order_code || `UJ-${row.order_id}`,
@@ -730,6 +854,7 @@ const message = t(lang, "payment.confirm_with_remaining", {
     return res.json({
       ok: true,
       amount_tzs: newAmountTotal,
+      duplicate: applied.duplicate,
     });
   } catch (e: any) {
     console.error("POST /payments/:id/status failed", e);
@@ -1122,7 +1247,13 @@ inboxRoutes.post("/orders/:id/status", async (req, res) => {
       return res.status(404).json({ error: "Order not found" });
     }
 
-    const prevStatus = (existingOrder.status as string | null) ?? "pending";
+    const prevStatus = ((existingOrder.status as string | null) ?? "pending") as DbOrderStatus;
+
+    if (!canTransitionOrderStatus(prevStatus, newStatus)) {
+      return res.status(400).json({
+        error: `Invalid order status transition: ${prevStatus} -> ${newStatus}`,
+      });
+    }
 
     const isEnteringPreparing =
       prevStatus !== "preparing" && newStatus === "preparing";
@@ -1258,6 +1389,18 @@ if (restockedProductIds.length > 0) {
       reason: "status_changed",
       order_id: id,
       status: newStatus,
+    });
+
+    await applyOrderStatusAudit({
+      orderId: id,
+      previousStatus: prevStatus,
+      nextStatus: newStatus,
+      actorUserId: (req as any).user?.id ?? null,
+      actorEmail: (req as any).user?.email ?? null,
+      source: "admin",
+      payload: {
+        delivery_agent_phone: delivery_agent_phone?.trim() || null,
+      },
     });
 
     // 🔽 🔽 🔽 NEW PART: send WhatsApp + log message 🔽 🔽 🔽
@@ -2116,6 +2259,152 @@ inboxRoutes.get("/stats/overview", async (req: Request, res: Response) => {
   }
 });
 
+// GET /api/dashboard/overview
+// Action-oriented business summary for the home dashboard.
+inboxRoutes.get("/dashboard/overview", async (_req: Request, res: Response) => {
+  try {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const weekStart = new Date(today);
+    weekStart.setDate(weekStart.getDate() - 6);
+
+    const todayTs = today.toISOString();
+    const weekTs = weekStart.toISOString();
+    const todayDate = today.toISOString().slice(0, 10);
+
+    const [
+      unreadAgg,
+      handoverAgg,
+      ordersTodayAgg,
+      preparingAgg,
+      deliveryAgg,
+      pendingPaymentsAgg,
+      revenueTodayAgg,
+      revenueWeekAgg,
+      topProductRows,
+      recentActivityRows,
+    ] = await Promise.all([
+      db("messages as m")
+        .where("m.direction", "inbound")
+        .where((qb) => {
+          qb.whereNull("m.status").orWhereNot("m.status", "read");
+        })
+        .countDistinct<{ count: string }[]>("m.conversation_id as count")
+        .first(),
+      db("conversations")
+        .where({ agent_allowed: true })
+        .count<{ count: string }[]>("id as count")
+        .first(),
+      db("orders")
+        .where("created_at", ">=", todayTs)
+        .count<{ count: string }[]>("id as count")
+        .first(),
+      db("orders")
+        .whereIn("status", ["pending", "verifying", "preparing"])
+        .count<{ count: string }[]>("id as count")
+        .first(),
+      db("orders")
+        .where("status", "out_for_delivery")
+        .count<{ count: string }[]>("id as count")
+        .first(),
+      db("payments")
+        .whereIn("status", ["awaiting", "verifying"])
+        .count<{ count: string }[]>("id as count")
+        .first(),
+      db("incomes")
+        .where("status", "approved")
+        .andWhere("recorded_at", ">=", todayDate)
+        .sum<{ total: string | number }[]>("amount_tzs as total")
+        .first(),
+      db("incomes")
+        .where("status", "approved")
+        .andWhere("recorded_at", ">=", weekTs.slice(0, 10))
+        .sum<{ total: string | number }[]>("amount_tzs as total")
+        .first(),
+      db("order_items as oi")
+        .join("orders as o", "o.id", "oi.order_id")
+        .where("o.created_at", ">=", weekTs)
+        .whereNotIn("o.status", ["cancelled"])
+        .groupBy("oi.sku", "oi.name")
+        .select(
+          "oi.sku",
+          "oi.name",
+          db.raw("SUM(oi.qty)::int as total_qty"),
+          db.raw("COALESCE(SUM(oi.qty * oi.unit_price_tzs), 0)::int as total_revenue")
+        )
+        .orderBy("total_qty", "desc")
+        .orderBy("total_revenue", "desc")
+        .limit(5),
+      db("order_events as oe")
+        .leftJoin("orders as o", "o.id", "oe.order_id")
+        .leftJoin("customers as c", "c.id", "oe.customer_id")
+        .select(
+          "oe.id",
+          "oe.event_type",
+          "oe.actor_type",
+          "oe.actor_email",
+          "oe.source",
+          "oe.payload_json",
+          "oe.created_at",
+          "oe.order_id",
+          "o.order_code",
+          "c.name as customer_name"
+        )
+        .whereIn("oe.event_type", [
+          "order.created",
+          "payment.proof_submitted",
+          "payment.status_changed",
+          "order.status_changed",
+        ])
+        .orderBy("oe.created_at", "desc")
+        .limit(8),
+    ]);
+
+    const recentActivity = (recentActivityRows as any[]).map((row) => ({
+      id: Number(row.id),
+      event_type: String(row.event_type ?? ""),
+      actor_type: row.actor_type ?? null,
+      actor_email: row.actor_email ?? null,
+      source: row.source ?? null,
+      created_at: row.created_at,
+      order_id: row.order_id ?? null,
+      order_code: row.order_code ?? null,
+      customer_name: row.customer_name ?? null,
+      payload: row.payload_json ?? {},
+    }));
+
+    return res.json({
+      inbox: {
+        unread_conversations: Number(unreadAgg?.count ?? 0),
+        handover_conversations: Number(handoverAgg?.count ?? 0),
+      },
+      orders: {
+        today: Number(ordersTodayAgg?.count ?? 0),
+        awaiting_fulfillment: Number(preparingAgg?.count ?? 0),
+        out_for_delivery: Number(deliveryAgg?.count ?? 0),
+      },
+      payments: {
+        pending_review: Number(pendingPaymentsAgg?.count ?? 0),
+      },
+      revenue: {
+        today_tzs: Number(revenueTodayAgg?.total ?? 0) || 0,
+        week_tzs: Number(revenueWeekAgg?.total ?? 0) || 0,
+      },
+      top_products: (topProductRows as any[]).map((row) => ({
+        sku: String(row.sku ?? ""),
+        name: String(row.name ?? ""),
+        total_qty: Number(row.total_qty ?? 0) || 0,
+        total_revenue: Number(row.total_revenue ?? 0) || 0,
+      })),
+      recent_activity: recentActivity,
+    });
+  } catch (err: any) {
+    console.error("GET /api/dashboard/overview failed", err);
+    return res.status(500).json({ error: err?.message ?? "Failed to load dashboard overview" });
+  }
+});
+
 
 // GET /api/stats/daily-incomes
 // Used for the "Profit Trend" chart – sums APPROVED incomes per day
@@ -2637,3 +2926,4 @@ inboxRoutes.post("/customers/broadcast", async (req: Request, res: Response) => 
     });
   }
 });
+

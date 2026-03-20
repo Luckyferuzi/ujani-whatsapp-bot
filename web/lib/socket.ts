@@ -1,10 +1,10 @@
 // web/lib/socket.ts
 
 import { io, Socket } from "socket.io-client";
+import { getWebRuntimeEnv } from "./env";
 
 // must match backend URL
-export const API =
-  process.env.NEXT_PUBLIC_API_BASE?.replace(/\/+$/, "") || "";
+export const API = getWebRuntimeEnv().apiBase;
 
 let s: Socket | null = null;
 

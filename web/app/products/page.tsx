@@ -7,6 +7,7 @@ import { api, get, post } from "@/lib/api";
 import { socket } from "@/lib/socket";
 import { toast } from "sonner";
 import { authPostForm } from "@/lib/auth";
+import { useCachedQuery } from "@/hooks/useCachedQuery";
 
 type Product = {
   id: number;
@@ -63,6 +64,13 @@ function formatTzs(value: number): string {
   return Math.floor(value).toLocaleString("sw-TZ");
 }
 
+function formatDateLabel(value?: string) {
+  if (!value) return "Recently";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "Recently";
+  return d.toLocaleDateString("en-US", { day: "2-digit", month: "short", year: "numeric" });
+}
+
 function stockBadge(stock_qty: number | null) {
   const s = stock_qty ?? 0;
   if (s === 0) return { label: "Out", className: "pr-badge pr-badge--out" };
@@ -72,7 +80,6 @@ function stockBadge(stock_qty: number | null) {
 
 export default function ProductsPage() {
   const [items, setItems] = useState<Product[]>([]);
-  const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -93,61 +100,54 @@ const [bulkAnchorIndex, setBulkAnchorIndex] = useState<number | null>(null);
 
   // Quick stock update in details panel
   const [stockEdit, setStockEdit] = useState<string>("");
-  const [catalogEnabled, setCatalogEnabled] = useState(false);
+  const {
+    data: productsResponse,
+    error: productsLoadError,
+    isLoading: loading,
+    isRefreshing: productsRefreshing,
+    refetch: refetchProducts,
+  } = useCachedQuery("products:list", () => get<ListResponse>("/api/products"), { staleMs: 20_000 });
 
-  async function loadProducts() {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await get<ListResponse>("/api/products");
-      setItems(res.items ?? []);
-      setBulkSelected((prev) => {
-  const next = new Set<number>();
-  for (const p of res.items ?? []) {
-    if (prev.has(p.id)) next.add(p.id);
-  }
-  return next;
-});
+  const { data: settingsMeta } = useCachedQuery(
+    "company:settings:meta",
+    () => get<CompanySettingsMeta>("/api/company/settings"),
+    { staleMs: 60_000 }
+  );
 
-      // Keep selection if still exists
-      setSelectedId((prev) => (prev != null && (res.items ?? []).some((p) => p.id === prev) ? prev : null));
-    } catch (err: any) {
-      console.error("Failed to load products", err);
-      const msg = err?.message ?? "Imeshindikana kupakia bidhaa. Jaribu tena.";
-      setError(msg);
-      toast.error("Imeshindikana kupakia bidhaa.", { description: "Jaribu tena muda mfupi." });
-    } finally {
-      setLoading(false);
-    }
-  }
+  const catalogEnabled = !!settingsMeta?.settings?.catalog_enabled;
 
   useEffect(() => {
-    void loadProducts();
-  }, []);
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const s = await get<CompanySettingsMeta>("/api/company/settings");
-        setCatalogEnabled(!!s?.settings?.catalog_enabled);
-      } catch {
-        setCatalogEnabled(false);
+    const nextItems = productsResponse?.items ?? [];
+    setItems(nextItems);
+    setBulkSelected((prev) => {
+      const next = new Set<number>();
+      for (const p of nextItems) {
+        if (prev.has(p.id)) next.add(p.id);
       }
-    })();
-  }, []);
+      return next;
+    });
+    setSelectedId((prev) => (prev != null && nextItems.some((p) => p.id === prev) ? prev : null));
+  }, [productsResponse]);
+
+  useEffect(() => {
+    if (!productsLoadError) return;
+    const msg = productsLoadError.message ?? "Imeshindikana kupakia bidhaa. Jaribu tena.";
+    setError(msg);
+    toast.error("Imeshindikana kupakia bidhaa.", { description: "Jaribu tena muda mfupi." });
+  }, [productsLoadError]);
 
   // Auto-refresh when backend notifies products/stock changed
   useEffect(() => {
     const s = socket();
     if (!s) return;
 
-    const handler = () => void loadProducts();
+    const handler = () => void refetchProducts();
     s.on("products.updated", handler);
 
     return () => {
       s.off("products.updated", handler);
     };
-  }, []);
+  }, [refetchProducts]);
 
   const selected = useMemo(() => {
     return selectedId == null ? null : items.find((p) => p.id === selectedId) ?? null;
@@ -172,6 +172,9 @@ const [bulkAnchorIndex, setBulkAnchorIndex] = useState<number | null>(null);
 
     return { total, active, low, out };
   }, [items]);
+
+  const catalogReadyCount = useMemo(() => items.filter((p) => Boolean(p.image_url)).length, [items]);
+  const installmentCount = useMemo(() => items.filter((p) => p.is_installment).length, [items]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -236,7 +239,7 @@ publish_to_catalog: false,
       await api(`/api/products/${p.id}`, { method: "DELETE" });
       toast.success("Product deleted.");
       if (selectedId === p.id) setSelectedId(null);
-      void loadProducts();
+      void refetchProducts();
     } catch (err: any) {
       console.error(err);
       toast.error("Failed to delete product.", { description: err?.message ?? "Try again." });
@@ -262,7 +265,7 @@ publish_to_catalog: false,
       });
 
       toast.success(payload.is_active ? "Product activated." : "Product deactivated.");
-      void loadProducts();
+      void refetchProducts();
     } catch (err: any) {
       console.error(err);
       toast.error("Failed to update status.", { description: err?.message ?? "Try again." });
@@ -296,7 +299,7 @@ publish_to_catalog: false,
       });
 
       toast.success("Stock updated.");
-      void loadProducts();
+      void refetchProducts();
     } catch (err: any) {
       console.error(err);
       toast.error("Failed to update stock.", { description: err?.message ?? "Try again." });
@@ -376,7 +379,7 @@ publish_to_catalog: catalogEnabled && !!form.publish_to_catalog,
       setShowModal(false);
       setEditingId(null);
       setForm(emptyForm);
-      void loadProducts();
+      void refetchProducts();
     } catch (err: any) {
       console.error("Failed to save product", err);
       const msg = err?.message ?? "Imeshindikana kuhifadhi bidhaa. Jaribu tena.";
@@ -525,7 +528,7 @@ async function bulkSetActive(is_active: boolean) {
   } finally {
     setBulkWorking(false);
     setBulkSelected(new Set());
-    void loadProducts();
+    void refetchProducts();
   }
 }
 
@@ -578,7 +581,7 @@ async function bulkSetStock() {
     setBulkWorking(false);
     setBulkSelected(new Set());
     setBulkStock("");
-    void loadProducts();
+    void refetchProducts();
   }
 }
 
@@ -608,7 +611,7 @@ async function bulkDelete() {
     setBulkWorking(false);
     setBulkSelected(new Set());
     if (selectedId && ids.includes(selectedId)) setSelectedId(null);
-    void loadProducts();
+    void refetchProducts();
   }
 }
 
@@ -648,16 +651,46 @@ function exportSelectedCsv() {
   toast.success(`Exported ${rows.length} product(s).`);
 }
 
+  const selectedStockBadge = selected ? stockBadge(selected.stock_qty) : null;
+
 
 
   return (
     <div className="products-page">
+      <section className="pr-hero">
+        <div className="pr-hero-copy">
+          <div className="pr-hero-kicker">Commerce workspace</div>
+          <div className="pr-hero-title">Products</div>
+          <div className="pr-hero-text">
+            Keep the live catalog organized, spot stock risk quickly, and manage commercial readiness without changing
+            the current product workflow.
+          </div>
+        </div>
+        <div className="pr-hero-metrics">
+          <div className="pr-hero-stat">
+            <span className="pr-hero-stat-label">Live products</span>
+            <strong className="pr-hero-stat-value">{stats.active}</strong>
+            <span className="pr-hero-stat-meta">active items currently available</span>
+          </div>
+          <div className="pr-hero-stat">
+            <span className="pr-hero-stat-label">Catalog ready</span>
+            <strong className="pr-hero-stat-value">{catalogReadyCount}</strong>
+            <span className="pr-hero-stat-meta">{catalogEnabled ? "products with image support" : "catalog disabled in setup"}</span>
+          </div>
+          <div className="pr-hero-stat">
+            <span className="pr-hero-stat-label">Installment items</span>
+            <strong className="pr-hero-stat-value">{installmentCount}</strong>
+            <span className="pr-hero-stat-meta">special payment products in catalog</span>
+          </div>
+        </div>
+      </section>
+
       {/* Topbar */}
       <div className="pr-topbar">
         <div>
-          <div className="pr-title">Products</div>
+          <div className="pr-title">Product operations</div>
           <div className="pr-subtitle">
-            Manage product name, price, stock, installment, and active status — in a clear admin view.
+            Manage names, pricing, stock, installment flags, and publish readiness from one commercial workspace.
           </div>
         </div>
 
@@ -683,7 +716,7 @@ function exportSelectedCsv() {
       toast.success("Imported from catalog.", {
         description: `created: ${out.imported}, updated: ${out.updated}`,
       });
-      void loadProducts();
+      void refetchProducts();
     } catch (e: any) {
       toast.error("Failed to import from catalog.", { description: e?.message ?? "Try again." });
     }
@@ -759,6 +792,24 @@ function exportSelectedCsv() {
           >
             Out: {stats.out}
           </button>
+        </div>
+      </div>
+
+      <div className="pr-summary-grid">
+        <div className="pr-summary-card">
+          <div className="pr-summary-label">Visible in current view</div>
+          <div className="pr-summary-value">{filtered.length}</div>
+          <div className="pr-summary-sub">products matching your filters right now</div>
+        </div>
+        <div className="pr-summary-card">
+          <div className="pr-summary-label">Replenishment pressure</div>
+          <div className="pr-summary-value">{stats.low + stats.out}</div>
+          <div className="pr-summary-sub">low-stock and out-of-stock items needing action</div>
+        </div>
+        <div className="pr-summary-card">
+          <div className="pr-summary-label">Catalog coverage</div>
+          <div className="pr-summary-value">{stats.total === 0 ? "0%" : `${Math.round((catalogReadyCount / stats.total) * 100)}%`}</div>
+          <div className="pr-summary-sub">share of products ready for image-based publishing</div>
         </div>
       </div>
 
@@ -978,10 +1029,38 @@ function exportSelectedCsv() {
           <div className="pr-card-body">
             {!selected ? (
               <div className="pr-empty">
-                Click a product row to view details and update stock quickly.
+                Click a product row to review stock health, catalog readiness, and quick product actions.
               </div>
             ) : (
               <>
+                <div className="pr-detail-hero">
+                  <div className="pr-detail-media">
+                    {selected.image_url ? (
+                      <Image
+                        src={selected.image_url}
+                        alt={selected.name}
+                        width={72}
+                        height={72}
+                        className="pr-detail-image"
+                      />
+                    ) : (
+                      <div className="pr-detail-fallback">{selected.name.slice(0, 1).toUpperCase()}</div>
+                    )}
+                  </div>
+                  <div className="pr-detail-main">
+                    <div className="pr-detail-name">{selected.name}</div>
+                    <div className="pr-detail-meta">
+                      <span>SKU {selected.sku}</span>
+                      <span>Created {formatDateLabel(selected.created_at)}</span>
+                    </div>
+                    <div className="pr-detail-badges">
+                      {selectedStockBadge ? <span className={selectedStockBadge.className}>{selectedStockBadge.label}</span> : null}
+                      {selected.is_installment ? <span className="pr-badge pr-badge--installment">Installment</span> : null}
+                      <span className="pr-badge">{selected.image_url ? "Image ready" : "No image"}</span>
+                    </div>
+                  </div>
+                </div>
+
                 <div className="pr-kv">
                   <div className="pr-kv-item">
                     <div className="pr-kv-label">Price</div>

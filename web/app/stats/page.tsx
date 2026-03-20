@@ -15,6 +15,7 @@ import {
   Pie,
   Cell,
 } from "recharts";
+import { useCachedQuery } from "@/hooks/useCachedQuery";
 
 type OverviewStats = {
   order_count: number;
@@ -94,58 +95,41 @@ function buildSeries(points: DailyPoint[], days: number) {
 }
 
 export default function StatsPage() {
-  const [overview, setOverview] = useState<OverviewStats | null>(null);
-  const [trendRaw, setTrendRaw] = useState<DailyPoint[]>([]);
-  const [products, setProducts] = useState<ProductStat[]>([]);
-
   const [range, setRange] = useState<RangeKey>("week");
   const [productSearch, setProductSearch] = useState("");
-
-  const [loadingMain, setLoadingMain] = useState(false);
-  const [loadingProducts, setLoadingProducts] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   const days = RANGE_TO_DAYS[range];
   const humanRange = RANGE_HUMAN[range];
 
-  async function loadMain() {
-    setLoadingMain(true);
-    setError(null);
-    try {
-      const [ov, daily] = await Promise.all([
+  const {
+    data: mainData,
+    error,
+    isLoading: loadingMain,
+    isRefreshing: refreshingMain,
+    refetch: refetchMain,
+  } = useCachedQuery(
+    `stats:main:${days}`,
+    async () => {
+      const [overview, daily] = await Promise.all([
         api<OverviewStats>(`/api/stats/overview?days=${days}`),
         api<DailyResponse>(`/api/stats/daily-incomes?days=${days}`),
       ]);
-      setOverview(ov);
-      setTrendRaw(daily.points ?? []);
-    } catch (e: any) {
-      console.error(e);
-      setError(e?.message ?? "Failed to load stats");
-    } finally {
-      setLoadingMain(false);
-    }
-  }
+      return { overview, trendRaw: daily.points ?? [] };
+    },
+    { staleMs: 30_000 }
+  );
 
-  async function loadProducts() {
-    setLoadingProducts(true);
-    try {
-      const r = await api<ProductsResponse>(`/api/stats/products`);
-      setProducts(r.items ?? []);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoadingProducts(false);
-    }
-  }
+  const {
+    data: productsData,
+    isLoading: loadingProducts,
+    refetch: refetchProducts,
+  } = useCachedQuery("stats:products", () => api<ProductsResponse>("/api/stats/products"), {
+    staleMs: 60_000,
+  });
 
-  useEffect(() => {
-    void loadMain();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [range]);
-
-  useEffect(() => {
-    void loadProducts();
-  }, []);
+  const overview = mainData?.overview ?? null;
+  const trendRaw = mainData?.trendRaw ?? [];
+  const products = productsData?.items ?? [];
 
   const earnings = overview?.total_revenue ?? 0;
   const expenses = overview?.total_expenses ?? 0;
@@ -177,7 +161,7 @@ export default function StatsPage() {
   const periodLabel = useMemo(() => {
     if (!series.length) return "";
     if (days === 1) return series[0]?.label ?? "";
-    return `${series[0]?.label ?? ""} – ${series[series.length - 1]?.label ?? ""}`;
+    return `${series[0]?.label ?? ""} - ${series[series.length - 1]?.label ?? ""}`;
   }, [series, days]);
 
   const insights = useMemo(() => {
@@ -216,12 +200,28 @@ export default function StatsPage() {
 
   return (
     <div className="stats-page">
+      <section className="st-report-hero">
+        <div className="st-report-copy">
+          <div className="st-report-kicker">Finance and reports</div>
+          <div className="st-report-title">Business performance</div>
+          <div className="st-report-text">
+            Review revenue, expenses, product movement, and simple operating signals without leaving the reporting
+            workspace.
+          </div>
+        </div>
+        <div className="st-report-links">
+          <Link href="/incomes" className="st-report-link">Income ledger</Link>
+          <Link href="/expenses" className="st-report-link">Expense ledger</Link>
+          <Link href="/orders" className="st-report-link">Order operations</Link>
+        </div>
+      </section>
+
       {/* Topbar */}
       <div className="st-topbar">
         <div>
           <div className="st-title">Business Stats</div>
           <div className="st-subtitle">
-            Clear overview of revenue, costs, approximate profit, and best-selling products — without clutter.
+            Clear overview of revenue, costs, approximate profit, and best-selling products without clutter.
           </div>
         </div>
 
@@ -232,8 +232,16 @@ export default function StatsPage() {
           <Link href="/expenses" className="st-btn">
             Expenses
           </Link>
-          <button type="button" className="st-btn st-btn-primary" onClick={() => void loadMain()} disabled={loadingMain}>
-            Refresh
+          <button
+            type="button"
+            className="st-btn st-btn-primary"
+            onClick={() => {
+              void refetchMain();
+              void refetchProducts();
+            }}
+            disabled={loadingMain || refreshingMain}
+          >
+            {refreshingMain ? "Refreshing..." : "Refresh"}
           </button>
         </div>
       </div>
@@ -264,8 +272,8 @@ export default function StatsPage() {
 
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
           {periodLabel ? <span className="st-chip">{periodLabel}</span> : <span className="st-chip">{humanRange}</span>}
-          {loadingMain ? <span className="st-chip">Loading…</span> : <span className="st-chip">Period: {humanRange}</span>}
-          {error ? <span className="st-error">{error}</span> : null}
+          {loadingMain || refreshingMain ? <span className="st-chip">Loading...</span> : <span className="st-chip">Period: {humanRange}</span>}
+          {error ? <span className="st-error">{error.message}</span> : null}
         </div>
       </div>
 
@@ -324,7 +332,7 @@ export default function StatsPage() {
 
             <div className="st-card-body">
               {loadingMain ? (
-                <div className="st-muted">Loading trend…</div>
+                <div className="st-muted">Loading trend...</div>
               ) : series.length === 0 ? (
                 <div className="st-muted">No data available for this period.</div>
               ) : (
@@ -368,7 +376,7 @@ export default function StatsPage() {
             <div className="st-card-header">
               <div>
                 <div className="st-card-title">Top products</div>
-                <div className="st-card-sub">Based on paid + delivered orders (overall).</div>
+                <div className="st-card-sub">Based on paid and delivered orders overall.</div>
               </div>
 
               <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
@@ -377,9 +385,9 @@ export default function StatsPage() {
                   style={{ width: 260 }}
                   value={productSearch}
                   onChange={(e) => setProductSearch(e.target.value)}
-                  placeholder="Search SKU or name…"
+                  placeholder="Search SKU or name..."
                 />
-                {loadingProducts ? <span className="st-chip">Loading…</span> : <span className="st-chip">{products.length} total</span>}
+                {loadingProducts ? <span className="st-chip">Loading...</span> : <span className="st-chip">{products.length} total</span>}
               </div>
             </div>
 
@@ -452,11 +460,11 @@ export default function StatsPage() {
       <div className="st-note">
         {insights.bestDay ? (
           <>
-            Best income day: <b>{dateOnly(insights.bestDay.date)}</b> —{" "}
+            Best income day: <b>{dateOnly(insights.bestDay.date)}</b> -{" "}
             <b>{fmtTzs(insights.bestDay.income)} TZS</b>.
           </>
         ) : (
-          <>Best income day: —</>
+          <>Best income day: -</>
         )}
       </div>
     </div>
@@ -474,7 +482,7 @@ export default function StatsPage() {
 
     <div className="st-card-body">
       {loadingMain ? (
-        <div className="st-muted">Loading…</div>
+        <div className="st-muted">Loading...</div>
       ) : financeSplit.total <= 0 ? (
         <div className="st-muted">No profit/expense data for this period.</div>
       ) : (

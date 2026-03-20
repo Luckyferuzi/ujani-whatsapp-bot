@@ -1,4 +1,11 @@
 // src/i18n.ts
+import {
+  type BusinessTextOverrideKey,
+  getBusinessTextOverride,
+  getCompanyDisplayName,
+  getSupportContact,
+} from "./runtime/companySettings.js";
+
 export type Lang = 'sw' | 'en';
 
 type Dict = Record<Lang, Record<string, string>>;
@@ -446,8 +453,57 @@ function interpolate(s: string, params?: Record<string, string | number>) {
   return s.replace(/\{(\w+)\}/g, (_, k) => String(params[k] ?? `{${k}}`));
 }
 
+function getDynamicBusinessText(lang: Lang, key: string): string | null {
+  const company = getCompanyDisplayName();
+  const support = getSupportContact();
+
+  switch (key) {
+    case "menu.header":
+      return lang === "sw"
+        ? `Karibu ${company} Chatbot 🌿`
+        : `Welcome to ${company} Chatbot 🌿`;
+    case "flow.reset_done":
+      return lang === "sw"
+        ? `Tumeanza upya mazungumzo yako. Hii hapa menyu ya ${company} Chatbot 🌿.`
+        : `Your conversation has been reset. Here is the ${company} Chatbot menu 🌿.`;
+    case "faq.intro":
+      return lang === "sw"
+        ? `Haya ni maswali machache ya mara kwa mara kuhusu bidhaa za ${company}:`
+        : `Here are some common questions about ${company} products:`;
+    case "disclaimer.general":
+      return lang === "sw"
+        ? [
+            "⚠️ *Tahadhari muhimu:*",
+            `• Bidhaa za ${company} ni virutubisho vya kiasili, na hazibadilishi ushauri au matibabu ya daktari.`,
+            "• Ikiwa una tatizo sugu (mf. presha, kisukari, moyo) au unatumia dawa za hospitali, wasiliana na daktari kabla ya kutumia.",
+            "• Usizidishe dozi iliyoelekezwa. Acha kutumia na wasiliana na mtaalamu wa afya ukipata dalili zisizo za kawaida.",
+          ].join("\n")
+        : [
+            "⚠️ *Important safety notice:*",
+            `• ${company} products are natural supplements and do not replace medical advice or treatment.`,
+            "• If you have a chronic condition (e.g. hypertension, diabetes, heart issues) or take hospital medicines, talk to your doctor before use.",
+            "• Do not exceed the recommended dosage. Stop using and consult a health professional if you notice unusual symptoms.",
+          ].join("\n");
+    case "payment.none":
+      if (support.phone || support.email) {
+        return lang === "sw"
+          ? `Namba za malipo hazijawekewa. Tafadhali wasiliana nasi kupitia ${support.phone ?? support.email}.`
+          : `Payment numbers are not configured. Please contact us via ${support.phone ?? support.email}.`;
+      }
+      return null;
+    default:
+      return null;
+  }
+}
+
 export function t(lang: Lang, key: string, params?: Record<string, string | number>) {
   const l: Lang = (lang === 'sw' || lang === 'en') ? lang : 'sw';
-  const v = dict[l][key] ?? dict.sw[key] ?? key;
+  const override = getBusinessTextOverride(key as BusinessTextOverrideKey, l);
+  const v =
+    override ??
+    getDynamicBusinessText(l, key) ??
+    dict[l][key] ??
+    dict.sw[key] ??
+    key;
   return interpolate(v, params);
 }

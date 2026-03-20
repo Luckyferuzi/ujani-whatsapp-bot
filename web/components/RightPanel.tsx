@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { formatPhonePretty } from "@/lib/phone";
+import OperatorTimelineNotes from "@/components/OperatorTimelineNotes";
+import { useCachedQuery } from "@/hooks/useCachedQuery";
 
 export interface RightPanelProps {
   conversationId: string | null;
@@ -148,8 +150,6 @@ export default function RightPanel({ conversationId }: RightPanelProps) {
 
   const [summary, setSummary] = useState<ConversationSummary | null>(null);
   const [orders, setOrders] = useState<OrderRow[]>([]);
-  const [loading, setLoading] = useState(false);
-
   const [activeView, setActiveView] = useState<"orders" | "settings">("orders");
 
   const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null);
@@ -196,7 +196,43 @@ export default function RightPanel({ conversationId }: RightPanelProps) {
     }
   };
 
-  const loadAll = async () => {
+  const handleOpenInboxOrderDesk = () => {
+    const phone = customer?.phone || latestOrder?.phone || undefined;
+    if (phone) {
+      const params = new URLSearchParams({ phone });
+      router.push(`/orders?${params.toString()}`);
+      return;
+    }
+    router.push("/orders");
+  };
+
+  const {
+    data: panelData,
+    isLoading: loading,
+    isRefreshing,
+    refetch: refetchPanel,
+  } = useCachedQuery(
+    conversationId ? `conversation:panel:${conversationId}` : null,
+    async () => {
+      const [summaryData, ordersData] = await Promise.all([
+        api<ConversationSummary>(`/api/conversations/${conversationId}/summary`),
+        api<{ items: OrderRow[] }>(`/api/conversations/${conversationId}/orders`),
+      ]);
+
+      return {
+        summary: summaryData,
+        orders: ordersData?.items ?? [],
+      };
+    },
+    { staleMs: 5_000, enabled: !!conversationId }
+  );
+
+    useEffect(() => {
+    const mode = readThemeMode();
+    setThemeMode(mode);
+  }, []);
+
+  useEffect(() => {
     if (!conversationId) {
       setSummary(null);
       setOrders([]);
@@ -204,45 +240,20 @@ export default function RightPanel({ conversationId }: RightPanelProps) {
       return;
     }
 
-    setLoading(true);
-    try {
-      const [summaryData, ordersData] = await Promise.all([
-        api<ConversationSummary>(`/api/conversations/${conversationId}/summary`),
-        api<{ items: OrderRow[] }>(`/api/conversations/${conversationId}/orders`),
-      ]);
+    const nextSummary = panelData?.summary ?? null;
+    const nextOrders = panelData?.orders ?? [];
+    setSummary(nextSummary);
+    setOrders(nextOrders);
 
-      const nextOrders = ordersData?.items ?? [];
-
-      setSummary(summaryData);
-      setOrders(nextOrders);
-
-      // default selection: newest order
-      if (nextOrders.length === 0) {
-        setSelectedOrderId(null);
-      } else if (
-        selectedOrderId == null ||
-        !nextOrders.some((o) => o.id === selectedOrderId)
-      ) {
-        setSelectedOrderId(nextOrders[0].id);
-      }
-    } catch (err) {
-      console.error("Failed to load right panel data", err);
-      setSummary(null);
-      setOrders([]);
+    if (nextOrders.length === 0) {
       setSelectedOrderId(null);
-    } finally {
-      setLoading(false);
+    } else if (selectedOrderId == null || !nextOrders.some((o) => o.id === selectedOrderId)) {
+      setSelectedOrderId(nextOrders[0].id);
     }
-  };
-
-    useEffect(() => {
-    const mode = readThemeMode();
-    setThemeMode(mode);
-  }, []);
-
+  }, [conversationId, panelData, selectedOrderId]);
 
   useEffect(() => {
-    void loadAll();
+    void refetchPanel();
 
     // reset view & transient inputs when switching conversations
     setActiveView("orders");
@@ -254,8 +265,7 @@ export default function RightPanel({ conversationId }: RightPanelProps) {
     setRiderPhoneInput("");
     setStatusError(null);
     setShowRiderForm(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [conversationId]);
+  }, [conversationId, refetchPanel]);
 
   const handleUpdatePaymentStatus = async (status: "verifying" | "paid") => {
     if (!payment?.id) return;
@@ -287,7 +297,7 @@ export default function RightPanel({ conversationId }: RightPanelProps) {
         setShowPaymentForm(false);
       }
 
-      await loadAll();
+      await refetchPanel();
     } catch (err) {
       console.error("Failed to update payment status", err);
       setPaymentError("Failed to update payment. Please try again.");
@@ -327,7 +337,7 @@ export default function RightPanel({ conversationId }: RightPanelProps) {
         setRiderPhoneInput("");
       }
 
-      await loadAll();
+      await refetchPanel();
     } catch (err) {
       console.error("Failed to update order status", err);
       setStatusError("Failed to update order status. Please try again.");
@@ -399,8 +409,8 @@ export default function RightPanel({ conversationId }: RightPanelProps) {
         <button
           type="button"
           className="rp-icon-button"
-          onClick={() => void loadAll()}
-          disabled={loading}
+          onClick={() => void refetchPanel()}
+          disabled={loading || isRefreshing}
           title="Refresh"
           aria-label="Refresh"
         >
@@ -411,6 +421,59 @@ export default function RightPanel({ conversationId }: RightPanelProps) {
       {/* ORDERS VIEW */}
       {activeView === "orders" && (
         <div className="rp-stack">
+          <div className="panel-card panel-card--hero">
+            <div className="rp-hero-top">
+              <div>
+                <div className="rp-hero-title">{displayName}</div>
+                <div className="rp-hero-sub">
+                  {customer?.phone ? formatPhonePretty(customer.phone) : "No phone on record"}
+                </div>
+              </div>
+              {customer?.lang ? <span className="rp-chip rp-chip--neutral">{customer.lang.toUpperCase()}</span> : null}
+            </div>
+
+            <div className="rp-hero-stats">
+              <div className="rp-hero-stat">
+                <div className="rp-hero-stat-label">Order</div>
+                <div className="rp-hero-stat-value">{currentOrder ? orderUi.label : "None"}</div>
+              </div>
+              <div className="rp-hero-stat">
+                <div className="rp-hero-stat-label">Payment</div>
+                <div className="rp-hero-stat-value">{paymentUi.label}</div>
+              </div>
+              <div className="rp-hero-stat">
+                <div className="rp-hero-stat-label">Delivery</div>
+                <div className="rp-hero-stat-value">{currentOrder?.delivery_mode || delivery?.mode || "—"}</div>
+              </div>
+            </div>
+
+            <div className="rp-actions rp-actions--wrap">
+              <button type="button" className="btn btn-secondary btn-xs" onClick={handleOpenInboxOrderDesk}>
+                Order desk
+              </button>
+              {payment?.id ? (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-xs"
+                  onClick={() => void handleUpdatePaymentStatus("verifying")}
+                  disabled={updatingPayment}
+                >
+                  Verify payment
+                </button>
+              ) : null}
+              {currentOrder ? (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-xs"
+                  onClick={() => void handleUpdateOrderStatus("preparing")}
+                  disabled={updatingStatus}
+                >
+                  Mark preparing
+                </button>
+              ) : null}
+            </div>
+          </div>
+
           {/* Customer */}
           <div className="panel-card">
             <div className="rp-card-title-row">
@@ -714,6 +777,17 @@ export default function RightPanel({ conversationId }: RightPanelProps) {
               </div>
             </div>
           ) : null}
+
+          <div className="panel-card">
+            <OperatorTimelineNotes
+              title="Timeline & Notes"
+              timelinePath={conversationId ? `/api/conversations/${conversationId}/timeline` : null}
+              notePath={conversationId ? `/api/conversations/${conversationId}/notes` : null}
+              emptyState="No business history yet for this conversation."
+              notePlaceholder="Add an internal note for payment checks, delivery context, or customer history."
+              refreshKey={`${conversationId ?? "none"}:${currentOrder?.id ?? "none"}`}
+            />
+          </div>
         </div>
       )}
 

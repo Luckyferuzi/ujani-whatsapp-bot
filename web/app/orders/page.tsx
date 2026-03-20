@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { socket } from "@/lib/socket";
 import { formatPhonePretty } from "@/lib/phone";
+import OperatorTimelineNotes from "@/components/OperatorTimelineNotes";
 import { toast } from "sonner";
 
 type OrderListRow = {
@@ -111,6 +112,31 @@ function paymentBadge(
   }
 
   return { label: "Unpaid", className: "or-badge or-badge--unpaid" };
+}
+
+function getStatusFilterOptions() {
+  return [
+    { key: "", label: "All orders", hint: "Everything in the current workspace" },
+    { key: "pending", label: "Pending", hint: "New orders waiting to move" },
+    { key: "verifying", label: "Payment verification", hint: "Proofs or payment checks in progress" },
+    { key: "preparing", label: "Preparing", hint: "Orders being fulfilled now" },
+    { key: "out_for_delivery", label: "Delivery", hint: "Orders currently with riders" },
+    { key: "delivered", label: "Delivered", hint: "Completed orders" },
+    { key: "cancelled", label: "Cancelled", hint: "Orders that will not continue" },
+  ] as const;
+}
+
+function formatRelativeDate(value: string): string {
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value;
+  const now = new Date();
+  const diffMs = now.getTime() - d.getTime();
+  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+  if (diffHours < 1) return "Just now";
+  if (diffHours < 24) return `${diffHours}h ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays < 7) return `${diffDays}d ago`;
+  return formatDateTime(value);
 }
 
 
@@ -762,6 +788,54 @@ async function deleteOrder(order: OrderListRow) {
   }, [items.length, total, loading]);
 
   const selectedBadge = statusBadge(selectedOrder?.status ?? null);
+  const paymentSelectedBadge = paymentBadge(
+    selectedOrder?.payment_status,
+    selectedOrder?.paid_amount,
+    selectedOrder?.total_tzs ?? 0
+  );
+  const statusFilters = getStatusFilterOptions();
+
+  const queueCards = useMemo(() => {
+    const countByStatus = new Map<string, number>();
+    for (const row of items) {
+      const key = String(row.status ?? "");
+      countByStatus.set(key, (countByStatus.get(key) ?? 0) + 1);
+    }
+    return [
+      {
+        title: "Pending queue",
+        value: countByStatus.get("pending") ?? 0,
+        hint: "New orders waiting for action",
+      },
+      {
+        title: "Payment checks",
+        value: countByStatus.get("verifying") ?? 0,
+        hint: "Orders in verification",
+      },
+      {
+        title: "Preparing",
+        value: countByStatus.get("preparing") ?? 0,
+        hint: "Orders being fulfilled",
+      },
+      {
+        title: "Out for delivery",
+        value: countByStatus.get("out_for_delivery") ?? 0,
+        hint: "Rider-handled orders",
+      },
+    ];
+  }, [items]);
+
+  const selectedRemaining = useMemo(() => {
+    if (!selectedOrder) return null;
+    const paid = typeof selectedOrder.paid_amount === "number" ? selectedOrder.paid_amount : 0;
+    return Math.max(0, selectedOrder.total_tzs - paid);
+  }, [selectedOrder]);
+
+  function applyStatusSegment(nextStatus: string) {
+    setStatus(nextStatus);
+    setPage(1);
+    void loadOrders();
+  }
 
   const grouped = useMemo(() => {
   const now = new Date();
@@ -795,9 +869,10 @@ async function deleteOrder(order: OrderListRow) {
       {/* Topbar */}
       <div className="orders-topbar">
         <div>
-          <div className="orders-title">Orders</div>
+          <div className="orders-kicker">Order operations</div>
+          <div className="orders-title">Orders console</div>
           <div className="orders-subtitle">
-            Search, update status, export, and create manual orders — in a clean admin view.
+            Process new orders, payment checks, fulfillment, and delivery transitions from one operator workspace.
           </div>
         </div>
 
@@ -821,6 +896,33 @@ async function deleteOrder(order: OrderListRow) {
             + New order
           </button>
         </div>
+      </div>
+
+      <div className="orders-queue-grid">
+        {queueCards.map((card) => (
+          <div key={card.title} className="or-queue-card">
+            <div className="or-queue-label">{card.title}</div>
+            <div className="or-queue-value">{card.value}</div>
+            <div className="or-queue-hint">{card.hint}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="orders-segments" role="tablist" aria-label="Order status segments">
+        {statusFilters.map((option) => {
+          const active = status === option.key;
+          return (
+            <button
+              key={option.label}
+              type="button"
+              className={"orders-segment" + (active ? " orders-segment--active" : "")}
+              onClick={() => applyStatusSegment(option.key)}
+            >
+              <span className="orders-segment-title">{option.label}</span>
+              <span className="orders-segment-hint">{option.hint}</span>
+            </button>
+          );
+        })}
       </div>
 
       {/* Controls */}
@@ -1010,8 +1112,9 @@ async function deleteOrder(order: OrderListRow) {
                   <th>Order</th>
                   <th>Customer</th>
                   <th>Status</th>
-                  <th>payment</th>
+                  <th>Payment</th>
                   <th>Mode</th>
+                  <th>Delivery</th>
                   <th className="or-td-right">Total</th>
                   <th>Created</th>
                   <th className="or-td-right">Actions</th>
@@ -1022,8 +1125,8 @@ async function deleteOrder(order: OrderListRow) {
                 {items.length === 0 && !loading ? (
                   <tr>
                     
-                    <td colSpan={9} style={{ padding: 14, color: "var(--or-muted)", fontWeight: 600 }}>
-                      No orders match your filters.
+                    <td colSpan={10} style={{ padding: 24, color: "var(--or-muted)", fontWeight: 600 }}>
+                      No orders match the current queue or filters.
                     </td>
                   </tr>
 ) : (
@@ -1031,7 +1134,7 @@ async function deleteOrder(order: OrderListRow) {
     <Fragment key={group.key}>
       <tr key={`grp-${group.key}`} className="or-group-row">
         
-        <td colSpan={9}>{group.title}</td>
+        <td colSpan={10}>{group.title}</td>
       </tr>
 
       {group.rows.map((order) => {
@@ -1096,8 +1199,26 @@ onChange={() => {}}
               )}
             </td>
 
+            <td>
+              <div className="or-delivery-cell">
+                <div className="or-delivery-primary">{order.region || "No destination"}</div>
+                <div className="or-delivery-secondary">
+                  {order.delivery_agent_phone
+                    ? `Rider ${formatPhonePretty(order.delivery_agent_phone)}`
+                    : order.delivery_mode === "delivery"
+                    ? "Awaiting rider"
+                    : "Pickup"}
+                </div>
+              </div>
+            </td>
+
             <td className="or-td-right">{formatTzs(order.total_tzs)} TZS</td>
-            <td>{formatDateTime(order.created_at)}</td>
+            <td>
+              <div className="or-time-cell">
+                <div>{formatRelativeDate(order.created_at)}</div>
+                <div className="or-time-sub">{formatDateTime(order.created_at)}</div>
+              </div>
+            </td>
 
             <td className="or-td-right">
               <div className="or-actions" onClick={(e) => e.stopPropagation()}>
@@ -1187,11 +1308,49 @@ onChange={() => {}}
 
           <div className="or-card-body">
             {!selectedOrder ? (
-              <div className="or-empty">
-                Click a row to see details and products. This keeps the main page clean and easy to scan.
+              <div className="or-empty-state">
+                <div className="or-empty-title">Pick an order to open the detail rail.</div>
+                <div className="or-empty">
+                  Review customer info, delivery progress, payment state, product lines, and operator notes without leaving the list.
+                </div>
               </div>
             ) : (
               <>
+                <div className="or-detail-hero">
+                  <div className="or-detail-top">
+                    <div>
+                      <div className="or-detail-code">#{selectedOrder.order_code || selectedOrder.id}</div>
+                      <div className="or-detail-customer">{selectedOrder.customer_name || "Unknown customer"}</div>
+                      <div className="or-detail-phone">
+                        {selectedOrder.phone ? formatPhonePretty(selectedOrder.phone) : "No phone on record"}
+                      </div>
+                    </div>
+                    <div className="or-detail-badges">
+                      <span className={selectedBadge.className}>{selectedBadge.label}</span>
+                      <span className={paymentSelectedBadge.className}>{paymentSelectedBadge.label}</span>
+                    </div>
+                  </div>
+
+                  <div className="or-detail-stats">
+                    <div className="or-detail-stat">
+                      <div className="or-detail-stat-label">Order total</div>
+                      <div className="or-detail-stat-value">{formatTzs(selectedOrder.total_tzs)} TZS</div>
+                    </div>
+                    <div className="or-detail-stat">
+                      <div className="or-detail-stat-label">Paid</div>
+                      <div className="or-detail-stat-value">
+                        {typeof selectedOrder.paid_amount === "number" ? `${formatTzs(selectedOrder.paid_amount)} TZS` : "—"}
+                      </div>
+                    </div>
+                    <div className="or-detail-stat">
+                      <div className="or-detail-stat-label">Remaining</div>
+                      <div className="or-detail-stat-value">
+                        {selectedRemaining != null ? `${formatTzs(selectedRemaining)} TZS` : "—"}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
                 <div className="or-kv">
                   <div className="or-kv-item">
                     <div className="or-kv-label">Customer</div>
@@ -1230,6 +1389,40 @@ onChange={() => {}}
                     <div className="or-kv-label">Region</div>
                     <div className="or-kv-value">{selectedOrder.region || "—"}</div>
                   </div>
+
+                  <div className="or-kv-item">
+                    <div className="or-kv-label">Rider</div>
+                    <div className="or-kv-value">
+                      {selectedOrder.delivery_agent_phone ? formatPhonePretty(selectedOrder.delivery_agent_phone) : "—"}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="or-detail-actions">
+                  <button
+                    type="button"
+                    className="or-btn"
+                    onClick={() => void setOrderStatus(selectedOrder, "preparing")}
+                    disabled={selectedOrder.status === "preparing" || selectedOrder.status === "delivered" || selectedOrder.status === "cancelled"}
+                  >
+                    Mark preparing
+                  </button>
+                  <button
+                    type="button"
+                    className="or-btn"
+                    onClick={() => openEdit(selectedOrder)}
+                  >
+                    Edit order
+                  </button>
+                  {selectedOrder.phone ? (
+                    <Link
+                      href={`/inbox?phone=${encodeURIComponent(selectedOrder.phone)}`}
+                      className="or-btn"
+                      style={{ textDecoration: "none", display: "inline-flex", alignItems: "center" }}
+                    >
+                      Open in Inbox
+                    </Link>
+                  ) : null}
                 </div>
 
                 <div className="or-items">
@@ -1255,22 +1448,19 @@ onChange={() => {}}
                   )}
                 </div>
 
+                <div className="or-items">
+                  <OperatorTimelineNotes
+                    title="Timeline & Notes"
+                    timelinePath={selectedOrder ? `/api/orders/${selectedOrder.id}/timeline` : null}
+                    notePath={selectedOrder ? `/api/orders/${selectedOrder.id}/notes` : null}
+                    emptyState="No operator history yet for this order."
+                    notePlaceholder="Add an internal order note for fulfillment, payment review, or customer context."
+                    refreshKey={selectedOrder?.id ?? null}
+                  />
+                </div>
+
                 <div className="or-items" style={{ borderTop: "none", paddingTop: 12 }}>
                   <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                    {selectedOrder.phone ? (
-                      <Link
-                        href={`/inbox?phone=${encodeURIComponent(selectedOrder.phone)}`}
-                        className="or-btn"
-                        style={{ textDecoration: "none", display: "inline-flex", alignItems: "center" }}
-                      >
-                        Open in Inbox
-                      </Link>
-                    ) : null}
-
-                    <button type="button" className="or-btn" onClick={() => openEdit(selectedOrder)}>
-                      Edit
-                    </button>
-
                     <button type="button" className="or-btn or-btn-danger" onClick={() => void deleteOrder(selectedOrder)}>
                       Delete
                     </button>

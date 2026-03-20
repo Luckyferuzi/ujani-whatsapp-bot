@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { api, get, post, put } from "@/lib/api";
 import { toast } from "sonner";
+import { useCachedQuery } from "@/hooks/useCachedQuery";
 
 type Expense = {
   id: number;
@@ -64,7 +65,6 @@ function badgeClassFor(category: string) {
 
 export default function ExpensesPage() {
   const [items, setItems] = useState<Expense[]>([]);
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // filters
@@ -94,34 +94,34 @@ export default function ExpensesPage() {
     description: "",
   });
 
-  async function loadExpenses() {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await get<ListResponse>("/api/expenses?limit=200");
-      const list = res.items ?? [];
-      setItems(list);
-
-      setSelectedId((prev) => (prev != null && list.some((x) => x.id === prev) ? prev : null));
-      setBulkSelected((prev) => {
-        const next = new Set<number>();
-        for (const it of list) if (prev.has(it.id)) next.add(it.id);
-        return next;
-      });
-    } catch (err: any) {
-      console.error(err);
-      setError("Imeshindikana kupakia matumizi.");
-      toast.error("Imeshindikana kupakia matumizi.", {
-        description: "Jaribu tena muda mfupi baadaye.",
-      });
-    } finally {
-      setLoading(false);
-    }
-  }
+  const {
+    data: expensesResponse,
+    error: expensesLoadError,
+    isLoading: loading,
+    isRefreshing,
+    refetch: refetchExpenses,
+  } = useCachedQuery("expenses:list", () => get<ListResponse>("/api/expenses?limit=200"), {
+    staleMs: 20_000,
+  });
 
   useEffect(() => {
-    void loadExpenses();
-  }, []);
+    const list = expensesResponse?.items ?? [];
+    setItems(list);
+    setSelectedId((prev) => (prev != null && list.some((x) => x.id === prev) ? prev : null));
+    setBulkSelected((prev) => {
+      const next = new Set<number>();
+      for (const it of list) if (prev.has(it.id)) next.add(it.id);
+      return next;
+    });
+  }, [expensesResponse]);
+
+  useEffect(() => {
+    if (!expensesLoadError) return;
+    setError("Imeshindikana kupakia matumizi.");
+    toast.error("Imeshindikana kupakia matumizi.", {
+      description: "Jaribu tena muda mfupi baadaye.",
+    });
+  }, [expensesLoadError]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -308,7 +308,7 @@ export default function ExpensesPage() {
         next.delete(row.id);
         return next;
       });
-      void loadExpenses();
+      void refetchExpenses();
     } catch (err: any) {
       console.error(err);
       toast.error("Imeshindikana kufuta matumizi.");
@@ -347,7 +347,7 @@ export default function ExpensesPage() {
     setBulkWorking(false);
     setBulkSelected(new Set());
     setBulkAnchorIndex(null);
-    void loadExpenses();
+    void refetchExpenses();
   }
 }
 
@@ -378,7 +378,7 @@ export default function ExpensesPage() {
       setBulkSelected(new Set());
       setBulkAnchorIndex(null);
       if (selectedId && ids.includes(selectedId)) setSelectedId(null);
-      void loadExpenses();
+      void refetchExpenses();
     }
   }
 
@@ -452,7 +452,7 @@ export default function ExpensesPage() {
         amount_tzs: "",
         description: "",
       });
-      void loadExpenses();
+      void refetchExpenses();
     } catch (err: any) {
       console.error(err);
       toast.error("Imeshindikana kuhifadhi.");
@@ -463,12 +463,27 @@ export default function ExpensesPage() {
 
   return (
     <div className="expenses-page">
+      <section className="ex-report-hero">
+        <div className="ex-report-copy">
+          <div className="ex-report-kicker">Finance workspace</div>
+          <div className="ex-report-title">Expense operations</div>
+          <div className="ex-report-text">
+            Track cost categories, review business spending, and keep the outgoing cash ledger clean and searchable.
+          </div>
+        </div>
+        <div className="ex-report-links">
+          <Link href="/stats" className="ex-report-link">Performance overview</Link>
+          <Link href="/incomes" className="ex-report-link">Income ledger</Link>
+          <Link href="/orders" className="ex-report-link">Order desk</Link>
+        </div>
+      </section>
+
       {/* Topbar */}
       <div className="ex-topbar">
         <div>
           <div className="ex-title">Expenses</div>
           <div className="ex-subtitle">
-            Rekodi na fuatilia matumizi ya biashara kwa mwonekano rahisi, safi, na wa admin.
+            Record and manage business expenses with a clearer operational ledger and category visibility.
           </div>
         </div>
 
@@ -534,6 +549,24 @@ export default function ExpensesPage() {
           <span className="ex-chip ex-chip--danger">Total: {formatTzs(totals.total)} TZS</span>
           <span className="ex-chip ex-chip--warn">This month: {formatTzs(totals.thisMonthTotal)} TZS</span>
           <span className="ex-chip">Today: {formatTzs(totals.todayTotal)} TZS</span>
+        </div>
+      </div>
+
+      <div className="ex-summary-grid-top">
+        <div className="ex-summary-top-card">
+          <div className="ex-summary-top-label">Current filtered spend</div>
+          <div className="ex-summary-top-value">{formatTzs(totals.total)} TZS</div>
+          <div className="ex-summary-top-sub">total expense value in the active filtered view</div>
+        </div>
+        <div className="ex-summary-top-card">
+          <div className="ex-summary-top-label">This month</div>
+          <div className="ex-summary-top-value">{formatTzs(totals.thisMonthTotal)} TZS</div>
+          <div className="ex-summary-top-sub">recorded spend for the current month</div>
+        </div>
+        <div className="ex-summary-top-card">
+          <div className="ex-summary-top-label">Today</div>
+          <div className="ex-summary-top-value">{formatTzs(totals.todayTotal)} TZS</div>
+          <div className="ex-summary-top-sub">expenses recorded today</div>
         </div>
       </div>
 
@@ -605,7 +638,7 @@ export default function ExpensesPage() {
             <div>
               <div className="ex-card-title">Expense records</div>
               <div className="ex-card-sub">
-                {loading ? "Loading…" : `${filtered.length} shown · ${items.length} total`}
+                {loading ? "Loading..." : `${filtered.length} shown · ${items.length} total${isRefreshing ? " · refreshing" : ""}`}
               </div>
             </div>
 

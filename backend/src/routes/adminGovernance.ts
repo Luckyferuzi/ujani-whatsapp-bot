@@ -170,7 +170,7 @@ adminGovernanceRoutes.post("/approvals", async (req, res) => {
     entity_id: String(approval.id),
     actor_user_id: (req as any).user?.id ?? null,
     actor_email: actor,
-    metadata_json: { action_key: actionKey },
+    metadata_json: { action_key: actionKey, request_id: (req as any).id ?? null },
   });
 
   return res.status(201).json({ ok: true, approval });
@@ -208,7 +208,12 @@ adminGovernanceRoutes.post("/approvals/:id/approve", async (req, res) => {
     entity_id: String(row.id),
     actor_user_id: (req as any).user?.id ?? null,
     actor_email: (req as any).user?.email ?? null,
-    metadata_json: { status: row.status, action_key: row.action_key, execution_error: row.execution_error },
+    metadata_json: {
+      status: row.status,
+      action_key: row.action_key,
+      execution_error: row.execution_error,
+      request_id: (req as any).id ?? null,
+    },
   });
 
   return res.json({ ok: true, approval: row });
@@ -239,7 +244,7 @@ adminGovernanceRoutes.post("/approvals/:id/reject", async (req, res) => {
     entity_id: String(row.id),
     actor_user_id: (req as any).user?.id ?? null,
     actor_email: (req as any).user?.email ?? null,
-    metadata_json: { action_key: row.action_key },
+    metadata_json: { action_key: row.action_key, request_id: (req as any).id ?? null },
   });
 
   return res.json({ ok: true, approval: row });

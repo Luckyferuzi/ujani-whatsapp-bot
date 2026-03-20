@@ -14,9 +14,11 @@ import { z } from "zod";
 import { env } from "../config.js";
 import {
   DEFAULT_COMPANY_SETTINGS,
+  getBusinessContentSettings,
   getPhoneNumberIdEffective,
   getWabaIdEffective,
   getCatalogEnabledEffective,
+  getCompanyDisplayName,
   getCompanySettingsCached,
   loadCompanySettingsToCache,
   saveCompanySettings,
@@ -69,6 +71,25 @@ const patchSchema = z
     whatsapp_solution_id: z.string().nullable().optional(),
     coexistence_enabled: z.boolean().optional(),
 
+    business_content: z
+      .object({
+        welcome_intro: z.record(z.string()).optional(),
+        pickup_info: z.record(z.string()).optional(),
+        support_phone: z.string().nullable().optional(),
+        support_email: z.string().nullable().optional(),
+        payment_methods: z
+          .array(
+            z.object({
+              id: z.string().min(1),
+              label: z.string().min(1),
+              value: z.string().min(1),
+            })
+          )
+          .optional(),
+        text_overrides: z.record(z.record(z.string())).optional(),
+      })
+      .optional(),
+
     is_setup_complete: z.boolean().optional(),
   })
   .strict();
@@ -77,9 +98,13 @@ function mergeSettings(
   current: typeof DEFAULT_COMPANY_SETTINGS,
   patch: z.infer<typeof patchSchema>
 ) {
-  const next: typeof DEFAULT_COMPANY_SETTINGS = {
+  const merged = {
     ...current,
     ...patch,
+  };
+  const next: typeof DEFAULT_COMPANY_SETTINGS = {
+    ...merged,
+    business_content: getBusinessContentSettings(merged as typeof DEFAULT_COMPANY_SETTINGS),
   };
 
   // inbox is always enabled
@@ -128,7 +153,7 @@ companyRoutes.get("/company/meta", async (_req, res) => {
   return res.json({
     ok: true,
     meta: {
-      company_name: s.company_name || "Ujani",
+      company_name: getCompanyDisplayName(s),
       enabled_modules: Array.isArray(s.enabled_modules) ? s.enabled_modules : ["inbox"],
       catalog_enabled: !!s.catalog_enabled,
     },

@@ -2,6 +2,10 @@
 
 This repo is a **WhatsApp Cloud API bot + team inbox + admin dashboard** (orders/products/payments/etc).
 
+Production operations references:
+- `OPERATIONS.md`
+- `architecture/final-qa-checklist.md`
+
 ✅ **Current mode:** **Single-tenant** (one company per deployment + one database).  
 ✅ **Fast client delivery:** clone repo → new DB → new WhatsApp creds → new branding/catalog.  
 🧠 Later, we can refactor to multi-tenant (one platform for many companies).

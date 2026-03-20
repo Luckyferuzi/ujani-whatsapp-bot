@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { formatPhonePretty } from "@/lib/phone";
+import { useCachedQuery } from "@/hooks/useCachedQuery";
 
 export type Convo = {
   id: string;
@@ -44,10 +45,34 @@ function describeLastMessage(text: string | null | undefined): string | null {
 function formatTime(value: string): string {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleTimeString("sw-TZ", {
-    hour: "2-digit",
-    minute: "2-digit",
+  const now = new Date();
+  const sameDay = d.toDateString() === now.toDateString();
+  if (sameDay) {
+    return d.toLocaleTimeString("sw-TZ", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  }
+  return d.toLocaleDateString("sw-TZ", {
+    month: "short",
+    day: "2-digit",
   });
+}
+
+function getConversationPriority(convo: Convo) {
+  const unread = convo.unread_count ?? 0;
+  if (unread > 0 && convo.agent_allowed) return "Needs reply";
+  if (unread > 0) return "Unread";
+  if (convo.agent_allowed) return "Handover";
+  return "Bot active";
+}
+
+function getConversationPriorityTone(convo: Convo) {
+  const unread = convo.unread_count ?? 0;
+  if (unread > 0 && convo.agent_allowed) return "conversation-priority conversation-priority--hot";
+  if (unread > 0) return "conversation-priority conversation-priority--new";
+  if (convo.agent_allowed) return "conversation-priority conversation-priority--agent";
+  return "conversation-priority";
 }
 
 export default function ConversationList({
@@ -57,7 +82,6 @@ export default function ConversationList({
   onLoaded,
 }: Props) {
   const [items, setItems] = useState<Convo[]>([]);
-  const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [view, setView] = useState<ViewKey>("all");
 
@@ -66,28 +90,23 @@ export default function ConversationList({
     onLoadedRef.current = onLoaded;
   }, [onLoaded]);
 
-  const load = async () => {
-    setLoading(true);
-    try {
-      const data = await api<{ items: Convo[] }>("/api/conversations");
-      const next = data.items ?? [];
-      setItems(next);
-      onLoadedRef.current?.(next);
-    } catch (err) {
-      console.error("failed to load conversations", err);
-      setItems([]);
-      onLoadedRef.current?.([]);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const { data, isLoading: loading, refetch } = useCachedQuery(
+    "conversations:list",
+    () => api<{ items: Convo[] }>("/api/conversations"),
+    { staleMs: 3_000 }
+  );
 
   useEffect(() => {
-    void load();
-    const t = setInterval(() => void load(), 3_000);
+    const next = data?.items ?? [];
+    setItems(next);
+    onLoadedRef.current?.(next);
+  }, [data]);
+
+  useEffect(() => {
+    void refetch();
+    const t = setInterval(() => void refetch(), 3_000);
     return () => clearInterval(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [refetch]);
 
   useEffect(() => {
     if (!phoneFilter) return;
@@ -132,7 +151,10 @@ export default function ConversationList({
   return (
     <div className="conversation-list">
       <div className="conversation-list-header">
-        <div className="conversation-list-header-title">Inbox</div>
+        <div>
+          <div className="conversation-list-header-title">Active conversations</div>
+          <div className="conversation-list-header-subtitle">Live inbox updates for customer handling, payments, and fulfillment.</div>
+        </div>
         <div className="conversation-list-header-count">{counts.all}</div>
       </div>
 
@@ -219,6 +241,8 @@ export default function ConversationList({
 
             const unread = c.unread_count ?? 0;
             const restockCount = c.restock_subscribed_count ?? 0;
+            const priority = getConversationPriority(c);
+            const priorityTone = getConversationPriorityTone(c);
 
             return (
               <li
@@ -236,10 +260,24 @@ export default function ConversationList({
 
                 <div className="conversation-main">
                   <div className="conversation-top-row">
-                    <span className="conversation-title">{title}</span>
+                    <div className="conversation-title-wrap">
+                      <span className="conversation-title">{title}</span>
+                      <span className={priorityTone}>{priority}</span>
+                    </div>
                     <div className="conversation-top-right">
                       {timeText && <span className="conversation-time">{timeText}</span>}
                       {unread > 0 && <span className="badge badge--unread">{unread}</span>}
+                    </div>
+                  </div>
+
+                  <div className="conversation-meta-row">
+                    <span className="conversation-phone">{formatPhonePretty(c.phone)}</span>
+                    <div className="conversation-badges">
+                      {c.agent_allowed ? (
+                        <span className="badge badge--handover">Human</span>
+                      ) : (
+                        <span className="badge badge--bot">Bot</span>
+                      )}
                     </div>
                   </div>
 
@@ -257,7 +295,9 @@ export default function ConversationList({
                           Stock Alert{restockCount > 1 ? ` ${restockCount}` : ""}
                         </span>
                       )}
-                      {!c.agent_allowed && <span className="badge badge--bot">Bot</span>}
+                      {unread > 0 && c.agent_allowed && (
+                        <span className="badge badge--needs-reply">Reply</span>
+                      )}
                     </div>
                   </div>
                 </div>

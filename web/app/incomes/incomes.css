@@ -750,3 +750,96 @@ html[data-theme="dark"] .incomes-root .ic-bulk {
 html[data-theme="dark"] .incomes-root .ic-bulk-tip {
   color: rgba(226, 232, 240, 0.70);
 }
+
+/* =========================================================
+   APPEND BELOW — Income reporting family enhancements
+   ========================================================= */
+
+.ic-report-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.9fr);
+  gap: 14px;
+  padding: 20px;
+  border: 1px solid var(--ic-border);
+  border-radius: 24px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(244, 250, 249, 0.84)),
+    radial-gradient(circle at top right, rgba(18, 140, 126, 0.14), transparent 48%);
+  box-shadow: var(--ic-shadow);
+}
+
+.ic-report-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ic-report-kicker,
+.ic-summary-label {
+  font-size: 11px;
+  font-weight: 780;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ic-accent-strong);
+}
+
+.ic-report-title {
+  font-size: clamp(28px, 4vw, 38px);
+  font-weight: 900;
+  letter-spacing: -0.04em;
+}
+
+.ic-report-text,
+.ic-summary-sub {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.55;
+  color: var(--ic-muted);
+}
+
+.ic-report-links,
+.ic-summary-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.ic-report-link,
+.ic-summary-card {
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(255, 255, 255, 0.8);
+  box-shadow: var(--ic-shadow-soft);
+}
+
+.ic-report-link {
+  color: var(--ic-text);
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 720;
+}
+
+.ic-summary-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.ic-summary-value {
+  font-size: 28px;
+  font-weight: 900;
+  letter-spacing: -0.04em;
+  color: var(--ic-text);
+}
+
+@media (max-width: 980px) {
+  .ic-report-hero,
+  .ic-summary-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+html[data-theme="dark"] .incomes-root .ic-report-hero,
+html[data-theme="dark"] .incomes-root .ic-report-link,
+html[data-theme="dark"] .incomes-root .ic-summary-card {
+  background: rgba(10, 15, 30, 0.92);
+  border-color: rgba(226, 232, 240, 0.12);
+}

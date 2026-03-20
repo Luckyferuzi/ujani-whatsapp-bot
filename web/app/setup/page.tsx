@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { useAuth } from "@/components/AuthProvider";
+import { useCachedQuery } from "@/hooks/useCachedQuery";
 
 type CompanySettings = {
   company_name: string;
@@ -14,6 +15,13 @@ type CompanySettings = {
   app_id: string | null;
   graph_api_version: string | null;
   catalog_enabled: boolean;
+  business_content: {
+    welcome_intro: { sw?: string; en?: string };
+    pickup_info: { sw?: string; en?: string };
+    support_phone: string | null;
+    support_email: string | null;
+    payment_methods: Array<{ id: string; label: string; value: string }>;
+  };
   is_setup_complete: boolean;
 };
 
@@ -88,9 +96,16 @@ type ReconcileStats = {
   messages_moved: number;
 };
 
+type SetupBootstrap = {
+  settings: CompanySettings;
+  runtime: RuntimeConfig;
+  diagnostics: SetupDiagnostics;
+  catalogDiagnostics: CatalogDiagnostics;
+};
+
 export default function SetupPage() {
   const { user } = useAuth();
-  const [loading, setLoading] = useState(true);
+  const [bootstrapped, setBootstrapped] = useState(false);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [completing, setCompleting] = useState(false);
@@ -112,6 +127,17 @@ export default function SetupPage() {
     app_id: "",
     graph_api_version: "v19.0",
     catalog_enabled: false,
+    business_content: {
+      welcome_intro: { sw: "", en: "" },
+      pickup_info: { sw: "", en: "" },
+      support_phone: "",
+      support_email: "",
+      payment_methods: [
+        { id: "PAY_1", label: "", value: "" },
+        { id: "PAY_2", label: "", value: "" },
+        { id: "PAY_3", label: "", value: "" },
+      ],
+    },
     is_setup_complete: false,
   });
 
@@ -119,30 +145,50 @@ export default function SetupPage() {
   const [testTo, setTestTo] = useState("");
   const [testText, setTestText] = useState("Ujani setup test message.");
 
-  useEffect(() => {
-    if (!user) return;
+  const {
+    data: bootstrap,
+    error: bootstrapError,
+    isLoading: loading,
+    isRefreshing,
+    mutate: mutateBootstrap,
+  } = useCachedQuery(
+    user ? "setup:bootstrap" : null,
+    async (): Promise<SetupBootstrap> => {
+      const [s, r, d, cd] = await Promise.all([
+        api<{ ok: true; settings: CompanySettings }>("/api/company/settings"),
+        api<{ ok: true; config: RuntimeConfig }>("/api/company/runtime-config"),
+        api<{ ok: true; diagnostics: SetupDiagnostics }>("/api/setup/diagnostics"),
+        api<{ ok: true; diagnostics: CatalogDiagnostics }>("/api/setup/catalog-diagnostics"),
+      ]);
 
-    (async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const [s, r] = await Promise.all([
-          api<{ ok: true; settings: CompanySettings }>("/api/company/settings"),
-          api<{ ok: true; config: RuntimeConfig }>("/api/company/runtime-config"),
-        ]);
-        setSettings((prev) => ({ ...prev, ...s.settings }));
-        setRuntime(r.config);
-        const d = await api<{ ok: true; diagnostics: SetupDiagnostics }>("/api/setup/diagnostics");
-        setDiag(d.diagnostics);
-        const cd = await api<{ ok: true; diagnostics: CatalogDiagnostics }>("/api/setup/catalog-diagnostics");
-        setCatalogDiag(cd.diagnostics);
-      } catch (e: any) {
-        setError(e?.message ?? "Failed to load setup data.");
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [user]);
+      return {
+        settings: s.settings,
+        runtime: r.config,
+        diagnostics: d.diagnostics,
+        catalogDiagnostics: cd.diagnostics,
+      };
+    },
+    { enabled: !!user, staleMs: 30_000 }
+  );
+
+  useEffect(() => {
+    if (!user) {
+      setBootstrapped(false);
+      return;
+    }
+    if (!bootstrap || bootstrapped) return;
+
+    setSettings((prev) => ({ ...prev, ...bootstrap.settings }));
+    setRuntime(bootstrap.runtime);
+    setDiag(bootstrap.diagnostics);
+    setCatalogDiag(bootstrap.catalogDiagnostics);
+    setBootstrapped(true);
+  }, [bootstrap, bootstrapped, user]);
+
+  useEffect(() => {
+    if (!bootstrapError) return;
+    setError(bootstrapError.message ?? "Failed to load setup data.");
+  }, [bootstrapError]);
 
   async function saveSettings(e: FormEvent) {
     e.preventDefault();
@@ -160,6 +206,21 @@ export default function SetupPage() {
         app_id: settings.app_id || null,
         graph_api_version: settings.graph_api_version || "v19.0",
         catalog_enabled: !!settings.catalog_enabled,
+        business_content: {
+          welcome_intro: {
+            sw: settings.business_content?.welcome_intro?.sw || "",
+            en: settings.business_content?.welcome_intro?.en || "",
+          },
+          pickup_info: {
+            sw: settings.business_content?.pickup_info?.sw || "",
+            en: settings.business_content?.pickup_info?.en || "",
+          },
+          support_phone: settings.business_content?.support_phone || null,
+          support_email: settings.business_content?.support_email || null,
+          payment_methods: (settings.business_content?.payment_methods || []).filter(
+            (item) => item.id.trim() && item.label.trim() && item.value.trim()
+          ),
+        },
       };
       const res = await api<{ ok: true; settings: CompanySettings }>("/api/company/settings", {
         method: "PUT",
@@ -167,6 +228,12 @@ export default function SetupPage() {
         body: JSON.stringify(payload),
       });
       setSettings((prev) => ({ ...prev, ...res.settings }));
+      if (bootstrap) {
+        mutateBootstrap((current) => ({
+          ...(current ?? bootstrap),
+          settings: { ...(current?.settings ?? bootstrap.settings), ...res.settings },
+        }));
+      }
       setOkMsg("Settings saved.");
     } catch (e: any) {
       setError(e?.message ?? "Failed to save settings.");
@@ -218,6 +285,13 @@ export default function SetupPage() {
       setDiag(d.diagnostics);
       const cd = await api<{ ok: true; diagnostics: CatalogDiagnostics }>("/api/setup/catalog-diagnostics");
       setCatalogDiag(cd.diagnostics);
+      if (bootstrap) {
+        mutateBootstrap((current) => ({
+          ...(current ?? bootstrap),
+          diagnostics: d.diagnostics,
+          catalogDiagnostics: cd.diagnostics,
+        }));
+      }
       setOkMsg("Diagnostics refreshed.");
     } catch (e: any) {
       setError(e?.message ?? "Failed to load diagnostics.");
@@ -238,12 +312,24 @@ export default function SetupPage() {
       setOkMsg("Contact reconciliation completed.");
       const d = await api<{ ok: true; diagnostics: SetupDiagnostics }>("/api/setup/diagnostics");
       setDiag(d.diagnostics);
+      if (bootstrap) {
+        mutateBootstrap((current) => ({
+          ...(current ?? bootstrap),
+          diagnostics: d.diagnostics,
+        }));
+      }
     } catch (e: any) {
       setError(e?.message ?? "Failed to reconcile contacts.");
     } finally {
       setReconciling(false);
     }
   }
+
+  const blockingIssueCount = diag?.issues.filter((issue) => issue.level === "error").length ?? 0;
+  const missingRequiredCount = diag?.setup.missing_required.length ?? 0;
+  const paymentMethodCount = settings.business_content?.payment_methods?.filter(
+    (item) => item.id.trim() && item.label.trim() && item.value.trim()
+  ).length ?? 0;
 
   if (!user) return null;
   if (user.role !== "admin") {
@@ -254,17 +340,62 @@ export default function SetupPage() {
       </div>
     );
   }
-  if (loading) return <div>Loading setup...</div>;
+  if (loading && !bootstrapped) return <div>Loading setup...</div>;
 
   return (
-    <div>
-      <h1>Project Setup</h1>
-      <p>Split into two parts: WhatsApp connection variables and flow/runtime variables.</p>
+    <div className="setup-page">
+      <section className="setup-hero">
+        <div className="setup-hero-copy">
+          <div className="setup-kicker">System and business settings</div>
+          <h1>Business setup</h1>
+          <p>
+            Manage business identity, WhatsApp connection details, operator-facing payment instructions, and live
+            diagnostics from one setup workspace.
+          </p>
+          {isRefreshing ? <div className="setup-kicker">Refreshing setup data...</div> : null}
+        </div>
 
-      {error ? <p className="text-red-600">{error}</p> : null}
-      {okMsg ? <p className="text-green-700">{okMsg}</p> : null}
+        <div className="setup-hero-grid">
+          <div className="setup-metric">
+            <span className="setup-metric-label">Setup status</span>
+            <strong className="setup-metric-value">{settings.is_setup_complete ? "Complete" : "In progress"}</strong>
+            <span className="setup-metric-meta">mark complete only after test send and webhook checks pass</span>
+          </div>
+          <div className="setup-metric">
+            <span className="setup-metric-label">Blocking issues</span>
+            <strong className="setup-metric-value">{blockingIssueCount}</strong>
+            <span className="setup-metric-meta">errors currently reported by diagnostics</span>
+          </div>
+          <div className="setup-metric">
+            <span className="setup-metric-label">Payment rails</span>
+            <strong className="setup-metric-value">{paymentMethodCount}</strong>
+            <span className="setup-metric-meta">configured payment instructions for operators and chatbot</span>
+          </div>
+        </div>
+      </section>
 
-      <div className="rounded-xl border p-4 mt-4">
+      <div className="setup-summary-grid">
+        <div className="setup-summary-card">
+          <div className="setup-summary-label">Missing required fields</div>
+          <div className="setup-summary-value">{missingRequiredCount}</div>
+          <div className="setup-summary-sub">required WhatsApp config values still not present</div>
+        </div>
+        <div className="setup-summary-card">
+          <div className="setup-summary-label">Catalog state</div>
+          <div className="setup-summary-value">{catalogDiag?.healthy ? "Healthy" : settings.catalog_enabled ? "Needs attention" : "Disabled"}</div>
+          <div className="setup-summary-sub">catalog availability based on current diagnostics</div>
+        </div>
+        <div className="setup-summary-card">
+          <div className="setup-summary-label">Inbox activity</div>
+          <div className="setup-summary-value">{diag?.inbox.conversations ?? 0}</div>
+          <div className="setup-summary-sub">conversation threads currently present in the inbox</div>
+        </div>
+      </div>
+
+      {error ? <p className="text-red-600 setup-status-banner setup-status-banner--error">{error}</p> : null}
+      {okMsg ? <p className="text-green-700 setup-status-banner setup-status-banner--ok">{okMsg}</p> : null}
+
+      <div className="rounded-xl border p-4 mt-4 setup-section-card">
         <h2 className="font-semibold">1) WhatsApp Connection (editable in interface)</h2>
         <p className="text-sm mb-3">
           These variables connect this project to Meta WhatsApp API.
@@ -278,6 +409,168 @@ export default function SetupPage() {
               value={settings.company_name ?? ""}
               onChange={(e) => setSettings((s) => ({ ...s, company_name: e.target.value }))}
             />
+          </div>
+
+          <div className="border rounded p-3 space-y-3">
+            <div className="font-semibold">Business Content</div>
+            <p className="text-sm">
+              These values keep the current flow logic intact while moving brand-owned text and payment rails into config.
+            </p>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label>Welcome intro (Swahili)</label>
+                <textarea
+                  className="w-full border rounded p-2 min-h-24"
+                  value={settings.business_content?.welcome_intro?.sw ?? ""}
+                  onChange={(e) =>
+                    setSettings((s) => ({
+                      ...s,
+                      business_content: {
+                        ...s.business_content,
+                        welcome_intro: { ...s.business_content.welcome_intro, sw: e.target.value },
+                      },
+                    }))
+                  }
+                />
+              </div>
+              <div>
+                <label>Welcome intro (English)</label>
+                <textarea
+                  className="w-full border rounded p-2 min-h-24"
+                  value={settings.business_content?.welcome_intro?.en ?? ""}
+                  onChange={(e) =>
+                    setSettings((s) => ({
+                      ...s,
+                      business_content: {
+                        ...s.business_content,
+                        welcome_intro: { ...s.business_content.welcome_intro, en: e.target.value },
+                      },
+                    }))
+                  }
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label>Pickup / office info (Swahili)</label>
+                <textarea
+                  className="w-full border rounded p-2 min-h-24"
+                  value={settings.business_content?.pickup_info?.sw ?? ""}
+                  onChange={(e) =>
+                    setSettings((s) => ({
+                      ...s,
+                      business_content: {
+                        ...s.business_content,
+                        pickup_info: { ...s.business_content.pickup_info, sw: e.target.value },
+                      },
+                    }))
+                  }
+                />
+              </div>
+              <div>
+                <label>Pickup / office info (English)</label>
+                <textarea
+                  className="w-full border rounded p-2 min-h-24"
+                  value={settings.business_content?.pickup_info?.en ?? ""}
+                  onChange={(e) =>
+                    setSettings((s) => ({
+                      ...s,
+                      business_content: {
+                        ...s.business_content,
+                        pickup_info: { ...s.business_content.pickup_info, en: e.target.value },
+                      },
+                    }))
+                  }
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label>Support phone / WhatsApp</label>
+                <input
+                  className="w-full border rounded p-2"
+                  value={settings.business_content?.support_phone ?? ""}
+                  onChange={(e) =>
+                    setSettings((s) => ({
+                      ...s,
+                      business_content: { ...s.business_content, support_phone: e.target.value },
+                    }))
+                  }
+                />
+              </div>
+              <div>
+                <label>Support email</label>
+                <input
+                  className="w-full border rounded p-2"
+                  value={settings.business_content?.support_email ?? ""}
+                  onChange={(e) =>
+                    setSettings((s) => ({
+                      ...s,
+                      business_content: { ...s.business_content, support_email: e.target.value },
+                    }))
+                  }
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <div className="font-medium">Payment methods</div>
+              {(settings.business_content?.payment_methods || []).map((item, index) => (
+                <div key={item.id || index} className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                  <input
+                    className="w-full border rounded p-2"
+                    placeholder="ID"
+                    value={item.id}
+                    onChange={(e) =>
+                      setSettings((s) => ({
+                        ...s,
+                        business_content: {
+                          ...s.business_content,
+                          payment_methods: s.business_content.payment_methods.map((row, rowIndex) =>
+                            rowIndex === index ? { ...row, id: e.target.value } : row
+                          ),
+                        },
+                      }))
+                    }
+                  />
+                  <input
+                    className="w-full border rounded p-2"
+                    placeholder="Label"
+                    value={item.label}
+                    onChange={(e) =>
+                      setSettings((s) => ({
+                        ...s,
+                        business_content: {
+                          ...s.business_content,
+                          payment_methods: s.business_content.payment_methods.map((row, rowIndex) =>
+                            rowIndex === index ? { ...row, label: e.target.value } : row
+                          ),
+                        },
+                      }))
+                    }
+                  />
+                  <input
+                    className="w-full border rounded p-2"
+                    placeholder="Number / account"
+                    value={item.value}
+                    onChange={(e) =>
+                      setSettings((s) => ({
+                        ...s,
+                        business_content: {
+                          ...s.business_content,
+                          payment_methods: s.business_content.payment_methods.map((row, rowIndex) =>
+                            rowIndex === index ? { ...row, value: e.target.value } : row
+                          ),
+                        },
+                      }))
+                    }
+                  />
+                </div>
+              ))}
+            </div>
           </div>
 
           <div>
@@ -390,7 +683,7 @@ export default function SetupPage() {
         </div>
       </div>
 
-      <div className="rounded-xl border p-4 mt-4">
+      <div className="rounded-xl border p-4 mt-4 setup-section-card">
         <h2 className="font-semibold">2) Flow / Runtime Variables (currently env-driven)</h2>
         <p className="text-sm mb-3">
           These affect delivery, pricing, and payment behavior during bot flow execution.
@@ -420,7 +713,7 @@ export default function SetupPage() {
         )}
       </div>
 
-      <div className="rounded-xl border p-4 mt-4">
+      <div className="rounded-xl border p-4 mt-4 setup-section-card">
         <h2 className="font-semibold">Finalize</h2>
         <p className="text-sm mb-3">
           Mark setup complete after successful test send and webhook configuration.
@@ -435,7 +728,7 @@ export default function SetupPage() {
         </div>
       </div>
 
-      <div className="rounded-xl border p-4 mt-4">
+      <div className="rounded-xl border p-4 mt-4 setup-section-card">
         <div className="flex items-center justify-between gap-3">
           <h2 className="font-semibold">Bot + Inbox Diagnostics</h2>
           <div className="flex items-center gap-2">
@@ -505,7 +798,7 @@ export default function SetupPage() {
         )}
       </div>
 
-      <div className="rounded-xl border p-4 mt-4">
+      <div className="rounded-xl border p-4 mt-4 setup-section-card">
         <h2 className="font-semibold">Catalog Health</h2>
         {!catalogDiag ? (
           <p className="text-sm mt-2">No catalog diagnostics yet.</p>

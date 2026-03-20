@@ -1,20 +1,82 @@
-import { env } from './config.js';
+import { getConfiguredPaymentMethods } from './runtime/companySettings.js';
 
-type Opt = { label: string; number: string };
+export const PAYMENT_STATUS_VALUES = [
+  "awaiting",
+  "verifying",
+  "paid",
+  "failed",
+] as const;
 
-function options(): Opt[] {
-  const opts: Opt[] = [];
-  if (env.LIPA_NAMBA_TILL) opts.push({ label: 'Tigo Lipa Namba', number: env.LIPA_NAMBA_TILL });
-  if (env.VODA_LNM_TILL)   opts.push({ label: 'Voda Lipa Namba', number: env.VODA_LNM_TILL });
-  if (env.VODA_P2P_MSISDN) opts.push({ label: 'Voda (Normal)',   number: env.VODA_P2P_MSISDN });
-  return opts;
+export type PaymentStatus = (typeof PAYMENT_STATUS_VALUES)[number];
+
+const ALLOWED_PAYMENT_STATUS_TRANSITIONS: Record<PaymentStatus, PaymentStatus[]> = {
+  awaiting: ["verifying", "paid", "failed"],
+  verifying: ["awaiting", "paid", "failed"],
+  paid: ["paid"],
+  failed: ["awaiting", "verifying", "paid", "failed"],
+};
+
+export function isPaymentStatus(value: string | null | undefined): value is PaymentStatus {
+  return PAYMENT_STATUS_VALUES.includes((value ?? "") as PaymentStatus);
+}
+
+export function canTransitionPaymentStatus(
+  from: string | null | undefined,
+  to: string | null | undefined
+): boolean {
+  if (!isPaymentStatus(from) || !isPaymentStatus(to)) return false;
+  if (from === to) return true;
+  return ALLOWED_PAYMENT_STATUS_TRANSITIONS[from].includes(to);
+}
+
+export function assertPaymentStatusTransition(
+  from: string | null | undefined,
+  to: string | null | undefined
+): PaymentStatus {
+  if (!isPaymentStatus(to)) {
+    throw new Error(`invalid_payment_status:${String(to ?? "")}`);
+  }
+  if (!isPaymentStatus(from)) {
+    throw new Error(`invalid_payment_status:${String(from ?? "")}`);
+  }
+  if (!canTransitionPaymentStatus(from, to)) {
+    throw new Error(`invalid_payment_transition:${from}->${to}`);
+  }
+  return to;
+}
+
+export function accumulatePaymentAmount(
+  currentAmount: number | null | undefined,
+  additionalAmount: number | null | undefined
+): number {
+  const current = Number(currentAmount ?? 0);
+  const delta = Number(additionalAmount ?? 0);
+  if (!Number.isFinite(current) || current < 0) {
+    throw new Error("invalid_current_payment_amount");
+  }
+  if (!Number.isFinite(delta) || delta < 0) {
+    throw new Error("invalid_additional_payment_amount");
+  }
+  return current + delta;
+}
+
+export function computeRemainingPayment(
+  orderTotalTzs: number | null | undefined,
+  paidAmountTzs: number | null | undefined
+): number {
+  const total = Math.max(0, Number(orderTotalTzs ?? 0) || 0);
+  const paid = Math.max(0, Number(paidAmountTzs ?? 0) || 0);
+  return Math.max(total - paid, 0);
 }
 
 /** Build the payment instruction text (numbers only; no account name) */
 export function buildPaymentMessage(totalTZS: number): string {
   const amount = (Math.floor(totalTZS) || 0).toLocaleString('sw-TZ');
   const header = `*Malipo (TZS):* ${amount}\n`;
-  const opts = options();
+  const opts = getConfiguredPaymentMethods().map((item) => ({
+    label: item.label,
+    number: item.value,
+  }));
 
   if (!opts.length) {
     return header +

@@ -1,7 +1,12 @@
 // src/routes/webhook.ts
 import { Router, Request, Response } from 'express';
 import { env } from '../config.js';
-import { getVerifyTokenEffective } from '../runtime/companySettings.js';
+import {
+  getBusinessIntroText,
+  getConfiguredPaymentMethods,
+  getPickupInfoText,
+  getVerifyTokenEffective,
+} from '../runtime/companySettings.js';
 import { t, Lang } from '../i18n.js';
 import {
   sendText,
@@ -21,7 +26,15 @@ import {
   resolveProductForSkuAsync,
 } from '../menu.js';
 
-import { getSession, saveSession, resetSession } from '../session.js';
+import {
+  type CartItem,
+  type FlowStep,
+  loadSession,
+  resetSession,
+  saveSession,
+  type Session,
+  updateSession,
+} from '../session.js';
 // backend/src/routes/webhook.ts
 import {
   upsertCustomerByWa,
@@ -35,9 +48,14 @@ import {
   findLatestOrderByCustomerName,
   updateOrderPaymentMode,
   getOrdersForCustomer,
+  applyOrderStatusAudit,
+  submitPaymentProof,
   upsertWhatsAppPhoneNumber,
 } from "../db/queries.js";
 import { getJsonSetting } from "../db/settings.js";
+import { isValidManualPaymentProofText } from "../utils/proofValidation.js";
+import { MAX_TEXT_CHARS, splitLongText } from "../utils/messageSafety.js";
+import { createWebhookProcessor } from "../services/chat/webhookProcessor.js";
 
 import { emit } from '../sockets.js';
 import db from '../db/knex.js';
@@ -49,6 +67,9 @@ export const webhook = Router();
  */
 
 function getDevIntroText(lang: Lang): string | null {
+  const configured = getBusinessIntroText(lang);
+  if (configured) return configured;
+
   const enabled = (process.env.DEV_INTRO_ENABLED ?? "true").toLowerCase() !== "false";
   if (!enabled) return null;
 
@@ -60,11 +81,30 @@ function getDevIntroText(lang: Lang): string | null {
   return text.length ? text : null;
 }
 
+const webhookProcessor = createWebhookProcessor({
+  getDevIntroText,
+  getInvalidQuantityText: (lang) => t(lang, "cart.ask_quantity_invalid"),
+  getAddedWithQtyText: (lang, item) =>
+    t(lang, "cart.added_with_qty", {
+      title: item.name,
+      qty: String(item.qty),
+    }),
+  showEntryMenu,
+  showMainMenu,
+  showCart,
+  onInteractive,
+  onFlow,
+  onSessionMessage,
+  showOrderDetailsAndActions,
+  isAgentAllowed,
+});
+
 async function sendBotText(user: string, body: string, phoneNumberId?: string | null) {
   // 1) Send to WhatsApp (use the correct business number if known)
   await sendText(user, body, { phoneNumberId: phoneNumberId ?? null });
 
-  // 2) Persist and emit for the inbox
+  // 2) Persist and emit for the inbox. The admin thread view depends on bot
+  // replies being logged here, so keep this side effect aligned with sendText.
   try {
     const { id: customerId } = await upsertCustomerByWa(user, undefined, user);
     const conversationId = await getOrCreateConversationForPhone(
@@ -82,31 +122,6 @@ async function sendBotText(user: string, body: string, phoneNumberId?: string | 
   } catch (err) {
     console.error("[webhook] failed to log bot message:", err);
   }
-}
-
-const MAX_TEXT_CHARS = 1200;
-
-function splitLongText(body: string, maxLen = MAX_TEXT_CHARS): string[] {
-  const text = String(body ?? "").trim();
-  if (!text) return [];
-  if (text.length <= maxLen) return [text];
-
-  const chunks: string[] = [];
-  let remaining = text;
-
-  while (remaining.length > maxLen) {
-    let cut = remaining.lastIndexOf("\n\n", maxLen);
-    if (cut < Math.floor(maxLen * 0.6)) cut = remaining.lastIndexOf("\n", maxLen);
-    if (cut < Math.floor(maxLen * 0.6)) cut = remaining.lastIndexOf(" ", maxLen);
-    if (cut < Math.floor(maxLen * 0.6)) cut = maxLen;
-
-    const part = remaining.slice(0, cut).trim();
-    if (part) chunks.push(part);
-    remaining = remaining.slice(cut).trim();
-  }
-
-  if (remaining) chunks.push(remaining);
-  return chunks;
 }
 
 async function sendLongTextSafe(
@@ -321,51 +336,9 @@ function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number) {
 function otherLang(l: Lang): Lang { return l === 'sw' ? 'en' : 'sw'; }
 function normId(id?: string) { return (id ?? '').toString().trim().toUpperCase(); }
 
-/** Payment choices from your envs first, then PAYMENT_n_* as fallback */
+/** Payment choices from settings first, then env fallback */
 function getPaymentOptions() {
-  const opts: Array<{ id: string; label: string; value: string }> = [];
-
-  // 1) MIXXBYYAS LIPANAMB (Lipa Namba Till)
-  const mixxTill = process.env.LIPA_NAMBA_TILL;
-  const mixxName = process.env.LIPA_NAMBA_NAME;
-  if (mixxTill) {
-    opts.push({
-      id: 'PAY_MIXX',
-      label: 'MIXXBYYAS LIPANAMB',
-      value: mixxName ? `${mixxTill} • ${mixxName}` : mixxTill,
-    });
-  }
-
-  // 2) VODALIPANMBA (Vodacom Lipa Namba Till)
-  const vodaTill = process.env.VODA_LNM_TILL;
-  const vodaName = process.env.VODA_LNM_NAME;
-  if (vodaTill) {
-    opts.push({
-      id: 'PAY_VODA_LNM',
-      label: 'VODALIPANMBA',
-      value: vodaName ? `${vodaTill} • ${vodaName}` : vodaTill,
-    });
-  }
-
-  // 3) Vodacom P2P
-  const vodaMsisdn = process.env.VODA_P2P_MSISDN;
-  const vodaP2PName = process.env.VODA_P2P_NAME;
-  if (vodaMsisdn) {
-    opts.push({
-      id: 'PAY_VODA_P2P',
-      label: 'Voda P2P',
-      value: vodaP2PName ? `${vodaMsisdn} • ${vodaP2PName}` : vodaMsisdn,
-    });
-  }
-
-  // 4) Generic fallback
-  for (let i = 1; i <= 5; i++) {
-    const label = (process.env as any)[`PAYMENT_${i}_LABEL`];
-    const value = (process.env as any)[`PAYMENT_${i}_NUMBER`];
-    if (label && value) opts.push({ id: `PAY_${i}`, label: String(label), value: String(value) });
-  }
-
-  return opts;
+  return getConfiguredPaymentMethods();
 }
 
 async function showPaymentOptions(user: string, lang: Lang, total: number) {
@@ -399,32 +372,7 @@ async function showPaymentOptions(user: string, lang: Lang, total: number) {
 
 function paymentChoiceById(id: string) {
   const N = (id || '').toUpperCase().trim();
-
-  if (N === 'PAY_MIXX') {
-    const till = process.env.LIPA_NAMBA_TILL;
-    const name = process.env.LIPA_NAMBA_NAME;
-    if (till) return { label: 'MIXXBYYAS LIPANAMB', value: name ? `${till} • ${name}` : till };
-  }
-  if (N === 'PAY_VODA_LNM') {
-    const till = process.env.VODA_LNM_TILL;
-    const name = process.env.VODA_LNM_NAME;
-    if (till) return { label: 'VODALIPANMBA', value: name ? `${till} • ${name}` : till };
-  }
-  if (N === 'PAY_VODA_P2P') {
-    const msisdn = process.env.VODA_P2P_MSISDN;
-    const name = process.env.VODA_P2P_NAME;
-    if (msisdn) return { label: 'Voda P2P', value: name ? `${msisdn} • ${name}` : msisdn };
-  }
-
-  if (N.startsWith('PAY_')) {
-    const n = Number(id.replace(/^PAY_/, ''));
-    if (!Number.isNaN(n)) {
-      const label = (process.env as any)[`PAYMENT_${n}_LABEL`];
-      const value = (process.env as any)[`PAYMENT_${n}_NUMBER`];
-      if (label && value) return { label, value };
-    }
-  }
-  return null;
+  return getPaymentOptions().find((item) => item.id.toUpperCase() === N) ?? null;
 }
 
 function getOrderStatusLabel(lang: Lang, rawStatus: string | null | undefined): string {
@@ -467,47 +415,86 @@ async function getOrdersForWhatsappUser(
 
 
 /* -------------------------------------------------------------------------- */
-/*                              In-memory state                               */
+/*                           Durable chat session state                       */
 /* -------------------------------------------------------------------------- */
 
-export type CartItem = { sku: string; name: string; qty: number; unitPrice: number };
-
-const USER_LANG = new Map<string, Lang>();
-const CART = new Map<string, CartItem[]>();
-const PENDING = new Map<string, CartItem | null>();
-const PENDING_QTY = new Map<string, { sku: string; name: string; unitPrice: number }>();
-
-// New granular flow (we keep Session.state minimal)
-type FlowStep =
-  | 'ASK_IF_DAR'       // buttons: inside/outside
-  | 'ASK_IN_DAR_MODE'  // buttons: delivery/pickup
-  | 'ASK_NAME_IN'
-  | 'ASK_PHONE_IN'
-  | 'ASK_GPS'
-  | 'ASK_NAME_PICK'
-  | 'ASK_PHONE_PICK'
-  | 'ASK_NAME_OUT'
-  | 'ASK_PHONE_OUT'
-  | 'ASK_REGION_OUT'
-  | 'TRACK_ASK_NAME';
-
-const FLOW = new Map<string, FlowStep | null>();
-const CONTACT = new Map<string, { name?: string; phone?: string; region?: string }>();
-
-function getLang(u: string): Lang { return USER_LANG.get(u) ?? 'sw'; }
-function setLang(u: string, l: Lang) { USER_LANG.set(u, l); }
-function getCart(u: string) { return CART.get(u) ?? []; }
-function setCart(u: string, x: CartItem[]) { CART.set(u, x); }
-function clearCart(u: string) { CART.delete(u); }
-function addToCart(u: string, it: CartItem) {
-  const arr = getCart(u);
-  const same = arr.find(c => c.sku === it.sku && c.unitPrice === it.unitPrice);
-  if (same) same.qty += it.qty; else arr.push({ ...it });
-  setCart(u, arr);
+async function getChatSession(user: string): Promise<Session> {
+  return loadSession(user);
 }
-function setPending(u: string, it: CartItem | null) { PENDING.set(u, it); }
-function pendingOrCart(u: string): CartItem[] { const p = PENDING.get(u); return p ? [p] : getCart(u); }
-function setFlow(u: string, step: FlowStep | null) { if (step) FLOW.set(u, step); else FLOW.delete(u); }
+
+async function patchChatSession(
+  user: string,
+  patch: Partial<Session>
+): Promise<Session> {
+  return updateSession(user, (current) => ({
+    ...current,
+    ...patch,
+  }));
+}
+
+async function getLang(u: string): Promise<Lang> {
+  return (await getChatSession(u)).lang;
+}
+
+async function setLang(u: string, l: Lang) {
+  await patchChatSession(u, { lang: l });
+}
+
+async function getCart(u: string): Promise<CartItem[]> {
+  return (await getChatSession(u)).cart;
+}
+
+async function setCart(u: string, x: CartItem[]) {
+  await patchChatSession(u, { cart: x });
+}
+
+async function clearCart(u: string) {
+  await patchChatSession(u, { cart: [] });
+}
+
+async function addToCart(u: string, it: CartItem) {
+  const arr = await getCart(u);
+  const same = arr.find((c) => c.sku === it.sku && c.unitPrice === it.unitPrice);
+  if (same) same.qty += it.qty;
+  else arr.push({ ...it });
+  await setCart(u, arr);
+}
+
+async function setPending(u: string, it: CartItem | null) {
+  await patchChatSession(u, { pending: it });
+}
+
+async function pendingOrCart(u: string): Promise<CartItem[]> {
+  const session = await getChatSession(u);
+  return session.pending ? [session.pending] : session.cart;
+}
+
+async function setPendingQty(
+  u: string,
+  value: { sku: string; name: string; unitPrice: number } | null
+) {
+  await patchChatSession(u, { pendingQty: value });
+}
+
+async function getPendingQty(u: string) {
+  return (await getChatSession(u)).pendingQty;
+}
+
+async function setFlow(u: string, step: FlowStep | null) {
+  await patchChatSession(u, { flow: step });
+}
+
+async function getFlow(u: string): Promise<FlowStep | null> {
+  return (await getChatSession(u)).flow;
+}
+
+async function getContact(u: string) {
+  return (await getChatSession(u)).contact;
+}
+
+async function setContact(u: string, contact: { name?: string; phone?: string; region?: string }) {
+  await patchChatSession(u, { contact });
+}
 
 /* -------------------------------------------------------------------------- */
 /*                                   Routes                                   */
@@ -542,507 +529,15 @@ webhook.post("/webhook", async (req: Request, res: Response) => {
       return res.sendStatus(200);
     }
 
-    const entries = req.body?.entry ?? [];
-    for (const entry of entries) {
+    const legacyEntries = req.body?.entry ?? [];
+    for (const entry of legacyEntries) {
       const changes = entry?.changes ?? [];
       for (const ch of changes) {
-        const field = ch?.field as string | undefined;
-        const contacts = ch?.value?.contacts ?? [];
-
-        // For multi-number setups, WhatsApp includes which business number
-        // received the message in value.metadata.phone_number_id.
-        const businessPhoneNumberId: string | null =
-          (ch?.value?.metadata?.phone_number_id as string | undefined) ?? null;
-        const displayPhoneNumber: string | null =
-          (ch?.value?.metadata?.display_phone_number as string | undefined) ?? null;
-
-        if (businessPhoneNumberId) {
-          // Track numbers in DB so we can switch defaults and debug connections.
-          await upsertWhatsAppPhoneNumber({
-            phone_number_id: businessPhoneNumberId,
-            display_phone_number: displayPhoneNumber,
-          }).catch(() => {});
-        }
-
-        // WhatsApp Business App Coexistence: capture SMB message echoes.
-        // These are messages sent by the business in the WhatsApp Business app after onboarding.
-        if (field === "smb_message_echoes") {
-          const echoes = ch?.value?.message_echoes ?? [];
-          for (const emsg of echoes) {
-            const to = emsg?.to as string | undefined;
-            if (!to) continue;
-
-            // Ensure replies continue from the same business number.
-            rememberCustomerPhoneNumberId(to, businessPhoneNumberId);
-
-            const matchingContact = contacts.find((c: any) => c.wa_id === to);
-            const profileName: string | undefined =
-              (matchingContact?.profile?.name as string | undefined) ??
-              (contacts[0]?.profile?.name as string | undefined);
-
-            const { id: customerId } = await upsertCustomerByWa(to, profileName);
-            const convoId = await getOrCreateConversationForPhone(
-              customerId,
-              businessPhoneNumberId
-            );
-
-            const type = (emsg?.type as string | undefined) ?? "unknown";
-            let body: string | null = null;
-            if (type === "text") body = emsg?.text?.body ?? null;
-            else if (type === "button") body = emsg?.button?.text ?? null;
-            else if (type === "interactive") body = JSON.stringify(emsg?.interactive ?? {});
-            else if (type === "image" || type === "video" || type === "audio" || type === "document") {
-              const mediaId = emsg?.[type]?.id ?? null;
-              body = mediaId ? `MEDIA:${type}:${mediaId}` : null;
-            } else {
-              body = JSON.stringify(emsg ?? {});
-            }
-
-            const [msgRow] = await db("messages")
-              .insert({
-                conversation_id: convoId,
-                wa_message_id: emsg?.id ?? null,
-                direction: "out",
-                type,
-                body,
-                status: "delivered",
-              })
-              .returning([
-                "id",
-                "conversation_id",
-                "wa_message_id",
-                "direction",
-                "type",
-                "body",
-                "status",
-                "created_at",
-              ]);
-
-            emit("message.created", { conversation_id: convoId, message: msgRow });
-          }
-
-          continue; // do not run the bot on echoes
-        }
-
-        // History / contact sync events can be quite large; ignore for now.
-        if (field === "history" || field === "smb_app_state_sync") {
-          console.log("[webhook] coexistence field received", field);
-          continue;
-        }
-
-        const messages = ch?.value?.messages ?? [];
-        if (!messages.length) {
-          console.log("[webhook] no messages in change payload", {
-            field,
-            businessPhoneNumberId,
-          });
-        }
-
-        for (const msg of messages) {
-    const from = msg?.from as string;
-    const mid = msg?.id as string | undefined;
-    if (!from) continue;
-
-    // Ensure subsequent bot replies use the same business number.
-    rememberCustomerPhoneNumberId(from, businessPhoneNumberId);
-
-    // Remember which business number this customer is currently talking to.
-    rememberCustomerPhoneNumberId(from, businessPhoneNumberId);
-
-    // Try to get WhatsApp profile name for this sender
-    const matchingContact = contacts.find(
-      (c: any) => c.wa_id === from
-    );
-    const profileName: string | undefined =
-      (matchingContact?.profile?.name as string | undefined) ??
-      (contacts[0]?.profile?.name as string | undefined);
-
-    // ...
-
-          //if (mid) await markAsRead(mid).catch(() => {});
-
-          const lang = getLang(from);
-          const s = getSession(from);
-
-          const type = msg?.type as string | undefined;
-          const text: string | undefined = type === 'text' ? (msg.text?.body as string) : undefined;
-
-          console.log("[webhook] inbound message received", {
-            from,
-            type: type ?? "unknown",
-            hasText: !!text,
-            textPreview: (text ?? "").slice(0, 120),
-            businessPhoneNumberId,
-            hasInteractive: type === "interactive",
-          });
-
-          // Interactive reply id (and debug)
-// Interactive reply id + label (what the user actually clicked)
-let interactiveId: string | undefined;
-let interactiveTitle: string | undefined;
-
-if (type === "interactive") {
-  const itype = msg.interactive?.type;
-  console.log(
-    "[webhook] interactive type:",
-    itype,
-    "payload:",
-    JSON.stringify(msg.interactive)
-  );
-
-  if (itype === "list_reply") {
-    interactiveId = msg.interactive?.list_reply?.id;
-    interactiveTitle = msg.interactive?.list_reply?.title || undefined;
-  }
-
-  if (itype === "button_reply") {
-    interactiveId = msg.interactive?.button_reply?.id;
-    interactiveTitle = msg.interactive?.button_reply?.title || undefined;
-  }
-}
-
-if (interactiveId) {
-  console.log("[webhook] calling onInteractive with", interactiveId, "for", from);
-
-  try {
-    await onInteractive(from, interactiveId, lang);
-  } catch (err) {
-    console.error("[webhook] onInteractive error", interactiveId, err);
-  }
-
-  continue;
-}
-
-
-          // Location pin
-          const hasLocation = type === 'location';
-          const lat = hasLocation ? Number(msg.location?.latitude) : undefined;
-          const lon = hasLocation ? Number(msg.location?.longitude) : undefined;
-
-// --- DB persistence + realtime for every inbound message ---
-let isNewCustomer = false;
-let isFirstInboundForCustomer = false;
-
-try {
-  // 1) Ensure customer + conversation exist (use WhatsApp profile name if available)
-  const up = await upsertCustomerByWa(from, profileName, from);
-  const customerId = up.id;
-  isNewCustomer = up.isNew;
-
-  // "New customer welcome" should depend on first inbound message ever,
-  // not on customer row creation (which can happen via admin/test sends).
-  const inboundBefore = await db("messages as m")
-    .join("conversations as c", "c.id", "m.conversation_id")
-    .where("c.customer_id", customerId)
-    .andWhere("m.direction", "inbound")
-    .first("m.id");
-  isFirstInboundForCustomer = !inboundBefore;
-
-  const conversationId = await getOrCreateConversationForPhone(
-    customerId,
-    businessPhoneNumberId
-  );
-
-  // 2) Pick a body to store (text, user's choice label, location coords, or media)
-  let bodyForDb: string | null = text ?? null;
-
-  // Interactive replies: store the label the customer saw (e.g. "Kuhusu bidhaa")
-  if (!bodyForDb && interactiveId) {
-    if (interactiveTitle && interactiveTitle.trim().length > 0) {
-      bodyForDb = interactiveTitle.trim();
-    } else {
-      // Fallback for older / weird payloads
-      bodyForDb = `[interactive:${interactiveId}]`;
-    }
-  }
-
-  // Location pin
-  if (
-    !bodyForDb &&
-    hasLocation &&
-    typeof lat === "number" &&
-    typeof lon === "number"
-  ) {
-    bodyForDb = `LOCATION ${lat},${lon}`;
-  }
-
-  // Media messages: store a marker MEDIA:<kind>:<mediaId>
-  if (!bodyForDb) {
-    if (type === "image" && msg.image?.id) {
-      bodyForDb = `MEDIA:image:${msg.image.id}`;
-    } else if (type === "video" && msg.video?.id) {
-      bodyForDb = `MEDIA:video:${msg.video.id}`;
-    } else if (type === "audio" && msg.audio?.id) {
-      bodyForDb = `MEDIA:audio:${msg.audio.id}`;
-    } else if (type === "document" && msg.document?.id) {
-      bodyForDb = `MEDIA:document:${msg.document.id}`;
-    }
-  }
-
-  // 3) Insert inbound message row
-  const inserted = await insertInboundMessage(
-    conversationId,
-    mid ?? null,
-    type ?? "text",
-    bodyForDb
-  );
-
-  // 4) Update conversation activity + emit realtime
-  await updateConversationLastUserMessageAt(conversationId);
-
-  emit("message.created", { conversation_id: conversationId, message: inserted });
-  emit("conversation.updated", {});
-} catch (err) {
-  console.error("inbound persist error:", err);
-}
-
-          // If this conversation is in agent mode, keep bot quiet unless customer
-          // explicitly asks to return (e.g. "hi", "menu", "start").
-          const rawTextForAgentGate = (text || "").trim();
-          const txtForAgentGate = rawTextForAgentGate.toLowerCase();
-          const returnToBotKeywords = new Set([
-            "hi",
-            "hello",
-            "mambo",
-            "start",
-            "anza",
-            "menu",
-            "menyu",
-            "bot",
-            "rudi",
-          ]);
-          const wantsReturnToBotFromText =
-            !interactiveId && returnToBotKeywords.has(txtForAgentGate);
-
-          const agentAllowed = await isAgentAllowed(from);
-          if (agentAllowed) {
-            if (!wantsReturnToBotFromText) {
-              console.log("[webhook] bot skip: agent mode still ON", {
-                from,
-                txtForAgentGate,
-                interactiveId: interactiveId ?? null,
-              });
-              continue;
-            }
-
-            const { id: customerId } = await upsertCustomerByWa(from, undefined, from);
-            const conversationId = await getOrCreateConversationForPhone(
-              customerId,
-              getRememberedPhoneNumberId(from) ?? null
-            );
-
-            await db("conversations")
-              .where({ id: conversationId })
-              .update({ agent_allowed: false });
-
-            emit("conversation.updated", { id: conversationId, agent_allowed: false });
-            console.log("[webhook] customer requested return-to-bot via text", {
-              from,
-              text: txtForAgentGate,
-              conversationId,
-            });
-            await showEntryMenu(from, lang);
-            continue;
-          }
-// If user sent a WhatsApp Catalog cart/order, convert it to our internal cart and continue with checkout
-if (type === "order" && Array.isArray(msg.order?.product_items) && msg.order.product_items.length > 0) {
-  clearCart(from);
-
-  const productItems = msg.order.product_items as any[];
-
-  // Unique requested SKUs from catalog
-  const requestedSkus = Array.from(
-    new Set(
-      productItems
-        .map((it) => String(it?.product_retailer_id ?? "").trim())
-        .filter(Boolean)
-    )
-  );
-
-  // Load matching products from our DB
-  const rows = await db("products")
-    .whereIn("sku", requestedSkus)
-    .select<{ sku: string; name: string; price_tzs: number }[]>("sku", "name", "price_tzs");
-
-  const bySku = new Map(rows.map((r) => [r.sku, r]));
-
-  // Build cart using only matched products
-  for (const it of productItems) {
-    const sku = String(it?.product_retailer_id ?? "").trim();
-    if (!sku) continue;
-
-    const qty = Math.max(1, Math.floor(Number(it?.quantity ?? 1)));
-    const p = bySku.get(sku);
-    if (!p) continue;
-
-    addToCart(from, {
-      sku,
-      name: p.name,
-      qty,
-      unitPrice: Number(p.price_tzs ?? 0),
-    });
-  }
-
-  const cartNow = getCart(from);
-
-  // Detect missing SKUs (catalog had them, our DB doesn't)
-  const missingSkus = requestedSkus.filter((sku) => !bySku.has(sku));
-
-  if (missingSkus.length > 0) {
-    const shown = missingSkus.slice(0, 5).join(", ");
-    const more = missingSkus.length > 5 ? " ..." : "";
-
-    await sendBotText(
-      from,
-      lang === "sw"
-        ? `⚠️ Baadhi ya bidhaa ulizochagua kwenye Catalog hazipo kwenye mfumo wetu bado: ${shown}${more}\nUnaweza kuagiza hizo kwa chat kwa kubonyeza *Oda kwa Chat* au kuandika *MENU*.`
-        : `⚠️ Some items you selected from the catalog are not available in our system yet: ${shown}${more}\nYou can order those via chat by pressing *Order by Chat* or typing *MENU*.`
-    );
-  }
-
-  if (!cartNow.length) {
-    await sendBotText(
-      from,
-      lang === "sw"
-        ? "Nimepokea oda kutoka Catalog lakini sijaweza kulinganisha bidhaa kwenye mfumo. Tafadhali bonyeza *Oda kwa Chat* au andika *MENU*."
-        : "I received a catalog order but couldn’t match products in the system. Press *Order by Chat* or type *MENU*."
-    );
-    await showEntryMenu(from, lang);
-    continue;
-  }
-
-  await sendBotText(
-    from,
-    lang === "sw"
-      ? "✅ Nimepokea bidhaa ulizochagua kutoka Catalog. Hapa chini ni muhtasari wa kikapu chako:"
-      : "✅ I received the items you selected from the catalog. Here is your cart summary:"
-  );
-
-  await showCart(from, lang);
-  continue;
-}
-
-
-          // DEV INTRO (send once for brand-new customers, then continue normal bot flow)
-const devIntro = getDevIntroText(lang);
-if (isFirstInboundForCustomer) {
-  if (devIntro) {
-    await sendBotText(from, devIntro, businessPhoneNumberId);
-  }
-  await showMainMenu(from, lang);
-  continue;
-}
-
-
-          // --- end DB persistence + realtime ---
-
-          // --- end DB persistence + realtime ---
-          
-          // 1) handle interactive first
-          // 1) handle interactive first
-          // 1) handle interactive first
-          if (interactiveId) {
-            await onInteractive(from, interactiveId, lang);
-            continue;
-          }
-
-          // 2) Extract the raw text (for list selections etc.)
-          const rawText = (text || "").trim();
-
-          // If the text looks like an order line with "(#<id>)", show order details.
-          // This is a fallback so that even if the interactive payload is weird,
-          // selecting an order from "Angalia oda zako" still works.
-          if (rawText) {
-            const match = rawText.match(/#(\d+)\)/);
-            if (match) {
-              const orderId = Number(match[1]);
-              if (Number.isFinite(orderId)) {
-                await showOrderDetailsAndActions(from, orderId, lang);
-                continue;
-              }
-            }
-          }
-
-          // 3) if we are waiting for a quantity for a product, handle that first
-          if (rawText && PENDING_QTY.has(from)) {
-
-            const pending = PENDING_QTY.get(from)!;
-            const qty = Number.parseInt(rawText, 10);
-
-            if (!Number.isFinite(qty) || qty <= 0) {
-              await sendBotText(from, t(lang, "cart.ask_quantity_invalid"));
-              continue;
-            }
-
-            const item: CartItem = {
-              sku: pending.sku,
-              name: pending.name,
-              qty,
-              unitPrice: pending.unitPrice,
-            };
-
-            addToCart(from, item);
-            PENDING_QTY.delete(from);
-
-            await sendBotText(
-              from,
-              t(lang, "cart.added_with_qty", {
-                title: item.name,
-                qty: String(item.qty),
-              })
-            );
-
-            // Show updated cart summary (already formats "title ×qty — price")
-            await showCart(from, lang);
-
-            continue;
-          }
-
-          // 3) start menu on greetings if idle (existing logic)
-          const activeFlow = FLOW.get(from);
-          const txt = rawText.toLowerCase();
-
-
-// 1) start menu on greetings if idle
-if ((!s || s.state === "IDLE") && !activeFlow) {
-  if (
-    !text ||
-    ["hi", "hello", "mambo", "start", "anza", "menu", "menyu"].includes(txt)
-  ) {
-    console.log("[webhook] greeting/menu trigger -> showMainMenu", {
-      from,
-      txt,
-      sessionState: s?.state ?? "none",
-    });
-    await showMainMenu(from, lang);
-    continue;
-  }
-}
-
-
-          // 3) route
-          if (activeFlow) {
-            console.log("[webhook] routing to onFlow", {
-              from,
-              flow: activeFlow,
-              textPreview: (text ?? "").slice(0, 120),
-              hasLocation,
-            });
-            await onFlow(from, activeFlow, { text, hasLocation, lat, lon }, lang);
-          } else {
-            console.log("[webhook] routing to onSessionMessage", {
-              from,
-              state: s?.state ?? "none",
-              textPreview: (text ?? "").slice(0, 120),
-              hasLocation,
-            });
-            await onSessionMessage(from, { text, hasLocation, lat, lon }, lang);
-          }
-
-        }
+        await webhookProcessor.processChange(ch);
       }
     }
-    res.sendStatus(200);
+
+    return res.sendStatus(200);
   } catch (e) {
     console.error('webhook error:', e);
     res.sendStatus(200);
@@ -1170,7 +665,7 @@ async function showMainMenu(user: string, lang: Lang) {
 
 
 async function showCart(user: string, lang: Lang) {
-  const items = getCart(user);
+  const items = await getCart(user);
   if (!items.length) return sendBotText(user, t(lang, "cart.empty"));
 
   const lines = [t(lang, "cart.summary_header")];
@@ -1359,8 +854,6 @@ async function showVariants(user: string, parentSku: string, lang: Lang) {
 /* -------------------------------------------------------------------------- */
 
 const OUTSIDE_DAR_FEE = 10_000;
-const PICKUP_INFO_SW = 'Tupo Keko Modern Furniture, mkabala na Omax Bar. Wasiliana nasi kwa maelezo zaidi.';
-const PICKUP_INFO_EN = 'We are at Keko Modern Furniture, opposite Omax Bar. Contact us for more details.';
 
 async function onInteractive(user: string, id: string, lang: Lang) {
   const N = normId(id);
@@ -1479,7 +972,7 @@ if (id === "ACTION_ORDER_BY_CHAT") {
 
   /* --------- Location / service selection FIRST (robust to truncation) -------- */
   if (N.startsWith('DAR_INSIDE')) {
-    setFlow(user, 'ASK_IN_DAR_MODE');
+    await setFlow(user, 'ASK_IN_DAR_MODE');
     await sendButtonsMessageSafe(user, t(lang, 'flow.choose_in_dar_mode'), [
       { id: 'IN_DAR_DELIVERY', title: t(lang, 'in_dar.delivery') },
       { id: 'IN_DAR_PICKUP',   title: t(lang, 'in_dar.pickup') },
@@ -1487,32 +980,29 @@ if (id === "ACTION_ORDER_BY_CHAT") {
     return;
   }
   if (N.startsWith('DAR_OUTSIDE')) {
-    setFlow(user, 'ASK_NAME_OUT');
-    CONTACT.set(user, {});
+    await setFlow(user, 'ASK_NAME_OUT');
+    await setContact(user, {});
     await sendBotText(user, t(lang, 'flow.ask_name'));
     return;
   }
   if (N.startsWith('IN_DAR_DELIVERY')) {
-    setFlow(user, 'ASK_NAME_IN');
-    CONTACT.set(user, {});
+    await setFlow(user, 'ASK_NAME_IN');
+    await setContact(user, {});
     await sendBotText(user, t(lang, 'flow.ask_name'));
     return;
   }
   if (N.startsWith('IN_DAR_PICKUP')) {
   // ✅ New behavior: ONLY send the pickup message; no name/phone/muhtasari
-  setFlow(user, null);
-  await sendBotText(user, (lang === 'sw'
-    ? 'Tupo Keko Modern Furniture, mkabala na Omax Bar. Wasiliana nasi kwa maelezo zaidi.'
-    : 'We are at Keko Modern Furniture, opposite Omax Bar. Contact us for more details.'
-  ));
+  await setFlow(user, null);
+  await sendBotText(user, getPickupInfoText(lang));
   return;
 }
 
   /* ------------------------ Payment mode (Dar customers) ---------------------- */
   if (id === "PAYMODE_PHONE") {
-    const s = getSession(user);
+    const s = await loadSession(user);
     const total = s.price ?? 0;
-    const lastOrderId = (s as any).lastOrderId as number | undefined;
+    const lastOrderId = s.lastOrderId ?? undefined;
 
     // Try to mark the order as "prepay" in DB
     if (lastOrderId) {
@@ -1531,8 +1021,8 @@ if (id === "ACTION_ORDER_BY_CHAT") {
   }
 
   if (id === "PAYMODE_COD") {
-    const s = getSession(user);
-    const lastOrderId = (s as any).lastOrderId as number | undefined;
+    const s = await loadSession(user);
+    const lastOrderId = s.lastOrderId ?? undefined;
 
     // Mark this order as COD
     if (lastOrderId) {
@@ -1551,9 +1041,9 @@ if (id === "ACTION_ORDER_BY_CHAT") {
     const choice = paymentChoiceById(id);
     if (choice) {
       await sendBotText(user, t(lang, 'payment.selected', { label: choice.label, value: choice.value }));
-      const s = getSession(user);
+      const s = await loadSession(user);
       s.state = 'WAIT_PROOF';
-      saveSession(user, s);
+      await saveSession(user, s);
       await sendBotText(user, t(lang, 'proof.ask'));
       return;
     }
@@ -1565,8 +1055,8 @@ if (id === "ACTION_ORDER_BY_CHAT") {
   if (id === 'ACTION_VIEW_CART') return showCart(user, lang);
 
   if (id === 'ACTION_CHECKOUT') {
-    setFlow(user, 'ASK_IF_DAR');
-    CONTACT.set(user, {});
+    await setFlow(user, 'ASK_IF_DAR');
+    await setContact(user, {});
     await sendButtonsMessageSafe(user, t(lang, 'flow.choose_dar'), [
       { id: 'DAR_INSIDE',  title: t(lang, 'flow.option_inside_dar') },
       { id: 'DAR_OUTSIDE', title: t(lang, 'flow.option_outside_dar') },
@@ -1575,8 +1065,8 @@ if (id === "ACTION_ORDER_BY_CHAT") {
   }
 
     if (id === 'ACTION_CHANGE_LANGUAGE') {
-    const next = otherLang(getLang(user));
-    setLang(user, next);
+    const next = otherLang(await getLang(user));
+    await setLang(user, next);
     return showMainMenu(user, next);
   }
 
@@ -1827,9 +1317,9 @@ if (id === 'ACTION_TALK_TO_AGENT') {
     }
 
     // Remember this order as the "current order being paid"
-    const s = getSession(user);
-    (s as any).lastOrderId = order.id;
-    saveSession(user, s);
+    const s = await loadSession(user);
+    s.lastOrderId = order.id;
+    await saveSession(user, s);
 
     // Tell the user which order they're paying for
     await sendBotText(
@@ -1952,6 +1442,16 @@ if (id.startsWith("ORDER_CANCEL_")) {
       order_id: orderId,
     });
   }
+
+  await applyOrderStatusAudit({
+    orderId,
+    previousStatus: prevStatus as any,
+    nextStatus: "cancelled",
+    source: "whatsapp",
+    payload: {
+      cancelled_by_customer: true,
+    },
+  });
 
   await sendBotText(
     user,
@@ -2155,7 +1655,7 @@ if (id.startsWith("ORDER_CANCEL_")) {
     // ---------------- NEW: ADD asks for quantity first ----------------
     if (mode === "ADD") {
       // Remember which product we are adding for this user
-      PENDING_QTY.set(user, {
+      await setPendingQty(user, {
         sku: prod.sku,
         name: prod.name,
         unitPrice: prod.price,
@@ -2182,9 +1682,9 @@ if (id.startsWith("ORDER_CANCEL_")) {
         unitPrice: prod.price,
       };
 
-      setPending(user, item);
-      setFlow(user, "ASK_IF_DAR"); // start with inside/outside Dar
-      CONTACT.set(user, {});
+      await setPending(user, item);
+      await setFlow(user, "ASK_IF_DAR"); // start with inside/outside Dar
+      await setContact(user, {});
       await sendButtonsMessageSafe(user, t(lang, "flow.choose_dar"), [
         { id: "DAR_INSIDE", title: t(lang, "flow.option_inside_dar") },
         { id: "DAR_OUTSIDE", title: t(lang, "flow.option_outside_dar") },
@@ -2195,9 +1695,9 @@ if (id.startsWith("ORDER_CANCEL_")) {
 
 
   if (id === 'ACTION_PAYMENT_DONE') {
-  const s = getSession(user);
+  const s = await loadSession(user);
   s.state = 'WAIT_PROOF';
-  saveSession(user, s);
+  await saveSession(user, s);
   await sendBotText(user, t(lang, 'proof.ask'));
   return;
 }
@@ -2262,15 +1762,16 @@ async function isAgentAllowed(waId: string): Promise<boolean> {
 
 type Incoming = {
   text?: string;
+  messageType?: string;
+  mediaId?: string;
   hasLocation?: boolean;
   lat?: number;
   lon?: number;
 };
 
 async function onFlow(user: string, step: FlowStep, m: Incoming, lang: Lang) {
-  const s = getSession(user);
   const txt = (m.text || '').trim();
-  const contact = CONTACT.get(user) || {};
+  const contact = await getContact(user);
 
   switch (step) {
     /* ----------------------------- Waiting on buttons ---------------------------- */
@@ -2281,29 +1782,29 @@ async function onFlow(user: string, step: FlowStep, m: Incoming, lang: Lang) {
     /* ----------------------- INSIDE Dar — DELIVERY path ------------------------- */
     case 'ASK_NAME_IN': {
       if (!txt) return sendBotText(user, t(lang, 'flow.ask_name'));
-      contact.name = txt; CONTACT.set(user, contact);
-      setFlow(user, 'ASK_PHONE_IN');
+      contact.name = txt; await setContact(user, contact);
+      await setFlow(user, 'ASK_PHONE_IN');
       return sendBotText(user, t(lang, 'flow.ask_phone'));
     }
     case 'ASK_PHONE_IN': {
       if (!txt) return sendBotText(user, t(lang, 'flow.ask_phone'));
-      contact.phone = txt; CONTACT.set(user, contact);
-      setFlow(user, 'ASK_GPS');
+      contact.phone = txt; await setContact(user, contact);
+      await setFlow(user, 'ASK_GPS');
       return sendBotText(user, t(lang, 'flow.ask_gps'));
     }
     case "ASK_GPS": {
       if (m.hasLocation && typeof m.lat === "number" && typeof m.lon === "number") {
         const km = haversineKm(KEKO.lat, KEKO.lon, m.lat, m.lon);
         const fee = feeForDarDistance(km);
-        const items = pendingOrCart(user);
+        const items = await pendingOrCart(user);
         const sub = items.reduce((a, it) => a + it.unitPrice * it.qty, 0);
         const total = sub + fee;
 
         // Save distance + total in session for later use
-        const s = getSession(user);
+        const s = await loadSession(user);
         s.distanceKm = km;
         s.price = total;
-        saveSession(user, s);
+        await saveSession(user, s);
 
         await sendBotText(
           user,
@@ -2354,9 +1855,9 @@ try {
           });
 
           // 🧠 remember this order in the session
-          const s2 = getSession(user);
-          (s2 as any).lastOrderId = orderId;
-          saveSession(user, s2);
+          const s2 = await loadSession(user);
+          s2.lastOrderId = orderId;
+          await saveSession(user, s2);
 
           emit("products.updated", {
             reason: "whatsapp_order_created",
@@ -2383,7 +1884,7 @@ try {
           ]
         );
 
-        setFlow(user, null);
+        await setFlow(user, null);
         return;
       }
 
@@ -2394,19 +1895,19 @@ try {
     /* ------------------------ INSIDE Dar — PICKUP path -------------------------- */
     case 'ASK_NAME_PICK': {
       if (!txt) return sendBotText(user, t(lang, 'flow.ask_name'));
-      contact.name = txt; CONTACT.set(user, contact);
-      setFlow(user, 'ASK_PHONE_PICK');
+      contact.name = txt; await setContact(user, contact);
+      await setFlow(user, 'ASK_PHONE_PICK');
       return sendBotText(user, t(lang, 'flow.ask_phone'));
     }
     case 'ASK_PHONE_PICK': {
       if (!txt) return sendBotText(user, t(lang, 'flow.ask_phone'));
-      contact.phone = txt; CONTACT.set(user, contact);
+      contact.phone = txt; await setContact(user, contact);
 
-      const items = pendingOrCart(user);
+      const items = await pendingOrCart(user);
       const sub = items.reduce((a, it) => a + it.unitPrice * it.qty, 0);
       const total = sub;
 
-      await sendBotText(user, (lang === 'sw' ? PICKUP_INFO_SW : PICKUP_INFO_EN));
+      await sendBotText(user, getPickupInfoText(lang));
       await sendBotText(user, [
         t(lang, 'checkout.summary_header'),
         t(lang, 'checkout.summary_name', { name: contact.name || '' }),
@@ -2417,29 +1918,29 @@ try {
       ].join('\n'));
 
       await showPaymentOptions(user, lang, total);
-      setFlow(user, null);
+      await setFlow(user, null);
       return;
     }
 
     /* ----------------------------- OUTSIDE Dar path ----------------------------- */
     case 'ASK_NAME_OUT': {
       if (!txt) return sendBotText(user, t(lang, 'flow.ask_name'));
-      contact.name = txt; CONTACT.set(user, contact);
-      setFlow(user, 'ASK_PHONE_OUT');
+      contact.name = txt; await setContact(user, contact);
+      await setFlow(user, 'ASK_PHONE_OUT');
       return sendBotText(user, t(lang, 'flow.ask_phone'));
     }
     case 'ASK_PHONE_OUT': {
       if (!txt) return sendBotText(user, t(lang, 'flow.ask_phone'));
-      contact.phone = txt; CONTACT.set(user, contact);
-      setFlow(user, 'ASK_REGION_OUT');
+      contact.phone = txt; await setContact(user, contact);
+      await setFlow(user, 'ASK_REGION_OUT');
       return sendBotText(user, t(lang, 'flow.ask_region'));
     }
         case "ASK_REGION_OUT": {
       if (!txt) return sendBotText(user, t(lang, "flow.ask_region"));
       contact.region = txt;
-      CONTACT.set(user, contact);
+      await setContact(user, contact);
 
-      const items = pendingOrCart(user);
+      const items = await pendingOrCart(user);
       const sub = items.reduce((a, it) => a + it.unitPrice * it.qty, 0);
       const total = sub + OUTSIDE_DAR_FEE;
 
@@ -2497,7 +1998,7 @@ try {
       ]);
 
       await showPaymentOptions(user, lang, total);
-      setFlow(user, null);
+      await setFlow(user, null);
       return;
     }
 
@@ -2530,7 +2031,7 @@ case "TRACK_ASK_NAME": {
 
   if (!result) {
     await sendBotText(user, t(lang, "track.not_found", { query }));
-    setFlow(user, null);
+    await setFlow(user, null);
     return;
   }
 
@@ -2631,14 +2132,14 @@ case "TRACK_ASK_NAME": {
 
   await sendLongTextSafe(user, lines.join("\n"));
 
-  setFlow(user, null);
+  await setFlow(user, null);
   return;
 }
   }
 }
 
 async function onSessionMessage(user: string, m: Incoming, lang: Lang) {
-  const s = getSession(user);
+  const s = await loadSession(user);
   const txt = (m.text || "").trim();
 
   switch (s.state) {
@@ -2647,27 +2148,51 @@ async function onSessionMessage(user: string, m: Incoming, lang: Lang) {
     }
     case "SHOW_PRICE": {
       s.state = "WAIT_PROOF";
-      saveSession(user, s);
+      await saveSession(user, s);
       return sendBotText(user, t(lang, "proof.ask"));
     }
     case "WAIT_PROOF": {
+      if (
+        (m.messageType === "image" || m.messageType === "document") &&
+        s.lastOrderId
+      ) {
+        try {
+          await submitPaymentProof({
+            orderId: s.lastOrderId,
+            proofType: "image",
+            proofMessageId: m.mediaId ?? null,
+            source: "whatsapp_media_proof",
+          });
+        } catch (error) {
+          console.error("[payment-proof] failed to persist media proof", error);
+        }
+
+        await clearCart(user);
+        await setPending(user, null);
+        await resetSession(user);
+        return sendBotText(user, t(lang, "proof.ok_image"));
+      }
+
       // Accept proof as 2 or 3 names (space-separated),
       // media proof is handled elsewhere in the media handler.
-      const words = txt
-        .split(/\s+/)
-        .map((w) => w.trim())
-        .filter(Boolean);
+      if (isValidManualPaymentProofText(txt)) {
+        if (s.lastOrderId) {
+          try {
+            await submitPaymentProof({
+              orderId: s.lastOrderId,
+              proofType: "text",
+              proofText: txt,
+              source: "whatsapp_text_proof",
+            });
+          } catch (error) {
+            console.error("[payment-proof] failed to persist text proof", error);
+          }
+        }
 
-      const count = words.length;
-
-      // Debug log (optional, helps if something goes wrong again)
-      console.log("[WAIT_PROOF] names =", words, "count =", count);
-
-      if (count >= 2 && count <= 3) {
         // 2 or 3 names is OK
-        clearCart(user);
-        setPending(user, null);
-        resetSession(user);
+        await clearCart(user);
+        await setPending(user, null);
+        await resetSession(user);
         return sendBotText(
           user,
           t(lang, "proof.ok_names", { names: txt })
@@ -2761,4 +2286,7 @@ function detailsSectionForSku(
   // Fallback: if something weird happens, just send the combined details
   return detailsForSku(lang, sku);
 }
+
+
+
 

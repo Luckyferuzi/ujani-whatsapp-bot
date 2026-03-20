@@ -201,7 +201,7 @@ export default function InboxPage() {
                   </button>
                 </div>
 
-                <Thread convo={active} />
+                <Thread convo={active} onOpenContext={() => setShowMobileMenu(true)} />
               </div>
             )}
 
@@ -230,12 +230,16 @@ export default function InboxPage() {
 
             {active ? (
               <>
-                <Thread convo={active} />
+                <Thread convo={active} onOpenContext={() => setShowMobileMenu(true)} />
                 <RightPanel conversationId={active.id} />
               </>
             ) : (
-              <div className="center-muted">
-                Select a conversation to view messages
+              <div className="inbox-empty-state">
+                <div className="inbox-empty-kicker">Inbox cockpit</div>
+                <div className="inbox-empty-title">Pick a conversation to start operating.</div>
+                <div className="inbox-empty-copy">
+                  Review customer history, payment status, delivery progress, and internal notes from one working view.
+                </div>
               </div>
             )}
           </>
