@@ -39,11 +39,6 @@ export const httpLogger = pinoHttp({
   customErrorMessage(req: Request, res: Response) {
     return `${req.method} ${req.url} failed with ${res.statusCode}`;
   },
-  customProps(req: Request) {
-    return {
-      requestId: String((req as any).id ?? ""),
-    };
-  },
 });
 
 export function logOperationalError(message: string, error: unknown, extra: Record<string, unknown> = {}) {
