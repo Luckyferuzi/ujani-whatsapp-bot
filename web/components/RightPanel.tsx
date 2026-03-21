@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { formatPhonePretty } from "@/lib/phone";
@@ -206,6 +206,25 @@ export default function RightPanel({ conversationId }: RightPanelProps) {
     router.push("/orders");
   };
 
+  const fetchPanelData = useCallback(async () => {
+    if (!conversationId) {
+      return {
+        summary: null,
+        orders: [] as OrderRow[],
+      };
+    }
+
+    const [summaryData, ordersData] = await Promise.all([
+      api<ConversationSummary>(`/api/conversations/${conversationId}/summary`),
+      api<{ items: OrderRow[] }>(`/api/conversations/${conversationId}/orders`),
+    ]);
+
+    return {
+      summary: summaryData,
+      orders: ordersData?.items ?? [],
+    };
+  }, [conversationId]);
+
   const {
     data: panelData,
     isLoading: loading,
@@ -213,17 +232,7 @@ export default function RightPanel({ conversationId }: RightPanelProps) {
     refetch: refetchPanel,
   } = useCachedQuery(
     conversationId ? `conversation:panel:${conversationId}` : null,
-    async () => {
-      const [summaryData, ordersData] = await Promise.all([
-        api<ConversationSummary>(`/api/conversations/${conversationId}/summary`),
-        api<{ items: OrderRow[] }>(`/api/conversations/${conversationId}/orders`),
-      ]);
-
-      return {
-        summary: summaryData,
-        orders: ordersData?.items ?? [],
-      };
-    },
+    fetchPanelData,
     { staleMs: 5_000, enabled: !!conversationId }
   );
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { formatPhonePretty } from "@/lib/phone";
 import { useCachedQuery } from "@/hooks/useCachedQuery";
@@ -92,9 +92,14 @@ export default function ConversationList({
     onLoadedRef.current = onLoaded;
   }, [onLoaded]);
 
+  const fetchConversations = useCallback(
+    () => api<{ items: Convo[] }>("/api/conversations"),
+    []
+  );
+
   const { data, isLoading: loading, refetch } = useCachedQuery(
     "conversations:list",
-    () => api<{ items: Convo[] }>("/api/conversations"),
+    fetchConversations,
     { staleMs: 3_000 }
   );
 
