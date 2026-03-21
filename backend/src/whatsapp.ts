@@ -220,7 +220,7 @@ export async function sendListMessage(args: {
   sections: ListSection[];
   phoneNumberId?: string | null;
 }) {
-  const phoneId = getPhoneNumberIdEffective();
+  const phoneId = resolvePhoneNumberId(args.phoneNumberId ?? null, args.to);
   if (!phoneId) {
     throw new Error(
       "[whatsapp] PHONE_NUMBER_ID missing; cannot perform this WhatsApp API call. Set PHONE_NUMBER_ID in Setup or .env."

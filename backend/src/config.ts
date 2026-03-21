@@ -48,7 +48,15 @@ const Schema = z.object({
   VODA_P2P_MSISDN: z.string().default(''),
 });
 
-export const env = Schema.parse(process.env);
+const configSource = {
+  ...process.env,
+  FRONTEND_ORIGIN:
+    process.env.FRONTEND_ORIGIN ??
+    process.env.AGENT_UI_ORIGIN ??
+    "",
+};
+
+export const env = Schema.parse(configSource);
 
 export type AppEnv = z.infer<typeof Schema>;
 
@@ -66,6 +74,10 @@ export function getConfigDiagnostics(config: AppEnv = env) {
 
   if (!config.INBOX_ACCESS_KEY) {
     errors.push("INBOX_ACCESS_KEY is required to protect admin APIs.");
+  }
+
+  if (process.env.AGENT_UI_ORIGIN && !process.env.FRONTEND_ORIGIN) {
+    warnings.push("AGENT_UI_ORIGIN is deprecated; rename it to FRONTEND_ORIGIN for backend/Render config.");
   }
 
   if (config.NODE_ENV === "production") {

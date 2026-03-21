@@ -30,6 +30,7 @@ export type SafeListPayload = {
   footer?: string;
   buttonText: string;
   sections: SafeListSection[];
+  phoneNumberId?: string | null;
 };
 
 export type Button = { id: string; title: string };
@@ -125,6 +126,7 @@ export async function sendListMessageSafe(p: SafeListPayload) {
     footer: p.footer,
     buttonText: (p.buttonText || "Open").slice(0, MAX_BUTTON_TITLE),
     sections,
+    phoneNumberId: p.phoneNumberId ?? getRememberedPhoneNumberId(p.to) ?? null,
   } as any);
 
   const summaryPayload = {

@@ -27,6 +27,8 @@ type Props = {
 
 type ViewKey = "all" | "unread" | "bot" | "stock";
 
+const CONVERSATIONS_POLL_MS = 10_000;
+
 function describeLastMessage(text: string | null | undefined): string | null {
   if (!text) return null;
   const s = text.trim();
@@ -104,8 +106,32 @@ export default function ConversationList({
 
   useEffect(() => {
     void refetch();
-    const t = setInterval(() => void refetch(), 3_000);
-    return () => clearInterval(t);
+
+    if (typeof window === "undefined") return;
+
+    let timer: number | null = null;
+
+    const poll = () => {
+      if (document.visibilityState !== "visible") return;
+      void refetch();
+    };
+
+    timer = window.setInterval(poll, CONVERSATIONS_POLL_MS);
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void refetch();
+      }
+    };
+
+    window.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      if (timer != null) {
+        window.clearInterval(timer);
+      }
+      window.removeEventListener("visibilitychange", onVisibilityChange);
+    };
   }, [refetch]);
 
   useEffect(() => {

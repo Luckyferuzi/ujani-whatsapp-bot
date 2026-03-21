@@ -155,6 +155,7 @@ type SafeListPayload = {
   footer?: string;
   buttonText: string;
   sections: SafeListSection[];
+  phoneNumberId?: string | null;
 };
 
 function splitTitleForTail(s: string): [string, string] {
@@ -219,6 +220,7 @@ async function sendListMessageSafe(p: SafeListPayload) {
     footer: p.footer,
     buttonText: (p.buttonText || "Open").slice(0, MAX_BUTTON_TITLE),
     sections,
+    phoneNumberId: p.phoneNumberId ?? getRememberedPhoneNumberId(p.to) ?? null,
   } as any);
 
   // 2) Build a JSON payload that the web UI can render as a summary

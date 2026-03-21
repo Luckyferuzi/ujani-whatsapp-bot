@@ -36,6 +36,33 @@ import { computeRemainingPayment, type PaymentStatus } from "../payments.js";
 
 export const inboxRoutes = Router();
 
+const CONVERSATION_RECONCILE_INTERVAL_MS = 5 * 60 * 1000;
+let lastConversationReconcileAt = 0;
+let reconcilePromise: Promise<void> | null = null;
+
+async function maybeReconcileInboxConversations() {
+  const now = Date.now();
+  if (now - lastConversationReconcileAt < CONVERSATION_RECONCILE_INTERVAL_MS) {
+    return;
+  }
+
+  if (!reconcilePromise) {
+    reconcilePromise = reconcileCustomersAndConversations()
+      .then(() => {
+        return;
+      })
+      .catch((err) => {
+        console.warn("[inbox] reconciliation skipped due to error", err);
+      })
+      .finally(() => {
+        lastConversationReconcileAt = Date.now();
+        reconcilePromise = null;
+      });
+  }
+
+  await reconcilePromise;
+}
+
 const updateOrderStatusSchema = z.object({
   status: z.enum(ORDER_STATUS_VALUES),
   delivery_agent_phone: z.string().trim().optional(),
@@ -199,10 +226,7 @@ async function notifyRestockSubscribers(
 
 inboxRoutes.get("/conversations", async (_req, res) => {
   try {
-    // Keep inbox professional: merge duplicated customer records/threads by same number.
-    await reconcileCustomersAndConversations().catch((err) => {
-      console.warn("[inbox] reconciliation skipped due to error", err);
-    });
+    await maybeReconcileInboxConversations();
 
     const latestMessageAgg = db("messages as m")
       .select("m.conversation_id")
@@ -263,6 +287,21 @@ for (const r of restockCounts as any[]) {
 }
 
 
+    const unreadCounts = await db("messages")
+      .whereIn("conversation_id", convoIds)
+      .andWhere("direction", "inbound")
+      .where((qb) => {
+        qb.whereNull("status").orWhereNot("status", "read");
+      })
+      .groupBy("conversation_id")
+      .select("conversation_id")
+      .count<{ conversation_id: number; count: string }[]>("id as count");
+
+    const unreadCountByConvo: Record<number, number> = {};
+    for (const row of unreadCounts as any[]) {
+      unreadCountByConvo[Number(row.conversation_id)] = Number(row.count ?? 0);
+    }
+
     // Last messages (both inbound + outbound)
     const msgRows = await db("messages")
       .whereIn("conversation_id", convoIds)
@@ -287,22 +326,13 @@ for (const r of restockCounts as any[]) {
       metaByConvo[cid].last_message_at = m.created_at as string;
     }
 
-    // unread_count = inbound messages that are not yet read
     for (const row of items as any[]) {
-      const unreadRow = await db("messages")
-        .where({ conversation_id: row.id, direction: "inbound" })
-        .where((qb) => {
-          qb.whereNull("status").orWhereNot("status", "read");
-        })
-        .count<{ count: string }>("id as count")
-        .first();
-
       const meta = metaByConvo[row.id as number] ?? {
         last_message_text: null,
         last_message_at: null,
       };
 
-      row.unread_count = Number(unreadRow?.count ?? 0);
+      row.unread_count = unreadCountByConvo[Number(row.id)] ?? 0;
       row.restock_subscribed_count =
   restockCountByCustomer[Number(row.customer_id)] ?? 0;
       row.last_message_text = meta.last_message_text;
