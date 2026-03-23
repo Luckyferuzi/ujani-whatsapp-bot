@@ -3,13 +3,7 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import {
-  Alert,
-  Button,
-  EmptyState,
-  RefreshIndicator,
-  Textarea,
-} from "@/components/ui";
+import { Alert, Button, EmptyState, RefreshIndicator, Textarea } from "@/components/ui";
 
 type TimelineItem = {
   id: string;
@@ -32,7 +26,7 @@ type Props = {
   refreshKey?: string | number | null;
 };
 
-function formatDateTime(value: string): string {
+function formatDateTime(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleString("sw-TZ", {
@@ -76,7 +70,6 @@ export default function OperatorTimelineNotes({
 
   useEffect(() => {
     void loadTimeline();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timelinePath, refreshKey]);
 
   const handleSave = async () => {
@@ -146,11 +139,7 @@ export default function OperatorTimelineNotes({
           </div>
         ) : items.length === 0 ? (
           <div className="timeline-notes__empty">
-            <EmptyState
-              eyebrow="Notes"
-              title="No history yet"
-              description={emptyState}
-            />
+            <EmptyState eyebrow="Notes" title="No history yet" description={emptyState} />
           </div>
         ) : (
           items.map((item) => (
@@ -172,8 +161,8 @@ export default function OperatorTimelineNotes({
               ) : null}
               <div className="timeline-notes__item-meta">
                 {item.kind === "note" ? "Internal note" : "Timeline event"}
-                {item.actor_label ? ` · ${item.actor_label}` : ""}
-                {item.scope ? ` · ${item.scope}` : ""}
+                {item.actor_label ? ` - ${item.actor_label}` : ""}
+                {item.scope ? ` - ${item.scope}` : ""}
               </div>
             </div>
           ))

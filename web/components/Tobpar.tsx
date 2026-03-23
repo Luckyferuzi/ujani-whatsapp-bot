@@ -161,29 +161,31 @@ export default function Topbar({
                       router.push("/profile");
                     }}
                   >
-                    Profile
-                  </button>
-                  <button
-                    type="button"
-                    className="console-topbar__menu-item"
-                    onClick={() => {
-                      setMenuOpen(false);
-                      router.push("/settings");
-                    }}
-                  >
-                    Settings
+                    My Account
                   </button>
                   {user.role === "admin" ? (
-                    <button
-                      type="button"
-                      className="console-topbar__menu-item"
-                      onClick={() => {
-                        setMenuOpen(false);
-                        router.push("/setup");
-                      }}
-                    >
-                      Setup
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        className="console-topbar__menu-item"
+                        onClick={() => {
+                          setMenuOpen(false);
+                          router.push("/settings");
+                        }}
+                      >
+                        Workspace Settings
+                      </button>
+                      <button
+                        type="button"
+                        className="console-topbar__menu-item"
+                        onClick={() => {
+                          setMenuOpen(false);
+                          router.push("/setup");
+                        }}
+                      >
+                        Setup
+                      </button>
+                    </>
                   ) : null}
                   <button
                     type="button"

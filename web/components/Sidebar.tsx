@@ -9,6 +9,7 @@ import { useAuth } from "@/components/AuthProvider";
 type NavItem = {
   href: string;
   label: string;
+  description: string;
   shortLabel: string;
   moduleKey?: string;
   adminOnly?: boolean;
@@ -23,40 +24,134 @@ const NAV_SECTIONS: NavSection[] = [
   {
     title: "Operations",
     items: [
-      { href: "/inbox", label: "Inbox", shortLabel: "IN", moduleKey: "inbox" },
-      { href: "/orders", label: "Orders", shortLabel: "OR", moduleKey: "orders" },
-      { href: "/broadcast", label: "Broadcast", shortLabel: "BC", moduleKey: "broadcast" },
+      {
+        href: "/",
+        label: "Command Center",
+        description: "Operational overview, priorities, and health signals.",
+        shortLabel: "CC",
+      },
+      {
+        href: "/inbox",
+        label: "Inbox",
+        description: "Live conversations, handover, and customer context.",
+        shortLabel: "IN",
+        moduleKey: "inbox",
+      },
+      {
+        href: "/orders",
+        label: "Orders",
+        description: "Fulfillment desk for payment, delivery, and status flow.",
+        shortLabel: "OR",
+        moduleKey: "orders",
+      },
     ],
   },
   {
     title: "Commerce",
     items: [
-      { href: "/products", label: "Products", shortLabel: "PR", moduleKey: "products" },
+      {
+        href: "/products",
+        label: "Catalog",
+        description: "Products, stock posture, pricing, and availability.",
+        shortLabel: "CA",
+        moduleKey: "products",
+      },
+      {
+        href: "/broadcast",
+        label: "Broadcasts",
+        description: "Outbound campaigns and message control.",
+        shortLabel: "BC",
+        moduleKey: "broadcast",
+      },
     ],
   },
   {
-    title: "Finance & Reports",
+    title: "Insights",
     items: [
-      { href: "/incomes", label: "Income", shortLabel: "IC", moduleKey: "incomes" },
-      { href: "/expenses", label: "Expenses", shortLabel: "EX", moduleKey: "expenses" },
-      { href: "/stats", label: "Reports", shortLabel: "RP", moduleKey: "analytics" },
+      {
+        href: "/stats",
+        label: "Reports",
+        description: "Performance, activity, and operational reporting.",
+        shortLabel: "RP",
+        moduleKey: "analytics",
+      },
+      {
+        href: "/incomes",
+        label: "Income",
+        description: "Business inflows, pending items, and approval tracking.",
+        shortLabel: "IC",
+        moduleKey: "incomes",
+      },
+      {
+        href: "/expenses",
+        label: "Expenses",
+        description: "Operational spend and cost visibility.",
+        shortLabel: "EX",
+        moduleKey: "expenses",
+      },
     ],
   },
   {
-    title: "System",
+    title: "Admin",
     items: [
-      { href: "/setup", label: "Setup", shortLabel: "SU", adminOnly: true },
-      { href: "/settings", label: "Settings", shortLabel: "ST", adminOnly: true },
-      { href: "/admin/users", label: "Users & Staff", shortLabel: "US", adminOnly: true },
-      { href: "/admin/audit", label: "Audit Log", shortLabel: "AL", adminOnly: true },
-      { href: "/admin/governance", label: "Governance", shortLabel: "GV", adminOnly: true },
-      { href: "/profile", label: "Profile", shortLabel: "PF" },
+      {
+        href: "/admin/users",
+        label: "Team",
+        description: "Staff access, roles, and operator management.",
+        shortLabel: "TM",
+        adminOnly: true,
+      },
+      {
+        href: "/admin/governance",
+        label: "Governance",
+        description: "Approvals, controls, and administrative review.",
+        shortLabel: "GV",
+        adminOnly: true,
+      },
+      {
+        href: "/admin/audit",
+        label: "Audit Log",
+        description: "Ledger of important internal actions and changes.",
+        shortLabel: "AU",
+        adminOnly: true,
+      },
+    ],
+  },
+  {
+    title: "Workspace",
+    items: [
+      {
+        href: "/settings",
+        label: "Workspace Settings",
+        description: "Business profile, menus, and system configuration.",
+        shortLabel: "WS",
+        adminOnly: true,
+      },
+      {
+        href: "/setup",
+        label: "Setup",
+        description: "Business onboarding, runtime checks, and integrations.",
+        shortLabel: "SU",
+        adminOnly: true,
+      },
+    ],
+  },
+  {
+    title: "Account",
+    items: [
+      {
+        href: "/profile",
+        label: "My Account",
+        description: "Personal profile, password, and operator preferences.",
+        shortLabel: "ME",
+      },
     ],
   },
 ];
 
 function isActive(pathname: string | null, href: string) {
   if (!pathname) return false;
+  if (href === "/") return pathname === "/";
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
@@ -125,7 +220,7 @@ export default function Sidebar({
 
       <aside className={"console-sidebar" + (open ? " console-sidebar--open" : "")}>
         <div className="console-sidebar__top">
-          <Link href="/inbox" className="console-sidebar__brand" onClick={onClose}>
+          <Link href="/" className="console-sidebar__brand" onClick={onClose}>
             <div className="console-sidebar__brand-mark">UJ</div>
             <div className="console-sidebar__brand-copy">
               <div className="console-sidebar__brand-title">{companyName}</div>
@@ -134,8 +229,10 @@ export default function Sidebar({
           </Link>
 
           <div className="console-sidebar__workspace">
-            <div className="console-sidebar__workspace-label">Workspace</div>
-            <div className="console-sidebar__workspace-value">Single business live environment</div>
+            <div className="console-sidebar__workspace-label">Console map</div>
+            <div className="console-sidebar__workspace-value">
+              Operations, commerce, insights, workspace control, and account access.
+            </div>
           </div>
         </div>
 
@@ -150,7 +247,9 @@ export default function Sidebar({
                     <Link
                       key={item.href}
                       href={item.href}
-                      className={"console-sidebar__link" + (active ? " console-sidebar__link--active" : "")}
+                      className={
+                        "console-sidebar__link" + (active ? " console-sidebar__link--active" : "")
+                      }
                       onClick={onClose}
                     >
                       <span className="console-sidebar__link-mark" aria-hidden="true">
@@ -158,6 +257,9 @@ export default function Sidebar({
                       </span>
                       <span className="console-sidebar__link-copy">
                         <span className="console-sidebar__link-label">{item.label}</span>
+                        <span className="console-sidebar__link-description">
+                          {item.description}
+                        </span>
                       </span>
                     </Link>
                   );

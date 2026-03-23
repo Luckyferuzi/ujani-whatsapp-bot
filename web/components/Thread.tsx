@@ -14,6 +14,7 @@ import { formatPhonePretty } from "@/lib/phone";
 import { socket } from "@/lib/socket";
 import type { Convo } from "./ConversationList";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { EmptyState, RefreshIndicator, ThreadSkeleton } from "@/components/ui";
 
 type ThreadProps = {
@@ -73,6 +74,8 @@ type ParsedMenu = {
   introLines: string[];
   sections: { title: string; options: string[] }[];
 };
+
+const PLAIN_MENU_BULLET_PATTERN = /^(?:•|â€¢)\s*/;
 
 function parseMenuFromJsonBody(body: string): ParsedMenu | null {
   const match = body.match(/^\[MENU\](.+)$/);
@@ -139,7 +142,7 @@ function parseMenuFromPlainBody(body: string): ParsedMenu | null {
 
   const rawLines = body.split("\n");
   const trimmed = rawLines.map((l) => l.trim());
-  const hasBullet = trimmed.some((l) => /^([•]|â€¢)\s/.test(l));
+  const hasBullet = trimmed.some((l) => PLAIN_MENU_BULLET_PATTERN.test(l));
   if (!hasBullet) return null;
 
   let firstHeaderIndex = -1;
@@ -179,8 +182,8 @@ function parseMenuFromPlainBody(body: string): ParsedMenu | null {
 
       if (line.endsWith(":")) break;
 
-      if (/^([•]|â€¢)\s/.test(line)) {
-        options.push(line.replace(/^([•]|â€¢)\s*/, "").trim());
+      if (PLAIN_MENU_BULLET_PATTERN.test(line)) {
+        options.push(line.replace(PLAIN_MENU_BULLET_PATTERN, "").trim());
       }
 
       i++;
@@ -507,7 +510,7 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
       }
     } catch (err: any) {
       console.error("Failed to resend media", err);
-      alert(err?.message ?? "Unable to resend media right now. Please try again.");
+      toast.error(err?.message ?? "Unable to resend media right now.");
     }
   }
 
@@ -520,7 +523,7 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
       setMessages((prev) => prev.filter((m) => String(m.id) !== String(messageId)));
     } catch (err: any) {
       console.error("Failed to delete media", err);
-      alert(err?.message ?? "Unable to delete media right now. Please try again.");
+      toast.error(err?.message ?? "Unable to delete media right now.");
     }
   }
 
@@ -544,7 +547,7 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
       }
     } catch (err: any) {
       console.error("Failed to send media", err);
-      alert(err?.message ?? "Unable to send media right now. Please try again.");
+      toast.error(err?.message ?? "Unable to send media right now.");
     } finally {
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
@@ -689,7 +692,7 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
     } catch (err) {
       console.error("Failed to toggle agent mode", err);
       setAgentAllowed(!next);
-      alert("Unable to update handover mode right now.");
+      toast.error("Unable to update handover mode right now.");
     } finally {
       setToggling(false);
     }
@@ -701,7 +704,7 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
     if (!value) return;
 
     if (!agentAllowed) {
-      alert("Bot mode is active. Switch to Agent Mode before sending a manual reply.");
+      toast.error("Bot mode is active. Switch to Agent Mode before sending a manual reply.");
       return;
     }
 
@@ -736,7 +739,7 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
       console.error("Failed to send message", err);
       setMessages((prev) => prev.filter((m) => String(m.id) !== optimisticId));
       setText(value);
-      alert("Unable to send the message right now.");
+      toast.error("Unable to send the message right now.");
     } finally {
       setSending(false);
     }

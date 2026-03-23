@@ -4,7 +4,6 @@ import { useMemo } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import { useCachedQuery } from "@/hooks/useCachedQuery";
-import PageHeader from "@/components/PageHeader";
 import {
   Alert,
   Badge,
@@ -260,12 +259,18 @@ export default function DashboardOverview() {
   if (loading) {
     return (
       <section className="dashboard-command">
-        <PageHeader
-          eyebrow="Command Center"
-          title="Loading today's operating picture..."
-          description="Checking inbox pressure, payment review, fulfillment movement, and business pace."
-          actions={<RefreshIndicator label="Preparing overview" />}
-        />
+        <div className="dashboard-command__masthead">
+          <div>
+            <div className="dashboard-command__masthead-kicker">Command Center</div>
+            <div className="dashboard-command__masthead-title">
+              Loading today's operating picture...
+            </div>
+            <div className="dashboard-command__masthead-copy">
+              Checking inbox pressure, payment review, fulfillment movement, and business pace.
+            </div>
+          </div>
+          <RefreshIndicator label="Preparing overview" />
+        </div>
 
         <div className="dashboard-command__priority-grid">
           <StatCardSkeleton />
@@ -320,38 +325,51 @@ export default function DashboardOverview() {
   if (error) {
     return (
       <section className="dashboard-command">
-        <PageHeader
-          eyebrow="Command Center"
-          title="Dashboard unavailable"
-          description={error.message}
-          actions={
-            <button type="button" className="ui-button ui-button--secondary" onClick={() => void refetch()}>
-              Try again
-            </button>
-          }
-        />
+        <div className="dashboard-command__masthead">
+          <div>
+            <div className="dashboard-command__masthead-kicker">Command Center</div>
+            <div className="dashboard-command__masthead-title">Dashboard unavailable</div>
+            <div className="dashboard-command__masthead-copy">{error.message}</div>
+          </div>
+          <button
+            type="button"
+            className="ui-button ui-button--secondary"
+            onClick={() => void refetch()}
+          >
+            Try again
+          </button>
+        </div>
       </section>
     );
   }
 
   return (
     <section className="dashboard-command">
-      <PageHeader
-        eyebrow="Command Center"
-        title="What matters now, in one operational view."
-        description="Use this command center to scan pressure in the inbox, payment review, fulfillment movement, and current revenue momentum."
-        actions={
-          <>
-            {isRefreshing ? <RefreshIndicator label="Refreshing overview" /> : null}
-            <Link href="/inbox" className="ui-button ui-button--primary dashboard-command__header-button">
-              Open inbox
-            </Link>
-            <button type="button" className="ui-button ui-button--secondary" onClick={() => void refetch()}>
-              Refresh
-            </button>
-          </>
-        }
-      />
+      <div className="dashboard-command__masthead">
+        <div>
+          <div className="dashboard-command__masthead-kicker">Command Center</div>
+          <div className="dashboard-command__masthead-title">
+            What matters now, in one operational view.
+          </div>
+          <div className="dashboard-command__masthead-copy">
+            Scan pressure in the inbox, payment review, fulfillment movement, and
+            current revenue momentum.
+          </div>
+        </div>
+        <div className="dashboard-command__masthead-actions">
+          {isRefreshing ? <RefreshIndicator label="Refreshing overview" /> : null}
+          <Link href="/inbox" className="ui-button ui-button--primary dashboard-command__header-button">
+            Open inbox
+          </Link>
+          <button
+            type="button"
+            className="ui-button ui-button--secondary"
+            onClick={() => void refetch()}
+          >
+            Refresh
+          </button>
+        </div>
+      </div>
 
       <div className="dashboard-command__priority-grid">
         {priorityItems.map((item) => (

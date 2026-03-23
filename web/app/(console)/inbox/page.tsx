@@ -10,7 +10,7 @@ import { useSearchParams } from "next/navigation";
 
 type MobileView = "list" | "chat";
 
-const MOBILE_BREAKPOINT = 768; // px
+const MOBILE_BREAKPOINT = 768;
 const STORAGE_KEY = "ujani-inbox-active";
 const STORAGE_MAX_AGE_MS = 10 * 60 * 1000;
 
@@ -38,10 +38,7 @@ function readSavedConversationId(): string | null {
 
 function writeSavedConversationId(id: string) {
   try {
-    window.localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({ id, savedAt: Date.now() })
-    );
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ id, savedAt: Date.now() }));
   } catch {
     // ignore
   }
@@ -64,8 +61,6 @@ export default function InboxPage() {
   const searchParams = useSearchParams();
   const phoneFromUrl = searchParams.get("phone");
 
-  // Saved selection restore (time-boxed and mobile-only to avoid reopening
-  // very heavy threads automatically on desktop page load)
   const [savedId, setSavedId] = useState<string | null>(null);
   const [restoreDone, setRestoreDone] = useState(false);
 
@@ -185,7 +180,7 @@ export default function InboxPage() {
                     onClick={handleBackToList}
                     aria-label="Back to chats"
                   >
-                    ←
+                    Back
                   </button>
 
                   <div className="mobile-thread-nav-main">
@@ -198,20 +193,20 @@ export default function InboxPage() {
                         </span>
                       )}
                     </div>
-                    {active && (
+                    {active ? (
                       <div className="mobile-thread-nav-sub">
                         {formatPhonePretty(active.phone)}
                       </div>
-                    )}
+                    ) : null}
                   </div>
 
                   <button
                     type="button"
                     className="mobile-nav-button"
                     onClick={handleToggleMobileMenu}
-                    aria-label="Open menu"
+                    aria-label="Open context"
                   >
-                    ⋮
+                    Context
                   </button>
                 </div>
 
@@ -219,7 +214,7 @@ export default function InboxPage() {
               </div>
             )}
 
-            {isMobile && active && showMobileMenu && (
+            {isMobile && active && showMobileMenu ? (
               <div
                 className="mobile-right-overlay"
                 onClick={() => setShowMobileMenu(false)}
@@ -231,7 +226,7 @@ export default function InboxPage() {
                   <RightPanel conversationId={active.id} />
                 </div>
               </div>
-            )}
+            ) : null}
           </>
         ) : (
           <>
@@ -247,9 +242,12 @@ export default function InboxPage() {
             ) : (
               <div className="inbox-empty-state">
                 <div className="inbox-empty-kicker">Inbox cockpit</div>
-                <div className="inbox-empty-title">Pick a conversation to start operating.</div>
+                <div className="inbox-empty-title">
+                  Pick a conversation to start operating.
+                </div>
                 <div className="inbox-empty-copy">
-                  Review customer history, payment status, delivery progress, and internal notes from one working view.
+                  Review customer history, payment status, delivery progress, and
+                  internal notes from one working view.
                 </div>
               </div>
             )}

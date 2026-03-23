@@ -1523,6 +1523,8 @@ body {
 
 .console-sidebar__link-copy {
   min-width: 0;
+  display: grid;
+  gap: 0.125rem;
 }
 
 .console-sidebar__link-label,
@@ -1531,6 +1533,17 @@ body {
   line-height: 1.35;
   font-weight: var(--ds-font-weight-medium);
   color: inherit;
+}
+
+.console-sidebar__link-description {
+  font-size: 0.75rem;
+  line-height: 1.35;
+  color: var(--ds-color-text-faint);
+}
+
+.console-sidebar__link--active .console-sidebar__link-description,
+.console-sidebar__link:hover .console-sidebar__link-description {
+  color: var(--ds-color-text-muted);
 }
 
 .console-topbar {

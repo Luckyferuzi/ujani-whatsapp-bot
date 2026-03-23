@@ -3,7 +3,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { formatPhonePretty } from "@/lib/phone";
-import { ConversationListSkeleton, EmptyState, RefreshIndicator } from "@/components/ui";
+import {
+  ConversationListSkeleton,
+  EmptyState,
+  RefreshIndicator,
+} from "@/components/ui";
 
 export type Convo = {
   id: string;
@@ -34,12 +38,12 @@ function describeLastMessage(text: string | null | undefined): string | null {
   const s = text.trim();
   if (!s) return null;
 
-  if (s.startsWith("LOCATION")) return "Mteja ametuma lokesheni";
-  if (s.startsWith("[image")) return "Picha imetumwa";
-  if (s.startsWith("[document")) return "Hati imetumwa";
-  if (s.startsWith("[audio")) return "Sauti imetumwa";
-  if (s.startsWith("[video")) return "Video imetumwa";
-  if (s.startsWith("[sticker")) return "Stika imetumwa";
+  if (s.startsWith("LOCATION")) return "Customer shared a location";
+  if (s.startsWith("[image")) return "Image received";
+  if (s.startsWith("[document")) return "Document received";
+  if (s.startsWith("[audio")) return "Voice note received";
+  if (s.startsWith("[video")) return "Video received";
+  if (s.startsWith("[sticker")) return "Sticker received";
 
   return s;
 }
@@ -71,7 +75,9 @@ function getConversationPriority(convo: Convo) {
 
 function getConversationPriorityTone(convo: Convo) {
   const unread = convo.unread_count ?? 0;
-  if (unread > 0 && convo.agent_allowed) return "conversation-priority conversation-priority--hot";
+  if (unread > 0 && convo.agent_allowed) {
+    return "conversation-priority conversation-priority--hot";
+  }
   if (unread > 0) return "conversation-priority conversation-priority--new";
   if (convo.agent_allowed) return "conversation-priority conversation-priority--agent";
   return "conversation-priority";
@@ -199,18 +205,19 @@ export default function ConversationList({
       <div className="conversation-list-header">
         <div>
           <div className="conversation-list-header-title">Active conversations</div>
-          <div className="conversation-list-header-subtitle">Live inbox updates for customer handling, payments, and fulfillment.</div>
+          <div className="conversation-list-header-subtitle">
+            Live customer handling, payment checks, and fulfillment follow-up.
+          </div>
         </div>
-        <div className="conversation-list-header-count">
-          {loading ? "—" : counts.all}
-        </div>
+        <div className="conversation-list-header-count">{loading ? "-" : counts.all}</div>
       </div>
 
       <div className="conversation-views">
         <button
           type="button"
           className={
-            "conversation-view-button" + (view === "all" ? " conversation-view-button--active" : "")
+            "conversation-view-button" +
+            (view === "all" ? " conversation-view-button--active" : "")
           }
           onClick={() => setView("all")}
         >
@@ -220,7 +227,8 @@ export default function ConversationList({
         <button
           type="button"
           className={
-            "conversation-view-button" + (view === "unread" ? " conversation-view-button--active" : "")
+            "conversation-view-button" +
+            (view === "unread" ? " conversation-view-button--active" : "")
           }
           onClick={() => setView("unread")}
         >
@@ -230,7 +238,8 @@ export default function ConversationList({
         <button
           type="button"
           className={
-            "conversation-view-button" + (view === "bot" ? " conversation-view-button--active" : "")
+            "conversation-view-button" +
+            (view === "bot" ? " conversation-view-button--active" : "")
           }
           onClick={() => setView("bot")}
         >
@@ -240,11 +249,12 @@ export default function ConversationList({
         <button
           type="button"
           className={
-            "conversation-view-button" + (view === "stock" ? " conversation-view-button--active" : "")
+            "conversation-view-button" +
+            (view === "stock" ? " conversation-view-button--active" : "")
           }
           onClick={() => setView("stock")}
         >
-          Stock Alerts <span className="conversation-view-count">{counts.stock}</span>
+          Stock alerts <span className="conversation-view-count">{counts.stock}</span>
         </button>
       </div>
 
@@ -252,7 +262,7 @@ export default function ConversationList({
         <div className="conversation-search-row">
           <input
             type="text"
-            placeholder="Tafuta jina, namba au ujumbe..."
+            placeholder="Search name, phone, or latest message"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="conversation-search-input"
@@ -261,17 +271,17 @@ export default function ConversationList({
       </div>
 
       {refreshing && items.length > 0 ? (
-        <div style={{ padding: "0 12px 12px" }}>
+        <div className="conversation-list-feedback">
           <RefreshIndicator label="Refreshing conversations" />
         </div>
       ) : null}
 
       {loading && items.length === 0 ? (
-        <div style={{ padding: 12 }}>
+        <div className="conversation-list-state">
           <ConversationListSkeleton rows={7} />
         </div>
       ) : filtered.length === 0 && items.length === 0 ? (
-        <div style={{ padding: 12 }}>
+        <div className="conversation-list-state">
           <EmptyState
             eyebrow="Inbox"
             title="No conversations yet."
@@ -279,7 +289,7 @@ export default function ConversationList({
           />
         </div>
       ) : filtered.length === 0 ? (
-        <div style={{ padding: 12 }}>
+        <div className="conversation-list-state">
           <EmptyState
             eyebrow="Search"
             title="No conversations match these filters."
@@ -290,9 +300,16 @@ export default function ConversationList({
         <ul className="conversation-items">
           {filtered.map((c) => {
             const isSelected = c.id === activeId;
-            const initials = (c.name || c.phone || "?").slice(-2).toUpperCase();
             const title =
               c.name && c.name.trim().length > 0 ? c.name : formatPhonePretty(c.phone);
+            const initials =
+              title
+                .split(/\s+/)
+                .filter(Boolean)
+                .slice(0, 2)
+                .map((part) => part[0]?.toUpperCase() ?? "")
+                .join("")
+                .slice(0, 2) || "?";
 
             const prettyLast = describeLastMessage(c.last_message_text);
 
@@ -300,8 +317,8 @@ export default function ConversationList({
               prettyLast && prettyLast.length > 0
                 ? prettyLast
                 : c.agent_allowed
-                ? "Agent mode kwa mazungumzo"
-                : "Bot anaendeleza mazungumzo";
+                  ? "Assigned to an operator"
+                  : "Bot is handling this thread";
 
             const subtitle =
               rawSubtitle.length > 45 ? rawSubtitle.slice(0, 42) + "..." : rawSubtitle;

@@ -9,6 +9,14 @@ import PageHeader from "@/components/PageHeader";
 function getPageMeta(pathname: string | null) {
   const p = pathname || "/";
 
+  if (p === "/") {
+    return {
+      title: "Command Center",
+      section: "Operations",
+      description: "What matters now across conversations, fulfillment, payments, and operational health.",
+      immersive: false,
+    };
+  }
   if (p.startsWith("/inbox")) {
     return {
       title: "Inbox",
@@ -27,56 +35,56 @@ function getPageMeta(pathname: string | null) {
   }
   if (p.startsWith("/broadcast")) {
     return {
-      title: "Broadcast",
-      section: "Operations",
-      description: "Send controlled outbound updates to recent WhatsApp customers.",
+      title: "Broadcasts",
+      section: "Commerce",
+      description: "Controlled outbound updates for recent WhatsApp customers.",
       immersive: false,
     };
   }
   if (p.startsWith("/products")) {
     return {
-      title: "Products",
+      title: "Catalog",
       section: "Commerce",
-      description: "Manage the active catalog, pricing, stock, and sellable items.",
+      description: "Manage the active catalog, pricing, stock posture, and sellable items.",
       immersive: false,
     };
   }
   if (p.startsWith("/stats")) {
     return {
       title: "Reports",
-      section: "Finance & Reports",
-      description: "Review business performance, order activity, and delivery trends.",
+      section: "Insights",
+      description: "Business performance, order activity, and delivery trends.",
       immersive: false,
     };
   }
   if (p.startsWith("/expenses")) {
     return {
       title: "Expenses",
-      section: "Finance & Reports",
-      description: "Record and review operational spending.",
+      section: "Insights",
+      description: "Operational spending and cost visibility.",
       immersive: false,
     };
   }
   if (p.startsWith("/incomes")) {
     return {
       title: "Income",
-      section: "Finance & Reports",
-      description: "Review approved and pending business income records.",
+      section: "Insights",
+      description: "Approved and pending business income records.",
       immersive: false,
     };
   }
   if (p.startsWith("/profile")) {
     return {
-      title: "Profile",
-      section: "System",
-      description: "Your account information and operator preferences.",
+      title: "My Account",
+      section: "Account",
+      description: "Your identity, password, and operator preferences.",
       immersive: false,
     };
   }
   if (p.startsWith("/admin/users")) {
     return {
-      title: "Users & Staff",
-      section: "System",
+      title: "Team",
+      section: "Admin",
       description: "Manage console access, roles, and internal operators.",
       immersive: false,
     };
@@ -84,7 +92,7 @@ function getPageMeta(pathname: string | null) {
   if (p.startsWith("/admin/audit")) {
     return {
       title: "Audit Log",
-      section: "System",
+      section: "Admin",
       description: "Review important internal actions and governance records.",
       immersive: false,
     };
@@ -92,23 +100,23 @@ function getPageMeta(pathname: string | null) {
   if (p.startsWith("/admin/governance")) {
     return {
       title: "Governance",
-      section: "System",
-      description: "Administrative review and approval workflows.",
+      section: "Admin",
+      description: "Administrative review, approvals, and policy controls.",
       immersive: false,
     };
   }
   if (p.startsWith("/settings")) {
     return {
-      title: "Settings",
-      section: "System",
-      description: "Operator settings and console configuration.",
+      title: "Workspace Settings",
+      section: "Workspace",
+      description: "Business profile, customer-facing menus, and system configuration.",
       immersive: false,
     };
   }
   if (p.startsWith("/setup")) {
     return {
       title: "Setup",
-      section: "System",
+      section: "Workspace",
       description: "Business setup, runtime checks, and WhatsApp configuration.",
       immersive: false,
     };

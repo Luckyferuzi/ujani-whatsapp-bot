@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { post } from "@/lib/api";
 import { toast } from "sonner";
+import { Alert, Badge, Button, Card, EmptyState, Select, Textarea } from "@/components/ui";
 
 type BroadcastResponse = {
   ok: boolean;
@@ -19,30 +20,35 @@ export default function BroadcastPage() {
   const [message, setMessage] = useState("");
   const [audience, setAudience] = useState<Audience>("24h");
   const [confirmOptIn, setConfirmOptIn] = useState(false);
-
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState<BroadcastResponse | null>(null);
 
   const maxLength = 1000;
   const remaining = maxLength - message.length;
 
- const canSubmit = useMemo(() => {
-  const trimmed = message.trim();
-  if (!trimmed) return false;
-  if (!confirmOptIn) return false;
-  return true;
-}, [message, confirmOptIn]);
+  const canSubmit = useMemo(() => {
+    return message.trim().length > 0 && confirmOptIn;
+  }, [message, confirmOptIn]);
 
-  const audienceBadge = useMemo(() => {
+  const audienceMeta = useMemo(() => {
     if (audience === "24h") {
-      return { text: "Audience: Last 24h (Recommended)", tone: "ok" as const };
+      return {
+        title: "Recent customers",
+        copy: "Safer delivery window for customers who have messaged within the last 24 hours.",
+        tone: "accent" as const,
+      };
     }
-    return { text: "Audience: All-time (Higher failure risk)", tone: "warn" as const };
+
+    return {
+      title: "All-time audience",
+      copy: "Higher failure risk for customers outside the WhatsApp service window.",
+      tone: "warning" as const,
+    };
   }, [audience]);
 
   const previewText = useMemo(() => {
     const trimmed = message.trim();
-    return trimmed ? trimmed : "Write the message on the left to preview it here.";
+    return trimmed || "Write a service update to preview the outgoing message here.";
   }, [message]);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -50,12 +56,12 @@ export default function BroadcastPage() {
 
     const trimmed = message.trim();
     if (!trimmed) {
-      toast.error("Tafadhali andika ujumbe wa kutumwa.");
+      toast.error("Write a message before sending.");
       return;
     }
 
     if (!confirmOptIn) {
-      toast.error("Tafadhali thibitisha opt-in / ruhusa ya wateja.");
+      toast.error("Confirm that recipients are eligible for this message.");
       return;
     }
 
@@ -63,102 +69,96 @@ export default function BroadcastPage() {
     setResult(null);
 
     try {
-      const payload: any = { message: trimmed };
+      const payload: { message: string; within_hours?: number } = { message: trimmed };
       if (audience === "24h") payload.within_hours = 24;
 
       const res = await post<BroadcastResponse>("/api/customers/broadcast", payload);
-
       setResult(res);
-      toast.success("Broadcast imetumwa.", {
-        description: `Imetumwa kwa ${res.sent} wateja, imeshindikana kwa ${res.failed}.`,
+      toast.success("Broadcast sent", {
+        description: `Sent ${res.sent}. Failed ${res.failed}.`,
       });
     } catch (err: any) {
       console.error("Broadcast failed", err);
-      toast.error("Imeshindikana kutuma broadcast.", {
-        description: err?.message ?? "Kumetokea hitilafu. Tafadhali jaribu tena baadae.",
+      toast.error("Broadcast failed", {
+        description: err?.message ?? "Please try again shortly.",
       });
     } finally {
       setSending(false);
     }
   }
 
-return (
-  <>
-    <div className="broadcast-topbar">
-      <div>
-        <div className="broadcast-title">Broadcast</div>
-        <div className="broadcast-subtitle">
-          Tuma ujumbe mmoja kwa wateja wako. Weka ujumbe mfupi na wa huduma.
+  return (
+    <div className="broadcast-page">
+      <section className="broadcast-hero">
+        <div className="broadcast-hero__copy">
+          <div className="broadcast-hero__kicker">Outbound control</div>
+          <div className="broadcast-hero__title">Broadcasts</div>
+          <div className="broadcast-hero__text">
+            Send careful service updates to recent customers with clear audience scope,
+            message preview, and delivery results.
+          </div>
         </div>
-      </div>
-
-      <Link className="broadcast-link" href="/inbox">
-        Inbox
-      </Link>
-    </div>
-
-    <div className="broadcast-shell">
-      {/* LEFT: Simple Composer */}
-      <div className="broadcast-card">
-        <div className="broadcast-card-header">
-          <div className="broadcast-card-title">Ujumbe</div>
-
-          <span
-            className={
-              "broadcast-badge " +
-              (audience === "24h" ? "broadcast-badge--ok" : "broadcast-badge--warn")
-            }
-          >
-            {audience === "24h" ? "Last 24h" : "All-time"}
-          </span>
+        <div className="broadcast-hero__actions">
+          <Link href="/inbox" className="ui-button ui-button--secondary">
+            Open inbox
+          </Link>
+          <Link href="/" className="ui-button ui-button--ghost">
+            Command Center
+          </Link>
         </div>
+      </section>
 
-        <div className="broadcast-card-body">
-          <label className="broadcast-label">Walengwa</label>
-          <div className="broadcast-segment">
-            <button
-              type="button"
-              className={"broadcast-seg-btn" + (audience === "24h" ? " broadcast-seg-btn--active" : "")}
-              onClick={() => setAudience("24h")}
-              disabled={sending}
-            >
-              Last 24 hours
-            </button>
-
-            <button
-              type="button"
-              className={"broadcast-seg-btn" + (audience === "all" ? " broadcast-seg-btn--active" : "")}
-              onClick={() => setAudience("all")}
-              disabled={sending}
-            >
-              All-time
-            </button>
+      <div className="broadcast-grid">
+        <Card className="broadcast-panel" padding="lg">
+          <div className="broadcast-panel__head">
+            <div>
+              <div className="broadcast-panel__title">Campaign setup</div>
+              <div className="broadcast-panel__copy">
+                Keep the message short, practical, and clearly service-oriented.
+              </div>
+            </div>
+            <Badge tone={audienceMeta.tone}>{audienceMeta.title}</Badge>
           </div>
 
-          {audience === "all" && (
-            <div className="broadcast-alert">
-              Tahadhari: all-time inaweza kushindikana kwa wateja ambao hawaja-message ndani ya 24h.
+          <form className="broadcast-form" onSubmit={(e) => void handleSubmit(e)}>
+            <div className="broadcast-field">
+              <label className="broadcast-label" htmlFor="broadcast-audience">
+                Audience
+              </label>
+              <Select
+                id="broadcast-audience"
+                value={audience}
+                onChange={(e) => setAudience(e.target.value as Audience)}
+                disabled={sending}
+              >
+                <option value="24h">Recent customers from the last 24 hours</option>
+                <option value="all">All-time customer audience</option>
+              </Select>
             </div>
-          )}
 
-          <div className="broadcast-section">
-            <label className="broadcast-label">Ujumbe wa kutuma</label>
-            <textarea
-              className="broadcast-textarea"
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              maxLength={maxLength}
-              placeholder="Mfano: Habari, tunahitaji kuthibitisha oda yako. Jibu NDIO au HAPANA."
-              disabled={sending}
-            />
+            <Alert tone={audienceMeta.tone} title={audienceMeta.title} description={audienceMeta.copy} />
 
-            <div className="broadcast-meta-row">
-              <div className="broadcast-note">Tip: Ujumbe 1–3 mistari ni bora.</div>
-              <div className="broadcast-count">{remaining} herufi</div>
+            <div className="broadcast-field">
+              <label className="broadcast-label" htmlFor="broadcast-message">
+                Message
+              </label>
+              <Textarea
+                id="broadcast-message"
+                className="broadcast-textarea"
+                value={message}
+                onChange={(e) => setMessage(e.target.value)}
+                maxLength={maxLength}
+                placeholder="Example: Hello, we need to confirm your order today. Reply YES to continue or NO to cancel."
+                disabled={sending}
+              />
+              <div className="broadcast-meta-row">
+                <div className="broadcast-note">
+                  Best results usually come from 1 to 3 short lines.
+                </div>
+                <div className="broadcast-count ui-tabular-nums">{remaining} characters</div>
+              </div>
             </div>
-          </div>
 
-          <div className="broadcast-section">
             <label className="broadcast-check">
               <input
                 type="checkbox"
@@ -166,88 +166,81 @@ return (
                 onChange={(e) => setConfirmOptIn(e.target.checked)}
                 disabled={sending}
               />
-              <span>Ninathibitisha huu ni ujumbe wa huduma na wateja wamewasiliana na Ujani.</span>
+              <span>
+                I confirm this is a service message and the recipients are valid for outreach.
+              </span>
             </label>
-          </div>
 
-          <div className="broadcast-footer">
-            <button
-              type="button"
-              className="broadcast-primary"
-              onClick={(e) => void handleSubmit(e as any)}
-              disabled={sending || !canSubmit}
-            >
-              {sending ? "Inatuma..." : "Tuma"}
-            </button>
-
-            <div className="broadcast-flag">
-              {result ? (
-                <>
-                  Sent <strong>{result.sent}</strong> · Failed <strong>{result.failed}</strong>
-                </>
-              ) : (
-                "Preview iko upande wa kulia."
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* RIGHT: Preview + Results (Simple) */}
-      <div className="broadcast-preview">
-        <div className="broadcast-card">
-          <div className="broadcast-card-header">
-            <div className="broadcast-card-title">Preview</div>
-            <div className="preview-meta">WhatsApp style</div>
-          </div>
-
-          <div className="broadcast-card-body">
-            <div className="preview-bubble preview-bubble--bot">
-              Mfano wa jinsi ujumbe utaonekana kwa mteja.
-            </div>
-
-            <div className="preview-bubble preview-bubble--out">{previewText}</div>
-
-            {audience === "all" && (
-              <div className="broadcast-note" style={{ marginTop: 10 }}>
-                Kwa all-time: failures zinaweza kuongezeka bila templates.
+            <div className="broadcast-form__footer">
+              <div className="broadcast-form__hint">
+                Review the preview and audience before sending.
               </div>
-            )}
-          </div>
-        </div>
+              <Button type="submit" loading={sending} disabled={!canSubmit}>
+                {sending ? "Sending..." : "Send broadcast"}
+              </Button>
+            </div>
+          </form>
+        </Card>
 
-        <div className="broadcast-card">
-          <div className="broadcast-card-header">
-            <div className="broadcast-card-title">Matokeo</div>
-            <div className="preview-meta">{result ? "Done" : "—"}</div>
-          </div>
+        <div className="broadcast-side">
+          <Card className="broadcast-panel" padding="lg">
+            <div className="broadcast-panel__head">
+              <div>
+                <div className="broadcast-panel__title">Message preview</div>
+                <div className="broadcast-panel__copy">
+                  How the outgoing update will read inside the customer thread.
+                </div>
+              </div>
+              <Badge tone="neutral">WhatsApp</Badge>
+            </div>
 
-          <div className="broadcast-card-body">
+            <div className="broadcast-preview">
+              <div className="broadcast-preview__bubble broadcast-preview__bubble--system">
+                Service update preview
+              </div>
+              <div className="broadcast-preview__bubble broadcast-preview__bubble--out">
+                {previewText}
+              </div>
+            </div>
+          </Card>
+
+          <Card className="broadcast-panel" padding="lg">
+            <div className="broadcast-panel__head">
+              <div>
+                <div className="broadcast-panel__title">Delivery result</div>
+                <div className="broadcast-panel__copy">
+                  Sent and failed counts from the latest broadcast attempt.
+                </div>
+              </div>
+            </div>
+
             {!result ? (
-              <div className="broadcast-note">Baada ya kutuma, utapata sent/failed hapa.</div>
+              <EmptyState
+                eyebrow="Results"
+                title="No broadcast sent yet."
+                description="Run a broadcast to see delivery totals here."
+              />
             ) : (
-              <div className="broadcast-result-grid">
-                <div className="broadcast-kpi">
-                  <div className="broadcast-kpi-label">Sent</div>
-                  <div className="broadcast-kpi-value">{result.sent}</div>
+              <div className="broadcast-results">
+                <div className="broadcast-result-card">
+                  <div className="broadcast-result-card__label">Sent</div>
+                  <div className="broadcast-result-card__value ui-tabular-nums">{result.sent}</div>
                 </div>
-                <div className="broadcast-kpi">
-                  <div className="broadcast-kpi-label">Failed</div>
-                  <div className="broadcast-kpi-value">{result.failed}</div>
+                <div className="broadcast-result-card">
+                  <div className="broadcast-result-card__label">Failed</div>
+                  <div className="broadcast-result-card__value ui-tabular-nums">{result.failed}</div>
                 </div>
-                <div className="broadcast-kpi">
-                  <div className="broadcast-kpi-label">Total</div>
-                  <div className="broadcast-kpi-value">
-                    {typeof result.total === "number" ? result.total : "—"}
+                <div className="broadcast-result-card">
+                  <div className="broadcast-result-card__label">Total</div>
+                  <div className="broadcast-result-card__value ui-tabular-nums">
+                    {typeof result.total === "number" ? result.total : "-"}
                   </div>
                 </div>
               </div>
             )}
-          </div>
+          </Card>
         </div>
       </div>
     </div>
-  </>
-);
-
+  );
 }
