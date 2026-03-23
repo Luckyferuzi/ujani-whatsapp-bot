@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   fetchWithCache,
   getCacheEntry,
@@ -30,6 +30,11 @@ export function useCachedQuery<T>(
   options: UseCachedQueryOptions<T> = {}
 ): UseCachedQueryResult<T> {
   const { enabled = true, staleMs = 15_000, initialData } = options;
+  const fetcherRef = useRef(fetcher);
+
+  useEffect(() => {
+    fetcherRef.current = fetcher;
+  }, [fetcher]);
 
   const readSnapshot = useCallback(() => {
     if (!key) {
@@ -71,9 +76,9 @@ export function useCachedQuery<T>(
   const runFetch = useCallback(
     async (force = false) => {
       if (!key || !enabled) return undefined;
-      return fetchWithCache(key, fetcher, { force });
+      return fetchWithCache(key, () => fetcherRef.current(), { force });
     },
-    [enabled, fetcher, key]
+    [enabled, key]
   );
 
   useEffect(() => {
