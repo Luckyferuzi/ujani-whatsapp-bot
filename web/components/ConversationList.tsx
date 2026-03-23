@@ -1,9 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { formatPhonePretty } from "@/lib/phone";
-import { useCachedQuery } from "@/hooks/useCachedQuery";
 
 export type Convo = {
   id: string;
@@ -84,6 +83,7 @@ export default function ConversationList({
   onLoaded,
 }: Props) {
   const [items, setItems] = useState<Convo[]>([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [view, setView] = useState<ViewKey>("all");
 
@@ -92,52 +92,56 @@ export default function ConversationList({
     onLoadedRef.current = onLoaded;
   }, [onLoaded]);
 
-  const fetchConversations = useCallback(
-    () => api<{ items: Convo[] }>("/api/conversations"),
-    []
-  );
-
-  const { data, isLoading: loading, refetch } = useCachedQuery(
-    "conversations:list",
-    fetchConversations,
-    { staleMs: 3_000 }
-  );
-
   useEffect(() => {
-    const next = data?.items ?? [];
-    setItems(next);
-    onLoadedRef.current?.(next);
-  }, [data]);
+    let cancelled = false;
 
-  useEffect(() => {
-    void refetch();
+    const load = async () => {
+      try {
+        const data = await api<{ items: Convo[] }>("/api/conversations");
+        if (cancelled) return;
+        const next = data?.items ?? [];
+        setItems(next);
+        onLoadedRef.current?.(next);
+      } catch (err) {
+        if (cancelled) return;
+        console.error("Failed to load conversations", err);
+        setItems([]);
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    };
 
-    if (typeof window === "undefined") return;
+    void load();
 
-    let timer: number | null = null;
+    if (typeof window === "undefined") {
+      return () => {
+        cancelled = true;
+      };
+    }
 
     const poll = () => {
       if (document.visibilityState !== "visible") return;
-      void refetch();
+      void load();
     };
 
-    timer = window.setInterval(poll, CONVERSATIONS_POLL_MS);
+    const timer = window.setInterval(poll, CONVERSATIONS_POLL_MS);
 
     const onVisibilityChange = () => {
       if (document.visibilityState === "visible") {
-        void refetch();
+        void load();
       }
     };
 
-    window.addEventListener("visibilitychange", onVisibilityChange);
+    document.addEventListener("visibilitychange", onVisibilityChange);
 
     return () => {
-      if (timer != null) {
-        window.clearInterval(timer);
-      }
-      window.removeEventListener("visibilitychange", onVisibilityChange);
+      cancelled = true;
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [refetch]);
+  }, []);
 
   useEffect(() => {
     if (!phoneFilter) return;

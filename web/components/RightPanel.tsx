@@ -1,11 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { formatPhonePretty } from "@/lib/phone";
 import OperatorTimelineNotes from "@/components/OperatorTimelineNotes";
-import { useCachedQuery } from "@/hooks/useCachedQuery";
 
 export interface RightPanelProps {
   conversationId: string | null;
@@ -150,6 +149,8 @@ export default function RightPanel({ conversationId }: RightPanelProps) {
 
   const [summary, setSummary] = useState<ConversationSummary | null>(null);
   const [orders, setOrders] = useState<OrderRow[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [activeView, setActiveView] = useState<"orders" | "settings">("orders");
 
   const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null);
@@ -206,42 +207,7 @@ export default function RightPanel({ conversationId }: RightPanelProps) {
     router.push("/orders");
   };
 
-  const fetchPanelData = useCallback(async () => {
-    if (!conversationId) {
-      return {
-        summary: null,
-        orders: [] as OrderRow[],
-      };
-    }
-
-    const [summaryData, ordersData] = await Promise.all([
-      api<ConversationSummary>(`/api/conversations/${conversationId}/summary`),
-      api<{ items: OrderRow[] }>(`/api/conversations/${conversationId}/orders`),
-    ]);
-
-    return {
-      summary: summaryData,
-      orders: ordersData?.items ?? [],
-    };
-  }, [conversationId]);
-
-  const {
-    data: panelData,
-    isLoading: loading,
-    isRefreshing,
-    refetch: refetchPanel,
-  } = useCachedQuery(
-    conversationId ? `conversation:panel:${conversationId}` : null,
-    fetchPanelData,
-    { staleMs: 5_000, enabled: !!conversationId }
-  );
-
-    useEffect(() => {
-    const mode = readThemeMode();
-    setThemeMode(mode);
-  }, []);
-
-  useEffect(() => {
+  async function loadPanelData(showLoading: boolean) {
     if (!conversationId) {
       setSummary(null);
       setOrders([]);
@@ -249,20 +215,48 @@ export default function RightPanel({ conversationId }: RightPanelProps) {
       return;
     }
 
-    const nextSummary = panelData?.summary ?? null;
-    const nextOrders = panelData?.orders ?? [];
-    setSummary(nextSummary);
-    setOrders(nextOrders);
-
-    if (nextOrders.length === 0) {
-      setSelectedOrderId(null);
-    } else if (selectedOrderId == null || !nextOrders.some((o) => o.id === selectedOrderId)) {
-      setSelectedOrderId(nextOrders[0].id);
+    if (showLoading) {
+      setLoading(true);
+    } else {
+      setIsRefreshing(true);
     }
-  }, [conversationId, panelData, selectedOrderId]);
+
+    try {
+      const [summaryData, ordersData] = await Promise.all([
+        api<ConversationSummary>(`/api/conversations/${conversationId}/summary`),
+        api<{ items: OrderRow[] }>(`/api/conversations/${conversationId}/orders`),
+      ]);
+
+      const nextSummary = summaryData ?? null;
+      const nextOrders = ordersData?.items ?? [];
+      setSummary(nextSummary);
+      setOrders(nextOrders);
+
+      if (nextOrders.length === 0) {
+        setSelectedOrderId(null);
+      } else {
+        setSelectedOrderId((current) =>
+          current != null && nextOrders.some((o) => o.id === current)
+            ? current
+            : nextOrders[0].id
+        );
+      }
+    } finally {
+      if (showLoading) {
+        setLoading(false);
+      } else {
+        setIsRefreshing(false);
+      }
+    }
+  }
+
+    useEffect(() => {
+    const mode = readThemeMode();
+    setThemeMode(mode);
+  }, []);
 
   useEffect(() => {
-    void refetchPanel();
+    void loadPanelData(true);
 
     // reset view & transient inputs when switching conversations
     setActiveView("orders");
@@ -274,7 +268,7 @@ export default function RightPanel({ conversationId }: RightPanelProps) {
     setRiderPhoneInput("");
     setStatusError(null);
     setShowRiderForm(false);
-  }, [conversationId, refetchPanel]);
+  }, [conversationId]);
 
   const handleUpdatePaymentStatus = async (status: "verifying" | "paid") => {
     if (!payment?.id) return;
@@ -306,7 +300,7 @@ export default function RightPanel({ conversationId }: RightPanelProps) {
         setShowPaymentForm(false);
       }
 
-      await refetchPanel();
+      await loadPanelData(false);
     } catch (err) {
       console.error("Failed to update payment status", err);
       setPaymentError("Failed to update payment. Please try again.");
@@ -346,7 +340,7 @@ export default function RightPanel({ conversationId }: RightPanelProps) {
         setRiderPhoneInput("");
       }
 
-      await refetchPanel();
+      await loadPanelData(false);
     } catch (err) {
       console.error("Failed to update order status", err);
       setStatusError("Failed to update order status. Please try again.");
@@ -418,7 +412,7 @@ export default function RightPanel({ conversationId }: RightPanelProps) {
         <button
           type="button"
           className="rp-icon-button"
-          onClick={() => void refetchPanel()}
+          onClick={() => void loadPanelData(false)}
           disabled={loading || isRefreshing}
           title="Refresh"
           aria-label="Refresh"

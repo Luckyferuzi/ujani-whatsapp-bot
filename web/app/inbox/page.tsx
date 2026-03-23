@@ -12,6 +12,7 @@ type MobileView = "list" | "chat";
 
 const MOBILE_BREAKPOINT = 768; // px
 const STORAGE_KEY = "ujani-inbox-active";
+const STORAGE_MAX_AGE_MS = 10 * 60 * 1000;
 
 function readSavedConversationId(): string | null {
   try {
@@ -19,7 +20,13 @@ function readSavedConversationId(): string | null {
     if (!raw) return null;
     const parsed = JSON.parse(raw);
 
-    if (parsed && typeof parsed === "object" && typeof parsed.id === "string") {
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      typeof parsed.id === "string" &&
+      typeof parsed.savedAt === "number" &&
+      Date.now() - parsed.savedAt < STORAGE_MAX_AGE_MS
+    ) {
       return parsed.id;
     }
 
@@ -31,7 +38,10 @@ function readSavedConversationId(): string | null {
 
 function writeSavedConversationId(id: string) {
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ id }));
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ id, savedAt: Date.now() })
+    );
   } catch {
     // ignore
   }
@@ -54,7 +64,8 @@ export default function InboxPage() {
   const searchParams = useSearchParams();
   const phoneFromUrl = searchParams.get("phone");
 
-  // Saved selection restore (by id only, validated against server list)
+  // Saved selection restore (time-boxed and mobile-only to avoid reopening
+  // very heavy threads automatically on desktop page load)
   const [savedId, setSavedId] = useState<string | null>(null);
   const [restoreDone, setRestoreDone] = useState(false);
 
@@ -115,7 +126,7 @@ export default function InboxPage() {
 
     if (restoreDone) return;
 
-    if (savedId) {
+    if (savedId && isMobile) {
       const match = list.find((c) => c.id === savedId);
       if (match) {
         setActive(match);
@@ -126,6 +137,9 @@ export default function InboxPage() {
         clearSavedConversationId();
         setSavedId(null);
       }
+    } else if (savedId && !isMobile) {
+      clearSavedConversationId();
+      setSavedId(null);
     }
 
     setRestoreDone(true);
