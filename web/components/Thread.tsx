@@ -14,6 +14,7 @@ import { formatPhonePretty } from "@/lib/phone";
 import { socket } from "@/lib/socket";
 import type { Convo } from "./ConversationList";
 import { useRouter } from "next/navigation";
+import { EmptyState, RefreshIndicator, ThreadSkeleton } from "@/components/ui";
 
 type ThreadProps = {
   convo: Convo;
@@ -73,10 +74,6 @@ type ParsedMenu = {
   sections: { title: string; options: string[] }[];
 };
 
-/**
- * Menus stored as JSON, e.g.
- * [MENU]{"kind":"menu","subtype":"buttons","header":null,"body":"Vitendo",...}
- */
 function parseMenuFromJsonBody(body: string): ParsedMenu | null {
   const match = body.match(/^\[MENU\](.+)$/);
   if (!match) return null;
@@ -94,7 +91,6 @@ function parseMenuFromJsonBody(body: string): ParsedMenu | null {
 
     const sections: ParsedMenu["sections"] = [];
 
-    // Buttons menus
     if (payload.subtype === "buttons" && Array.isArray(payload.buttons)) {
       const opts = (payload.buttons as unknown[])
         .filter((v): v is string => typeof v === "string")
@@ -109,18 +105,13 @@ function parseMenuFromJsonBody(body: string): ParsedMenu | null {
       }
     }
 
-    // List menus
     if (payload.subtype === "list" && Array.isArray(payload.sections)) {
       for (const sec of payload.sections as any[]) {
         const secTitle = typeof sec?.title === "string" ? sec.title.trim() : "";
         const rows = Array.isArray(sec?.rows) ? sec.rows : [];
         const opts = rows
           .map((r: any) =>
-            typeof r === "string"
-              ? r
-              : typeof r?.title === "string"
-              ? r.title
-              : ""
+            typeof r === "string" ? r : typeof r?.title === "string" ? r.title : ""
           )
           .map((s: string) => s.trim())
           .filter(Boolean);
@@ -143,25 +134,14 @@ function parseMenuFromJsonBody(body: string): ParsedMenu | null {
   }
 }
 
-/**
- * Menus stored as plain text, e.g.
- *
- * Vitendo:
- * • Ongeza kikapuni
- * • Nunua sasa
- * • Maelezo zaidi
- */
 function parseMenuFromPlainBody(body: string): ParsedMenu | null {
   if (!body) return null;
 
   const rawLines = body.split("\n");
   const trimmed = rawLines.map((l) => l.trim());
-
-  // Must have at least one "• something"
-  const hasBullet = trimmed.some((l) => l.startsWith("• "));
+  const hasBullet = trimmed.some((l) => /^([•]|â€¢)\s/.test(l));
   if (!hasBullet) return null;
 
-  // Find first "Section:" line
   let firstHeaderIndex = -1;
   for (let i = 0; i < trimmed.length; i++) {
     const line = trimmed[i];
@@ -197,12 +177,10 @@ function parseMenuFromPlainBody(body: string): ParsedMenu | null {
         continue;
       }
 
-      // Next section header
       if (line.endsWith(":")) break;
 
-      // Option line: starts with "• "
-      if (line.startsWith("• ")) {
-        options.push(line.slice(2).trim());
+      if (/^([•]|â€¢)\s/.test(line)) {
+        options.push(line.replace(/^([•]|â€¢)\s*/, "").trim());
       }
 
       i++;
@@ -218,7 +196,6 @@ function parseMenuFromPlainBody(body: string): ParsedMenu | null {
   return { introLines, sections };
 }
 
-/** Common React renderer for menus */
 function renderMenuBlock(parsed: ParsedMenu) {
   return (
     <div className="thread-menu">
@@ -256,44 +233,44 @@ function formatInteractiveDisplay(id: string, products: Record<string, string>):
   if (id.startsWith("PRODUCT_")) {
     const sku = id.slice("PRODUCT_".length);
     const name = nameForSku(sku);
-    return `✅ Mteja amechagua bidhaa: ${name}`;
+    return `Customer selected product: ${name}`;
   }
 
   if (id.startsWith("DETAILS_") && !id.startsWith("DETAILS2_")) {
     const sku = id.slice("DETAILS_".length);
     const name = nameForSku(sku);
-    return `ℹ️ Mteja ameomba maelezo zaidi kuhusu ${name}`;
+    return `Customer requested more details about ${name}`;
   }
 
   if (id.startsWith("DETAILS2_")) {
     const rest = id.slice("DETAILS2_".length);
     const [sku, section] = rest.split("_");
     const name = nameForSku(sku);
-    if (section === "ABOUT") return `ℹ️ Mteja ameomba maelezo kuhusu ${name}`;
-    if (section === "USAGE") return `🧴 Mteja ameomba jinsi ya kutumia ${name}`;
-    if (section === "WARN") return `⚠️ Mteja ameomba tahadhari muhimu za ${name}`;
+    if (section === "ABOUT") return `Customer requested an overview of ${name}`;
+    if (section === "USAGE") return `Customer requested usage guidance for ${name}`;
+    if (section === "WARN") return `Customer requested warnings for ${name}`;
   }
 
   if (id.startsWith("ADD_")) {
     const sku = id.slice("ADD_".length);
     const name = nameForSku(sku);
-    return `🛒 Mteja ameongeza kwenye mzigo: ${name}`;
+    return `Customer added to cart: ${name}`;
   }
 
   if (id.startsWith("BUY_")) {
     const sku = id.slice("BUY_".length);
     const name = nameForSku(sku);
-    return `💳 Mteja amebonyeza *Nunua sasa* — ${name}`;
+    return `Customer chose Buy now for ${name}`;
   }
 
-  if (id === "ACTION_VIEW_CART") return "🛒 Mteja ameangalia mzigo (cart)";
-  if (id === "ACTION_CHECKOUT") return "✅ Mteja ameanza kukamilisha oda (checkout)";
-  if (id === "ACTION_TRACK_BY_NAME") return "🔍 Mteja anafuata oda kwa jina";
-  if (id === "ACTION_TALK_TO_AGENT") return "☎️ Mteja ameomba kuongea na agent";
-  if (id === "ACTION_FAQ") return "❓ Mteja ameangalia maswali (FAQ)";
-  if (id === "ACTION_BACK") return "↩️ Mteja amerudi kwenye menyu kuu";
+  if (id === "ACTION_VIEW_CART") return "Customer viewed cart";
+  if (id === "ACTION_CHECKOUT") return "Customer started checkout";
+  if (id === "ACTION_TRACK_BY_NAME") return "Customer is tracking an order by name";
+  if (id === "ACTION_TALK_TO_AGENT") return "Customer requested an agent";
+  if (id === "ACTION_FAQ") return "Customer opened FAQ";
+  if (id === "ACTION_BACK") return "Customer returned to the main menu";
 
-  return `⛓️ Interactive: ${id}`;
+  return `Interactive action: ${id}`;
 }
 
 type Role = "customer" | "agent" | "bot";
@@ -304,7 +281,6 @@ function getRole(msg: Msg): Role {
 
   const body = msg.body ?? "";
 
-  // Bot tends to send structured menus / interactive markers
   if (parseMenuFromJsonBody(body)) return "bot";
   if (parseMenuFromPlainBody(body)) return "bot";
   if (/^\[interactive:(.+)\]$/.test(body)) return "bot";
@@ -312,7 +288,6 @@ function getRole(msg: Msg): Role {
   return "agent";
 }
 
-// LOCATION handling: "LOCATION lat,lng"
 function renderBody(
   msg: Msg,
   products: Record<string, string>,
@@ -325,7 +300,6 @@ function renderBody(
   const inbound = msg.direction === "in" || msg.direction === "inbound";
   const outbound = !inbound;
 
-  /* 0) Menus: JSON then plain-text */
   const jsonMenu = parseMenuFromJsonBody(body);
   if (jsonMenu) return renderMenuBlock(jsonMenu);
 
@@ -334,7 +308,6 @@ function renderBody(
     if (plainMenu) return renderMenuBlock(plainMenu);
   }
 
-  /* 1) Old interactive markers */
   const interactiveMatch = body.match(/^\[interactive:(.+)\]$/);
   if (interactiveMatch) {
     const id = interactiveMatch[1];
@@ -342,7 +315,6 @@ function renderBody(
     return <div className="thread-text">{pretty}</div>;
   }
 
-  /* 2) LOCATION */
   if (body.startsWith("LOCATION ")) {
     const raw = body.substring("LOCATION ".length).trim();
     const [latStr, lngStr] = raw.split(",").map((p) => p.trim());
@@ -357,18 +329,17 @@ function renderBody(
 
     return (
       <div className="thread-location">
-        <div className="thread-text">Mteja ametuma lokesheni</div>
+        <div className="thread-text">Customer shared a location</div>
         <div className="thread-location-coords">
           {lat.toFixed(5)}, {lng.toFixed(5)}
         </div>
         <a href={url} target="_blank" rel="noreferrer" className="thread-location-link">
-          Fungua kwenye ramani
+          Open in maps
         </a>
       </div>
     );
   }
 
-  /* 3) MEDIA marker: MEDIA:kind:id */
   const mediaMatch = body.match(/^MEDIA:([a-z]+):(.+)$/);
   if (mediaMatch) {
     const kind = mediaMatch[1] as "image" | "video" | "audio" | "document";
@@ -385,9 +356,9 @@ function renderBody(
           type="button"
           className="thread-media-edit"
           onClick={() => onToggleMediaActions(msg.id)}
-          title="Hariri media"
+          title="Manage media actions"
         >
-          ✏️
+          Edit
         </button>
       ) : null;
 
@@ -398,7 +369,7 @@ function renderBody(
           className="thread-media-resend"
           onClick={() => onResendMedia(kind, mediaId)}
         >
-          Tuma tena media
+          Resend media
         </button>
       ) : null;
 
@@ -409,16 +380,16 @@ function renderBody(
           className="thread-media-delete"
           onClick={() => onDeleteMedia(msg.id)}
         >
-          Futa media
+          Delete media
         </button>
       ) : null;
 
     if (kind === "image") {
       return (
         <div className="thread-media">
-          <img src={src} className="thread-image" alt="Picha kutoka mteja" />
+          <img src={src} className="thread-image" alt="Media sent in conversation" />
           <a href={src} target="_blank" rel="noreferrer" className="thread-media-link">
-            Fungua picha
+            Open image
           </a>
           {showActions && (resendButton || deleteButton) && (
             <div className="thread-media-actions">
@@ -436,7 +407,7 @@ function renderBody(
         <div className="thread-media">
           <video src={src} controls className="thread-video" />
           <a href={src} target="_blank" rel="noreferrer" className="thread-media-link">
-            Fungua video
+            Open video
           </a>
           {showActions && (resendButton || deleteButton) && (
             <div className="thread-media-actions">
@@ -468,7 +439,7 @@ function renderBody(
       return (
         <div className="thread-media">
           <a href={src} target="_blank" rel="noreferrer" className="thread-media-link">
-            Fungua faili
+            Open file
           </a>
           {showActions && (resendButton || deleteButton) && (
             <div className="thread-media-actions">
@@ -482,7 +453,6 @@ function renderBody(
     }
   }
 
-  /* 4) Default: plain text */
   return <div className="thread-text">{body}</div>;
 }
 
@@ -490,6 +460,7 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
   const router = useRouter();
   const [messages, setMessages] = useState<Msg[]>([]);
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [agentAllowed, setAgentAllowed] = useState<boolean>(convo.agent_allowed);
   const [text, setText] = useState("");
   const [toggling, setToggling] = useState(false);
@@ -497,14 +468,12 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
   const [productNames, setProductNames] = useState<Record<string, string>>({});
   const [activeMediaActionsId, setActiveMediaActionsId] = useState<string | number | null>(null);
 
-  // scrolling
   const messagesRef = useRef<HTMLDivElement | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const firstUnreadRef = useRef<HTMLDivElement | null>(null);
   const [isAtBottom, setIsAtBottom] = useState(true);
   const initialScrolledRef = useRef(false);
 
-  // file input
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   function handleToggleMediaActions(messageId: string | number) {
@@ -516,7 +485,7 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
   function handleInputKeyDown(e: KeyboardEvent<HTMLInputElement>) {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      handleSend(e as any);
+      handleSend(e as unknown as FormEvent);
     }
   }
 
@@ -538,12 +507,12 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
       }
     } catch (err: any) {
       console.error("Failed to resend media", err);
-      alert(err?.message ?? "Imeshindikana kutuma media tena. Tafadhali jaribu tena baadae.");
+      alert(err?.message ?? "Unable to resend media right now. Please try again.");
     }
   }
 
   async function handleDeleteMedia(messageId: string | number) {
-    const confirmDelete = window.confirm("Una uhakika unataka kufuta hii media?");
+    const confirmDelete = window.confirm("Delete this media message?");
     if (!confirmDelete) return;
 
     try {
@@ -551,7 +520,7 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
       setMessages((prev) => prev.filter((m) => String(m.id) !== String(messageId)));
     } catch (err: any) {
       console.error("Failed to delete media", err);
-      alert(err?.message ?? "Imeshindikana kufuta media. Tafadhali jaribu tena baadae.");
+      alert(err?.message ?? "Unable to delete media right now. Please try again.");
     }
   }
 
@@ -575,7 +544,7 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
       }
     } catch (err: any) {
       console.error("Failed to send media", err);
-      alert(err?.message ?? "Imeshindikana kutuma media. Tafadhali jaribu tena baadae.");
+      alert(err?.message ?? "Unable to send media right now. Please try again.");
     } finally {
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
@@ -601,7 +570,6 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
     void loadProducts();
   }, []);
 
-  // oldest unread inbound index
   const oldestUnreadIndex = (() => {
     if (!messages.length) return -1;
     return messages.findIndex(
@@ -631,27 +599,39 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
     setIsAtBottom(distFromBottom <= threshold);
   };
 
-  async function loadMessages() {
-    setLoading(true);
+  async function loadMessages(options?: { preserveExisting?: boolean }) {
+    const preserveExisting = options?.preserveExisting ?? messages.length > 0;
+
+    if (preserveExisting) {
+      setRefreshing(true);
+    } else {
+      setLoading(true);
+    }
+
     try {
       const { items } = await api<{ items: Msg[] }>(`/api/conversations/${convo.id}/messages`);
       setMessages(items ?? []);
+      setActiveMediaActionsId(null);
     } catch (err) {
       console.error("Failed to load messages", err);
       setMessages([]);
+      setActiveMediaActionsId(null);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }
 
-  // Initial load when conversation changes
   useEffect(() => {
     setAgentAllowed(convo.agent_allowed);
+    setMessages([]);
+    setText("");
+    setActiveMediaActionsId(null);
     initialScrolledRef.current = false;
-    void loadMessages();
+    setIsAtBottom(true);
+    void loadMessages({ preserveExisting: false });
   }, [convo.id, convo.agent_allowed]);
 
-  // Handle scroll on message change
   useEffect(() => {
     if (!messages.length) return;
 
@@ -668,7 +648,6 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
     }
   }, [messages, oldestUnreadIndex, isAtBottom]);
 
-  // Socket updates
   useEffect(() => {
     const s = socket();
     if (!s) return;
@@ -680,9 +659,13 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
       const msg = payload.message as Msg;
 
       setMessages((prev) => {
-        if (!prev) return [msg];
-        if (prev.some((m) => String(m.id) === String(msg.id))) return prev;
-        return [...prev, msg];
+        if (!prev.some((m) => String(m.id) === String(msg.id))) {
+          return [...prev, msg];
+        }
+
+        return prev.map((existing) =>
+          String(existing.id) === String(msg.id) ? msg : existing
+        );
       });
     };
 
@@ -706,7 +689,7 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
     } catch (err) {
       console.error("Failed to toggle agent mode", err);
       setAgentAllowed(!next);
-      alert("Imeshindikana kubadilisha mode, angalia server logs.");
+      alert("Unable to update handover mode right now.");
     } finally {
       setToggling(false);
     }
@@ -718,11 +701,26 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
     if (!value) return;
 
     if (!agentAllowed) {
-      alert("Bot mode iko ON. Washa Agent Mode ili kujibu.");
+      alert("Bot mode is active. Switch to Agent Mode before sending a manual reply.");
       return;
     }
 
+    const optimisticId = `temp-${Date.now()}`;
+    const optimisticMessage: Msg = {
+      id: optimisticId,
+      conversation_id: convo.id,
+      direction: "outbound",
+      type: "text",
+      body: value,
+      status: "sending",
+      created_at: new Date().toISOString(),
+    };
+
     setSending(true);
+    setText("");
+    setMessages((prev) => [...prev, optimisticMessage]);
+    scrollToBottom("smooth");
+
     try {
       await api("/api/send", {
         method: "POST",
@@ -733,11 +731,12 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
         }),
       });
 
-      setText("");
-      await loadMessages();
+      await loadMessages({ preserveExisting: true });
     } catch (err) {
       console.error("Failed to send message", err);
-      alert("Imeshindikana kutuma ujumbe, angalia server logs.");
+      setMessages((prev) => prev.filter((m) => String(m.id) !== optimisticId));
+      setText(value);
+      alert("Unable to send the message right now.");
     } finally {
       setSending(false);
     }
@@ -747,20 +746,26 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
 
   return (
     <div className="thread">
-      {/* HEADER */}
       <div className="thread-header">
         <div className="thread-header-main">
           <div className="thread-title-row">
             <div className="thread-title" title={title}>
               {title}
             </div>
-            <span className={"thread-mode-chip" + (agentAllowed ? " thread-mode-chip--agent" : " thread-mode-chip--bot")}>
+            <span
+              className={
+                "thread-mode-chip" +
+                (agentAllowed ? " thread-mode-chip--agent" : " thread-mode-chip--bot")
+              }
+            >
               {agentAllowed ? "Human handover" : "Bot managed"}
             </span>
           </div>
           <div className="thread-subtitle">
             {formatPhonePretty(convo.phone)}
-            {convo.lang && <span className="thread-lang"> · {convo.lang.toUpperCase()}</span>}
+            {convo.lang && (
+              <span className="thread-lang"> · {convo.lang.toUpperCase()}</span>
+            )}
             {(convo.restock_subscribed_count ?? 0) > 0 && (
               <span className="badge badge--restock thread-restock-badge">
                 Stock Alert
@@ -779,7 +784,11 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
               Open orders
             </button>
             {onOpenContext ? (
-              <button type="button" className="thread-header-action thread-header-action--mobile" onClick={onOpenContext}>
+              <button
+                type="button"
+                className="thread-header-action thread-header-action--mobile"
+                onClick={onOpenContext}
+              >
                 Context
               </button>
             ) : null}
@@ -790,27 +799,38 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
           className={"thread-agent-toggle" + (agentAllowed ? " thread-agent-toggle--on" : "")}
           onClick={toggleAgentMode}
           disabled={toggling}
-          title={agentAllowed ? "Agent Mode ON" : "Bot Mode ON"}
+          title={agentAllowed ? "Agent mode is active" : "Bot mode is active"}
           aria-label={agentAllowed ? "Switch to Bot Mode" : "Switch to Agent Mode"}
         >
           <span className="thread-agent-toggle-left">
             <span className="thread-agent-toggle-icon" aria-hidden="true">
-              {agentAllowed ? "🧑‍💼" : "🤖"}
+              {agentAllowed ? "A" : "B"}
             </span>
             <span className="thread-agent-toggle-text">
               {agentAllowed ? "Agent Mode" : "Bot Mode"}
             </span>
           </span>
         </button>
-
       </div>
 
-      {/* MESSAGES */}
       <div className="thread-body">
+        {refreshing && messages.length > 0 ? (
+          <div className="thread-loading-banner">
+            <RefreshIndicator label="Refreshing thread" />
+          </div>
+        ) : null}
         {loading && messages.length === 0 ? (
-          <div className="thread-empty">Loading messages…</div>
+          <div className="thread-loading-state">
+            <ThreadSkeleton rows={8} />
+          </div>
         ) : messages.length === 0 ? (
-          <div className="thread-empty">Hakuna ujumbe bado.</div>
+          <div className="thread-loading-state">
+            <EmptyState
+              eyebrow="Conversation"
+              title="No messages yet."
+              description="This thread will populate as the customer and operators exchange messages."
+            />
+          </div>
         ) : (
           <div className="thread-messages" ref={messagesRef} onScroll={handleScroll}>
             {messages.map((m, idx) => {
@@ -845,19 +865,17 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
               const groupedWithNext =
                 !!next && nextRole === role && gapNext <= GROUP_GAP_MINUTES;
 
-              // Show meta only on the last message in a group
               const showMeta = !groupedWithNext;
-
-              // Show "Bot" label only once per bot block
               const showBotLabel = role === "bot" && !groupedWithPrev;
-
               const isFirstUnread = idx === oldestUnreadIndex;
+              const isSending = outbound && m.status === "sending";
 
               const bubbleClass =
                 "thread-bubble" +
                 (role === "bot" ? " thread-bubble--bot" : "") +
                 (groupedWithPrev ? " thread-bubble--stacked-prev" : "") +
-                (groupedWithNext ? " thread-bubble--stacked-next" : "");
+                (groupedWithNext ? " thread-bubble--stacked-next" : "") +
+                (isSending ? " thread-bubble--pending" : "");
 
               const msgClass =
                 "thread-message " +
@@ -873,10 +891,7 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
                     </div>
                   ) : null}
 
-                  <div
-                    ref={isFirstUnread ? firstUnreadRef : null}
-                    className={msgClass}
-                  >
+                  <div ref={isFirstUnread ? firstUnreadRef : null} className={msgClass}>
                     {showBotLabel && <div className="thread-role-label">Bot</div>}
 
                     <div className={bubbleClass}>
@@ -894,7 +909,12 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
                           <span className="thread-time">{formatTime(m.created_at)}</span>
                           {outbound && m.status === "read" && (
                             <span className="thread-ticks" aria-label="read">
-                              ✓✓
+                              Read
+                            </span>
+                          )}
+                          {isSending && (
+                            <span className="thread-ticks thread-ticks--pending" aria-label="sending">
+                              Sending
                             </span>
                           )}
                         </div>
@@ -910,7 +930,6 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
         )}
       </div>
 
-      {/* COMPOSER */}
       <div className="thread-footer">
         {!agentAllowed ? (
           <div className="thread-composer-notice">
@@ -921,10 +940,11 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
           <button
             type="button"
             className="thread-attach-button"
-            onClick={() => fileInputRef.current?.click()}
-            title="Tuma picha / faili"
+            onClick={handleAttachClick}
+            title="Add attachment"
+            aria-label="Add attachment"
           >
-            📎
+            Add
           </button>
 
           <input
@@ -939,7 +959,7 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
             className="thread-input"
             value={text}
             onChange={(e) => setText(e.target.value)}
-            placeholder="Andika ujumbe..."
+            placeholder="Write a reply..."
             onKeyDown={handleInputKeyDown}
           />
 
@@ -949,7 +969,7 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
             onClick={handleSend}
             disabled={sending}
           >
-            {sending ? "Inatuma..." : "Tuma"}
+            {sending ? "Sending..." : "Send"}
           </button>
         </div>
       </div>

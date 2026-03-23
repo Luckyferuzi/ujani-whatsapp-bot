@@ -1,0 +1,530 @@
+.config-root {
+  min-height: calc(100vh - var(--topbar-height, 56px));
+  padding: var(--ds-space-6);
+}
+
+.config-page {
+  display: grid;
+  gap: var(--ds-space-5);
+  max-width: 1180px;
+  margin: 0 auto;
+}
+
+.config-page--narrow {
+  max-width: 1040px;
+}
+
+.config-header-meta,
+.config-actions,
+.config-badge-row,
+.config-inline-actions,
+.config-upload-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  flex-wrap: wrap;
+}
+
+.config-header-meta {
+  justify-content: flex-end;
+}
+
+.config-overview-grid,
+.config-stat-grid,
+.config-summary-grid,
+.config-runtime-grid,
+.config-detail-grid,
+.config-form-grid,
+.config-spotlight-grid,
+.config-account-grid {
+  display: grid;
+  gap: var(--ds-space-4);
+}
+
+.config-overview-grid {
+  grid-template-columns: minmax(0, 1.35fr) minmax(20rem, 0.95fr);
+}
+
+.config-summary-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.config-stat-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.config-runtime-grid,
+.config-detail-grid,
+.config-form-grid,
+.config-account-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.config-spotlight-grid {
+  grid-template-columns: minmax(0, 1.2fr) minmax(18rem, 0.8fr);
+}
+
+.config-nav {
+  display: grid;
+  gap: var(--ds-space-2);
+}
+
+.config-nav__item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--ds-space-3);
+  padding: var(--ds-space-3) var(--ds-space-4);
+  border-radius: var(--ds-radius-panel);
+  border: 1px solid var(--ds-color-border-soft);
+  background: color-mix(in srgb, var(--ds-color-surface-muted) 72%, transparent);
+  color: inherit;
+  text-decoration: none;
+  transition: border-color var(--ds-duration-base) var(--ds-ease-standard),
+    background-color var(--ds-duration-base) var(--ds-ease-standard),
+    transform var(--ds-duration-base) var(--ds-ease-standard);
+}
+
+.config-nav__item:hover {
+  transform: translateY(-1px);
+  border-color: var(--ds-color-accent-border);
+  background: color-mix(in srgb, var(--ds-color-accent-soft) 42%, var(--ds-color-surface-muted));
+}
+
+.config-nav__label {
+  font-size: 0.9rem;
+  line-height: 1.35;
+  font-weight: var(--ds-font-weight-semibold);
+  color: var(--ds-color-text-strong);
+}
+
+.config-nav__meta {
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  color: var(--ds-color-text-muted);
+}
+
+.config-stat-card,
+.config-summary-card,
+.config-step-card,
+.config-note,
+.config-preview,
+.config-upload,
+.config-identity-card,
+.config-security-card {
+  display: grid;
+  gap: var(--ds-space-2);
+}
+
+.config-stat-card {
+  padding: var(--ds-space-4);
+  border-radius: var(--ds-radius-panel);
+  border: 1px solid var(--ds-color-border-soft);
+  background: color-mix(in srgb, var(--ds-color-surface-raised) 92%, transparent);
+}
+
+.config-summary-card {
+  align-content: start;
+}
+
+.config-kicker,
+.config-stat-label,
+.config-section-eyebrow,
+.config-field-label,
+.config-list-label {
+  font-size: 0.75rem;
+  line-height: 1.35;
+  font-weight: var(--ds-font-weight-semibold);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.config-kicker,
+.config-section-eyebrow {
+  color: var(--ds-color-accent-strong);
+}
+
+.config-stat-label,
+.config-field-label,
+.config-list-label {
+  color: var(--ds-color-text-faint);
+}
+
+.config-hero-title {
+  margin: 0;
+  font-family: var(--ds-font-display);
+  font-size: clamp(2rem, 4vw, 2.85rem);
+  line-height: 1.02;
+  letter-spacing: -0.05em;
+  font-weight: var(--ds-font-weight-semibold);
+  color: var(--ds-color-text-strong);
+}
+
+.config-lead {
+  margin: 0;
+  max-width: 60ch;
+  font-size: var(--ds-text-body-size);
+  line-height: 1.7;
+  color: var(--ds-color-text-muted);
+}
+
+.config-stat-value {
+  font-family: var(--ds-font-display);
+  font-size: 1.9rem;
+  line-height: 1;
+  letter-spacing: -0.05em;
+  font-weight: var(--ds-font-weight-semibold);
+  color: var(--ds-color-text-strong);
+}
+
+.config-stat-meta,
+.config-copy-muted,
+.config-section-description,
+.config-field-hint,
+.config-list-copy,
+.config-progress-meta {
+  font-size: var(--ds-text-body-secondary-size);
+  line-height: var(--ds-text-body-secondary-line);
+  color: var(--ds-color-text-muted);
+}
+
+.config-section-card {
+  display: grid;
+  gap: var(--ds-space-4);
+}
+
+.config-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--ds-space-3);
+  flex-wrap: wrap;
+}
+
+.config-section-title {
+  margin: 0;
+  font-size: 1.05rem;
+  line-height: 1.3;
+  font-weight: var(--ds-font-weight-semibold);
+  color: var(--ds-color-text-strong);
+}
+
+.config-progress {
+  display: grid;
+  gap: var(--ds-space-3);
+  padding-top: var(--ds-space-1);
+}
+
+.config-progress-bar {
+  position: relative;
+  height: 0.625rem;
+  border-radius: 999px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--ds-color-surface-muted) 72%, transparent);
+}
+
+.config-progress-bar > span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--config-progress, 0%);
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--ds-color-accent-solid), var(--ds-color-accent-strong));
+}
+
+.config-step-list,
+.config-list,
+.config-issue-list {
+  display: grid;
+  gap: var(--ds-space-3);
+}
+
+.config-step-card,
+.config-list-item,
+.config-issue-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--ds-space-3);
+  padding: var(--ds-space-4);
+  border-radius: var(--ds-radius-panel);
+  border: 1px solid var(--ds-color-border-soft);
+  background: color-mix(in srgb, var(--ds-color-surface-muted) 74%, transparent);
+}
+
+.config-step-card__copy,
+.config-list-item__copy {
+  display: grid;
+  gap: var(--ds-space-1);
+}
+
+.config-step-card__title,
+.config-list-title {
+  font-size: 0.95rem;
+  line-height: 1.35;
+  font-weight: var(--ds-font-weight-semibold);
+  color: var(--ds-color-text-strong);
+}
+
+.config-fieldset {
+  display: grid;
+  gap: var(--ds-space-4);
+}
+
+.config-field {
+  display: grid;
+  gap: var(--ds-space-2);
+  min-width: 0;
+}
+
+.config-checkbox {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: var(--ds-space-3);
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: var(--ds-color-text);
+}
+
+.config-checkbox input {
+  margin-top: 0.125rem;
+  accent-color: var(--ds-color-accent-solid);
+}
+
+.config-card-stack {
+  display: grid;
+  gap: var(--ds-space-4);
+}
+
+.config-note,
+.config-preview,
+.config-upload {
+  padding: var(--ds-space-4);
+  border-radius: var(--ds-radius-panel);
+  border: 1px solid var(--ds-color-border-soft);
+  background: color-mix(in srgb, var(--ds-color-surface-muted) 76%, transparent);
+}
+
+.config-preview-phone {
+  display: grid;
+  gap: var(--ds-space-3);
+  max-width: 24rem;
+  padding: var(--ds-space-4);
+  border-radius: 1.25rem;
+  border: 1px solid var(--ds-color-border-soft);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--ds-color-surface-raised) 96%, transparent),
+    color-mix(in srgb, var(--ds-color-accent-soft) 26%, var(--ds-color-surface-muted))
+  );
+}
+
+.config-preview-bubble {
+  display: grid;
+  gap: var(--ds-space-2);
+  padding: var(--ds-space-4);
+  border-radius: 1rem 1rem 1rem 0.5rem;
+  background: var(--ds-color-surface-raised);
+  border: 1px solid var(--ds-color-border-soft);
+  box-shadow: var(--ds-shadow-sm);
+}
+
+.config-preview-brand {
+  font-weight: var(--ds-font-weight-semibold);
+  color: var(--ds-color-text-strong);
+}
+
+.config-preview-meta {
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  color: var(--ds-color-text-muted);
+}
+
+.config-runtime-item,
+.config-diagnostic-item {
+  display: grid;
+  gap: var(--ds-space-1);
+  padding: var(--ds-space-4);
+  border-radius: var(--ds-radius-panel);
+  border: 1px solid var(--ds-color-border-soft);
+  background: color-mix(in srgb, var(--ds-color-surface-muted) 74%, transparent);
+}
+
+.config-runtime-item__value,
+.config-diagnostic-item__value {
+  font-size: 1rem;
+  line-height: 1.4;
+  font-weight: var(--ds-font-weight-medium);
+  color: var(--ds-color-text-strong);
+}
+
+.config-upload {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+}
+
+.config-upload__preview {
+  width: 5rem;
+  height: 5rem;
+  border-radius: 1.25rem;
+  overflow: hidden;
+  border: 1px solid var(--ds-color-border-soft);
+  background: color-mix(in srgb, var(--ds-color-accent-soft) 36%, var(--ds-color-surface-muted));
+  display: grid;
+  place-items: center;
+  color: var(--ds-color-text-strong);
+  font-weight: var(--ds-font-weight-semibold);
+}
+
+.config-upload__preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.config-upload__body {
+  display: grid;
+  gap: var(--ds-space-2);
+  min-width: 0;
+}
+
+.config-hidden-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.config-upload-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.5rem;
+  padding: 0 var(--ds-space-4);
+  border-radius: var(--ds-radius-control);
+  border: 1px solid var(--ds-color-border-strong);
+  background: var(--ds-color-surface-raised);
+  color: var(--ds-color-text-strong);
+  font-size: 0.875rem;
+  line-height: 1;
+  font-weight: var(--ds-font-weight-semibold);
+  cursor: pointer;
+  transition: border-color var(--ds-duration-base) var(--ds-ease-standard),
+    transform var(--ds-duration-base) var(--ds-ease-standard);
+}
+
+.config-upload-button:hover {
+  transform: translateY(-1px);
+  border-color: var(--ds-color-accent-border);
+}
+
+.config-upload-button[aria-disabled="true"] {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.config-identity-card {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  padding: var(--ds-space-5);
+  border-radius: var(--ds-radius-panel-lg);
+  border: 1px solid var(--ds-color-border-soft);
+  background:
+    radial-gradient(circle at top right, color-mix(in srgb, var(--ds-color-accent-soft) 42%, transparent), transparent 42%),
+    linear-gradient(180deg, color-mix(in srgb, var(--ds-color-surface-raised) 94%, transparent), color-mix(in srgb, var(--ds-color-surface-muted) 88%, transparent));
+}
+
+.config-identity-avatar {
+  width: 4.5rem;
+  height: 4.5rem;
+  border-radius: 1.4rem;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--ds-color-accent-soft) 58%, var(--ds-color-surface-raised));
+  border: 1px solid var(--ds-color-accent-border);
+  color: var(--ds-color-accent-strong);
+  font-family: var(--ds-font-display);
+  font-size: 1.25rem;
+  font-weight: var(--ds-font-weight-semibold);
+}
+
+.config-identity-copy {
+  display: grid;
+  gap: var(--ds-space-1);
+}
+
+.config-identity-name {
+  font-size: 1.125rem;
+  line-height: 1.25;
+  font-weight: var(--ds-font-weight-semibold);
+  color: var(--ds-color-text-strong);
+}
+
+.config-identity-meta {
+  font-size: var(--ds-text-body-secondary-size);
+  line-height: var(--ds-text-body-secondary-line);
+  color: var(--ds-color-text-muted);
+}
+
+.config-security-card {
+  padding: var(--ds-space-5);
+}
+
+.config-divider {
+  height: 1px;
+  background: var(--ds-color-border-soft);
+}
+
+.config-list-inline {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  flex-wrap: wrap;
+}
+
+.config-empty {
+  padding: var(--ds-space-4);
+  border-radius: var(--ds-radius-panel);
+  border: 1px dashed var(--ds-color-border-strong);
+  color: var(--ds-color-text-muted);
+  background: color-mix(in srgb, var(--ds-color-surface-muted) 76%, transparent);
+}
+
+.config-aside-stack {
+  display: grid;
+  gap: var(--ds-space-4);
+}
+
+@media (max-width: 1100px) {
+  .config-overview-grid,
+  .config-spotlight-grid,
+  .config-summary-grid,
+  .config-stat-grid,
+  .config-runtime-grid,
+  .config-detail-grid,
+  .config-form-grid,
+  .config-account-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .config-root {
+    padding: var(--ds-space-4);
+  }
+
+  .config-upload,
+  .config-identity-card {
+    grid-template-columns: 1fr;
+  }
+
+  .config-section-head,
+  .config-header-meta {
+    align-items: stretch;
+  }
+}

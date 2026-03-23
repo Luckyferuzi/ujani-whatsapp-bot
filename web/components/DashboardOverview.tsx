@@ -4,6 +4,17 @@ import { useMemo } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import { useCachedQuery } from "@/hooks/useCachedQuery";
+import PageHeader from "@/components/PageHeader";
+import {
+  Alert,
+  Badge,
+  Card,
+  EmptyState,
+  MetricValue,
+  RefreshIndicator,
+  StatCardSkeleton,
+  TableSkeleton,
+} from "@/components/ui";
 
 type DashboardOverviewResponse = {
   inbox: {
@@ -40,6 +51,28 @@ type DashboardOverviewResponse = {
     customer_name: string | null;
     payload: Record<string, any>;
   }[];
+};
+
+type PriorityItem = {
+  label: string;
+  value: number;
+  hint: string;
+  href: string;
+  tone: "neutral" | "accent" | "warning";
+};
+
+type HealthItem = {
+  label: string;
+  value: string;
+  note: string;
+  tone: "success" | "warning" | "info";
+};
+
+type SignalItem = {
+  title: string;
+  description: string;
+  href: string;
+  tone: "accent" | "warning" | "info" | "success";
 };
 
 function formatTzs(value: number) {
@@ -93,22 +126,16 @@ function describeActivity(item: DashboardOverviewResponse["recent_activity"][num
   }
 }
 
-type ActionCardProps = {
-  label: string;
-  value: string | number;
-  hint: string;
-  href: string;
-  tone?: "default" | "accent" | "warn";
-};
+function toneForCount(count: number): "neutral" | "accent" | "warning" {
+  if (count <= 0) return "neutral";
+  if (count >= 5) return "warning";
+  return "accent";
+}
 
-function ActionCard({ label, value, hint, href, tone = "default" }: ActionCardProps) {
-  return (
-    <Link href={href} className={`dashboard-action-card dashboard-action-card--${tone}`}>
-      <div className="dashboard-action-label">{label}</div>
-      <div className="dashboard-action-value">{value}</div>
-      <div className="dashboard-action-hint">{hint}</div>
-    </Link>
-  );
+function badgeToneForPriority(tone: PriorityItem["tone"]) {
+  if (tone === "warning") return "warning" as const;
+  if (tone === "accent") return "accent" as const;
+  return "neutral" as const;
 }
 
 export default function DashboardOverview() {
@@ -118,47 +145,173 @@ export default function DashboardOverview() {
     { staleMs: 20_000 }
   );
 
-  const actionItems = useMemo(() => {
+  const priorityItems = useMemo<PriorityItem[]>(() => {
     if (!data) return [];
     return [
       {
         label: "Unread chats",
         value: data.inbox.unread_conversations,
-        hint: data.inbox.unread_conversations > 0 ? "Requires inbox attention now" : "No unread conversations",
+        hint:
+          data.inbox.unread_conversations > 0
+            ? "Inbox attention needed now"
+            : "No unread conversations waiting",
         href: "/inbox",
-        tone: data.inbox.unread_conversations > 0 ? ("accent" as const) : ("default" as const),
+        tone: toneForCount(data.inbox.unread_conversations),
       },
       {
-        label: "Pending payments",
+        label: "Payments to review",
         value: data.payments.pending_review,
-        hint: data.payments.pending_review > 0 ? "Proofs waiting for review" : "No payments waiting",
+        hint:
+          data.payments.pending_review > 0
+            ? "Proofs are waiting for confirmation"
+            : "No payments are blocked in review",
         href: "/inbox",
-        tone: data.payments.pending_review > 0 ? ("warn" as const) : ("default" as const),
+        tone: toneForCount(data.payments.pending_review),
       },
       {
-        label: "Awaiting fulfillment",
+        label: "Fulfillment queue",
         value: data.orders.awaiting_fulfillment,
         hint: "Pending, verifying, or preparing orders",
         href: "/orders",
-        tone: data.orders.awaiting_fulfillment > 0 ? ("accent" as const) : ("default" as const),
+        tone: toneForCount(data.orders.awaiting_fulfillment),
       },
       {
         label: "Out for delivery",
         value: data.orders.out_for_delivery,
         hint: "Orders currently with delivery agents",
         href: "/orders",
-        tone: "default" as const,
+        tone: data.orders.out_for_delivery > 0 ? "accent" : "neutral",
       },
     ];
   }, [data]);
 
+  const signals = useMemo<SignalItem[]>(() => {
+    if (!data) return [];
+
+    const next: SignalItem[] = [];
+    if (data.inbox.unread_conversations > 0) {
+      next.push({
+        title: `${data.inbox.unread_conversations} unread conversation${data.inbox.unread_conversations === 1 ? "" : "s"}`,
+        description: "Customer conversations are waiting in the inbox.",
+        href: "/inbox",
+        tone: data.inbox.unread_conversations >= 5 ? "warning" : "accent",
+      });
+    }
+    if (data.payments.pending_review > 0) {
+      next.push({
+        title: `${data.payments.pending_review} payment proof${data.payments.pending_review === 1 ? "" : "s"} pending`,
+        description: "Review submitted proofs to keep order flow moving.",
+        href: "/inbox",
+        tone: "warning",
+      });
+    }
+    if (data.orders.awaiting_fulfillment > 0) {
+      next.push({
+        title: `${data.orders.awaiting_fulfillment} order${data.orders.awaiting_fulfillment === 1 ? "" : "s"} awaiting fulfillment`,
+        description: "The fulfillment queue needs operational follow-through.",
+        href: "/orders",
+        tone: data.orders.awaiting_fulfillment >= 5 ? "warning" : "accent",
+      });
+    }
+    if (next.length === 0) {
+      next.push({
+        title: "Operations are currently stable",
+        description: "No urgent inbox, payment, or fulfillment pressure is visible right now.",
+        href: "/inbox",
+        tone: "success",
+      });
+    }
+    return next.slice(0, 3);
+  }, [data]);
+
+  const healthItems = useMemo<HealthItem[]>(() => {
+    if (!data) return [];
+    return [
+      {
+        label: "Inbox coverage",
+        value: `${data.inbox.handover_conversations}`,
+        note:
+          data.inbox.handover_conversations > 0
+            ? "Conversations are actively held by agents"
+            : "Bot is carrying most active conversations",
+        tone: data.inbox.handover_conversations > 0 ? "info" : "success",
+      },
+      {
+        label: "Order flow",
+        value: `${data.orders.out_for_delivery} in transit`,
+        note:
+          data.orders.awaiting_fulfillment > 0
+            ? `${data.orders.awaiting_fulfillment} still waiting to move`
+            : "No backlog visible in fulfillment",
+        tone: data.orders.awaiting_fulfillment > 0 ? "warning" : "success",
+      },
+      {
+        label: "Revenue pace",
+        value: `${formatTzs(data.revenue.today_tzs)} TZS`,
+        note: `${formatTzs(data.revenue.week_tzs)} TZS captured in the last 7 days`,
+        tone: data.revenue.today_tzs > 0 ? "success" : "info",
+      },
+    ];
+  }, [data]);
+
+  const topProducts = data?.top_products ?? [];
+  const recentActivity = data?.recent_activity ?? [];
+
   if (loading) {
     return (
-      <section className="dashboard-overview">
-        <div className="dashboard-hero">
-          <div className="dashboard-kicker">Command Overview</div>
-          <div className="dashboard-title">Loading today&apos;s priorities...</div>
-          <div className="dashboard-subtitle">Checking inbox load, fulfillment pressure, and commercial activity.</div>
+      <section className="dashboard-command">
+        <PageHeader
+          eyebrow="Command Center"
+          title="Loading today's operating picture..."
+          description="Checking inbox pressure, payment review, fulfillment movement, and business pace."
+          actions={<RefreshIndicator label="Preparing overview" />}
+        />
+
+        <div className="dashboard-command__priority-grid">
+          <StatCardSkeleton />
+          <StatCardSkeleton />
+          <StatCardSkeleton />
+          <StatCardSkeleton />
+        </div>
+
+        <div className="dashboard-command__layout">
+          <div className="dashboard-command__main">
+            <Card className="dashboard-command__panel" padding="lg">
+              <div className="dashboard-command__panel-head">
+                <div className="dashboard-command__panel-title">Needs attention</div>
+                <div className="dashboard-command__panel-copy">
+                  Priority work for inbox, payments, and fulfillment.
+                </div>
+              </div>
+              <div className="dashboard-command__signal-stack">
+                <StatCardSkeleton />
+                <StatCardSkeleton />
+              </div>
+            </Card>
+
+            <Card className="dashboard-command__panel" padding="lg">
+              <div className="dashboard-command__panel-head">
+                <div className="dashboard-command__panel-title">Recent activity</div>
+                <div className="dashboard-command__panel-copy">
+                  Latest operational movements across orders and payments.
+                </div>
+              </div>
+              <TableSkeleton rows={5} />
+            </Card>
+          </div>
+
+          <div className="dashboard-command__side">
+            <Card className="dashboard-command__panel" padding="lg">
+              <div className="dashboard-command__health-grid">
+                <StatCardSkeleton />
+                <StatCardSkeleton />
+                <StatCardSkeleton />
+              </div>
+            </Card>
+            <Card className="dashboard-command__panel" padding="lg">
+              <TableSkeleton rows={4} />
+            </Card>
+          </div>
         </div>
       </section>
     );
@@ -166,106 +319,117 @@ export default function DashboardOverview() {
 
   if (error) {
     return (
-      <section className="dashboard-overview">
-        <div className="dashboard-hero">
-          <div className="dashboard-kicker">Command Overview</div>
-          <div className="dashboard-title">Dashboard unavailable</div>
-          <div className="dashboard-subtitle">{error.message}</div>
-          <button type="button" className="console-home-link console-home-link--secondary" onClick={() => void refetch()}>
-            Try again
-          </button>
-        </div>
+      <section className="dashboard-command">
+        <PageHeader
+          eyebrow="Command Center"
+          title="Dashboard unavailable"
+          description={error.message}
+          actions={
+            <button type="button" className="ui-button ui-button--secondary" onClick={() => void refetch()}>
+              Try again
+            </button>
+          }
+        />
       </section>
     );
   }
 
-  const topProducts = data?.top_products ?? [];
-  const recentActivity = data?.recent_activity ?? [];
-
   return (
-    <section className="dashboard-overview">
-      <div className="dashboard-hero">
-        <div>
-          <div className="dashboard-kicker">Command Overview</div>
-          <div className="dashboard-title">Focus the team on what needs action today.</div>
-          <div className="dashboard-subtitle">
-            This view prioritizes inbox pressure, payment review, fulfillment movement, and current business momentum.
-          </div>
-        </div>
-        <div className="dashboard-hero-actions">
-          <Link href="/inbox" className="console-home-link">
-            Open inbox
-          </Link>
-          <button type="button" className="console-home-link console-home-link--secondary" onClick={() => void refetch()}>
-            {isRefreshing ? "Refreshing..." : "Refresh"}
-          </button>
-        </div>
-      </div>
+    <section className="dashboard-command">
+      <PageHeader
+        eyebrow="Command Center"
+        title="What matters now, in one operational view."
+        description="Use this command center to scan pressure in the inbox, payment review, fulfillment movement, and current revenue momentum."
+        actions={
+          <>
+            {isRefreshing ? <RefreshIndicator label="Refreshing overview" /> : null}
+            <Link href="/inbox" className="ui-button ui-button--primary dashboard-command__header-button">
+              Open inbox
+            </Link>
+            <button type="button" className="ui-button ui-button--secondary" onClick={() => void refetch()}>
+              Refresh
+            </button>
+          </>
+        }
+      />
 
-      <div className="dashboard-action-grid">
-        {actionItems.map((item) => (
-          <ActionCard key={item.label} {...item} />
+      <div className="dashboard-command__priority-grid">
+        {priorityItems.map((item) => (
+          <Link
+            href={item.href}
+            key={item.label}
+            className={`dashboard-command__priority dashboard-command__priority--${item.tone}`}
+          >
+            <div className="dashboard-command__priority-top">
+              <div className="dashboard-command__priority-label">{item.label}</div>
+              <Badge tone={badgeToneForPriority(item.tone)}>
+                {item.tone === "warning" ? "Action" : item.tone === "accent" ? "Watch" : "Stable"}
+              </Badge>
+            </div>
+            <div className="dashboard-command__priority-value ui-tabular-nums">
+              <MetricValue value={item.value} refreshing={isRefreshing} width="5ch" />
+            </div>
+            <div className="dashboard-command__priority-hint">{item.hint}</div>
+          </Link>
         ))}
       </div>
 
-      <div className="dashboard-main-grid">
-        <div className="dashboard-column">
-          <div className="dashboard-panel">
-            <div className="dashboard-panel-head">
+      <div className="dashboard-command__layout">
+        <div className="dashboard-command__main">
+          <Card className="dashboard-command__panel" padding="lg">
+            <div className="dashboard-command__panel-head">
               <div>
-                <div className="dashboard-panel-title">Commercial snapshot</div>
-                <div className="dashboard-panel-subtitle">Quick revenue and order signals for owners and operators.</div>
+                <div className="dashboard-command__panel-title">Needs attention</div>
+                <div className="dashboard-command__panel-copy">
+                  The most actionable operational pressure points right now.
+                </div>
               </div>
+              <Link href="/orders" className="dashboard-command__inline-link">
+                Order desk
+              </Link>
             </div>
 
-            <div className="dashboard-metric-grid">
-              <div className="dashboard-metric-card">
-                <div className="dashboard-metric-label">Orders today</div>
-                <div className="dashboard-metric-value">{data?.orders.today ?? 0}</div>
-                <div className="dashboard-metric-sub">New orders created since midnight.</div>
-              </div>
-
-              <div className="dashboard-metric-card">
-                <div className="dashboard-metric-label">Revenue today</div>
-                <div className="dashboard-metric-value">{formatTzs(data?.revenue.today_tzs ?? 0)} TZS</div>
-                <div className="dashboard-metric-sub">Approved income recorded today.</div>
-              </div>
-
-              <div className="dashboard-metric-card">
-                <div className="dashboard-metric-label">Revenue this week</div>
-                <div className="dashboard-metric-value">{formatTzs(data?.revenue.week_tzs ?? 0)} TZS</div>
-                <div className="dashboard-metric-sub">Approved income in the last 7 days.</div>
-              </div>
-
-              <div className="dashboard-metric-card">
-                <div className="dashboard-metric-label">Human handover</div>
-                <div className="dashboard-metric-value">{data?.inbox.handover_conversations ?? 0}</div>
-                <div className="dashboard-metric-sub">Conversations currently left open for agents.</div>
-              </div>
+            <div className="dashboard-command__signal-stack">
+              {signals.map((signal) => (
+                <Link
+                  key={signal.title}
+                  href={signal.href}
+                  className={`dashboard-command__signal dashboard-command__signal--${signal.tone}`}
+                >
+                  <div className="dashboard-command__signal-title">{signal.title}</div>
+                  <div className="dashboard-command__signal-copy">{signal.description}</div>
+                </Link>
+              ))}
             </div>
-          </div>
+          </Card>
 
-          <div className="dashboard-panel">
-            <div className="dashboard-panel-head">
+          <Card className="dashboard-command__panel" padding="lg">
+            <div className="dashboard-command__panel-head">
               <div>
-                <div className="dashboard-panel-title">Recent critical activity</div>
-                <div className="dashboard-panel-subtitle">Latest payment, order, and fulfillment changes worth tracking.</div>
+                <div className="dashboard-command__panel-title">Recent activity</div>
+                <div className="dashboard-command__panel-copy">
+                  Latest payment, order, and fulfillment changes worth tracking.
+                </div>
               </div>
             </div>
 
             {recentActivity.length === 0 ? (
-              <div className="dashboard-empty">No recent critical activity yet. Order and payment events will appear here automatically.</div>
+              <EmptyState
+                eyebrow="Activity"
+                title="No recent operational activity."
+                description="Order and payment events will appear here automatically."
+              />
             ) : (
-              <div className="dashboard-activity-list">
+              <div className="dashboard-command__activity-list">
                 {recentActivity.map((item) => {
                   const described = describeActivity(item);
                   return (
-                    <div key={item.id} className="dashboard-activity-item">
-                      <div className="dashboard-activity-main">
-                        <div className="dashboard-activity-title">{described.title}</div>
-                        <div className="dashboard-activity-subtitle">{described.description}</div>
+                    <div key={item.id} className="dashboard-command__activity-item">
+                      <div className="dashboard-command__activity-main">
+                        <div className="dashboard-command__activity-title">{described.title}</div>
+                        <div className="dashboard-command__activity-copy">{described.description}</div>
                       </div>
-                      <div className="dashboard-activity-meta">
+                      <div className="dashboard-command__activity-meta">
                         <div>{formatTime(item.created_at)}</div>
                         <div>{item.actor_email || item.source || "system"}</div>
                       </div>
@@ -274,32 +438,59 @@ export default function DashboardOverview() {
                 })}
               </div>
             )}
-          </div>
+          </Card>
         </div>
 
-        <div className="dashboard-column dashboard-column--side">
-          <div className="dashboard-panel">
-            <div className="dashboard-panel-head">
+        <div className="dashboard-command__side">
+          <Card className="dashboard-command__panel" padding="lg">
+            <div className="dashboard-command__panel-head">
               <div>
-                <div className="dashboard-panel-title">Sales highlights</div>
-                <div className="dashboard-panel-subtitle">Top-selling products from the last 7 days.</div>
+                <div className="dashboard-command__panel-title">System health</div>
+                <div className="dashboard-command__panel-copy">
+                  A quick read on coverage, movement, and commercial pace.
+                </div>
               </div>
-              <Link href="/products" className="dashboard-inline-link">
+            </div>
+
+            <div className="dashboard-command__health-grid">
+              {healthItems.map((item) => (
+                <div key={item.label} className="dashboard-command__health-card">
+                  <Badge tone={item.tone}>{item.label}</Badge>
+                  <div className="dashboard-command__health-value ui-tabular-nums">{item.value}</div>
+                  <div className="dashboard-command__health-note">{item.note}</div>
+                </div>
+              ))}
+            </div>
+          </Card>
+
+          <Card className="dashboard-command__panel" padding="lg">
+            <div className="dashboard-command__panel-head">
+              <div>
+                <div className="dashboard-command__panel-title">Sales highlights</div>
+                <div className="dashboard-command__panel-copy">
+                  Best-performing products from the last 7 days.
+                </div>
+              </div>
+              <Link href="/products" className="dashboard-command__inline-link">
                 Products
               </Link>
             </div>
 
             {topProducts.length === 0 ? (
-              <div className="dashboard-empty">Not enough sales data yet. Product highlights will appear once orders start flowing in.</div>
+              <EmptyState
+                eyebrow="Products"
+                title="Not enough sales data yet."
+                description="Product highlights will appear once orders start flowing in."
+              />
             ) : (
-              <div className="dashboard-product-list">
+              <div className="dashboard-command__product-list">
                 {topProducts.map((product) => (
-                  <div key={product.sku} className="dashboard-product-row">
-                    <div className="dashboard-product-main">
-                      <div className="dashboard-product-name">{product.name}</div>
-                      <div className="dashboard-product-sku">{product.sku}</div>
+                  <div key={product.sku} className="dashboard-command__product-row">
+                    <div className="dashboard-command__product-main">
+                      <div className="dashboard-command__product-name">{product.name}</div>
+                      <div className="dashboard-command__product-sku">{product.sku}</div>
                     </div>
-                    <div className="dashboard-product-meta">
+                    <div className="dashboard-command__product-meta">
                       <div>{product.total_qty} sold</div>
                       <div>{formatTzs(product.total_revenue)} TZS</div>
                     </div>
@@ -307,31 +498,47 @@ export default function DashboardOverview() {
                 ))}
               </div>
             )}
-          </div>
+          </Card>
 
-          <div className="dashboard-panel">
-            <div className="dashboard-panel-head">
+          <Card className="dashboard-command__panel" padding="lg">
+            <div className="dashboard-command__panel-head">
               <div>
-                <div className="dashboard-panel-title">Action shortcuts</div>
-                <div className="dashboard-panel-subtitle">Jump quickly into the places the team uses most.</div>
+                <div className="dashboard-command__panel-title">Quick actions</div>
+                <div className="dashboard-command__panel-copy">
+                  Jump straight into the operational surfaces the team uses most.
+                </div>
               </div>
             </div>
 
-            <div className="dashboard-shortcuts">
-              <Link href="/inbox" className="dashboard-shortcut">
-                <div className="dashboard-shortcut-title">Inbox triage</div>
-                <div className="dashboard-shortcut-copy">Review unread chats and proof submissions.</div>
+            <div className="dashboard-command__quick-actions">
+              <Link href="/inbox" className="dashboard-command__quick-action">
+                <div className="dashboard-command__quick-title">Inbox triage</div>
+                <div className="dashboard-command__quick-copy">
+                  Review unread chats and payment proof submissions.
+                </div>
               </Link>
-              <Link href="/orders" className="dashboard-shortcut">
-                <div className="dashboard-shortcut-title">Fulfillment queue</div>
-                <div className="dashboard-shortcut-copy">Advance pending, preparing, and delivery orders.</div>
+              <Link href="/orders" className="dashboard-command__quick-action">
+                <div className="dashboard-command__quick-title">Fulfillment queue</div>
+                <div className="dashboard-command__quick-copy">
+                  Advance pending, preparing, and delivery orders.
+                </div>
               </Link>
-              <Link href="/stats" className="dashboard-shortcut">
-                <div className="dashboard-shortcut-title">Detailed reports</div>
-                <div className="dashboard-shortcut-copy">Open deeper revenue and product reporting.</div>
+              <Link href="/stats" className="dashboard-command__quick-action">
+                <div className="dashboard-command__quick-title">Detailed reports</div>
+                <div className="dashboard-command__quick-copy">
+                  Open deeper revenue and product performance reporting.
+                </div>
               </Link>
             </div>
-          </div>
+          </Card>
+
+          {signals.length === 1 && signals[0].tone === "success" ? (
+            <Alert
+              tone="success"
+              title="Operational load is currently calm"
+              description="No urgent inbox, payment, or fulfillment pressure is visible from this snapshot."
+            />
+          ) : null}
         </div>
       </div>
     </section>

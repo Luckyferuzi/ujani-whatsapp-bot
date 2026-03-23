@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/components/AuthProvider";
+import { applyThemeMode, readStoredThemeMode, type ThemeMode } from "@/lib/theme";
 
 type TopbarProps = {
   pageTitle?: string;
@@ -12,35 +13,6 @@ type TopbarProps = {
   onToggleSidebar?: () => void;
   isInbox?: boolean;
 };
-
-type ThemeMode = "system" | "light" | "dark";
-
-const STORAGE_KEY = "ujani-theme";
-
-function readThemeMode(): ThemeMode {
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (raw === "light" || raw === "dark" || raw === "system") return raw;
-    return "system";
-  } catch {
-    return "system";
-  }
-}
-
-function applyThemeMode(mode: ThemeMode) {
-  if (typeof document === "undefined") return;
-  const root = document.documentElement;
-  if (mode === "system") {
-    delete root.dataset.theme;
-  } else {
-    root.dataset.theme = mode;
-  }
-  try {
-    window.localStorage.setItem(STORAGE_KEY, mode);
-  } catch {
-    // ignore
-  }
-}
 
 function cycleTheme(current: ThemeMode): ThemeMode {
   if (current === "system") return "light";
@@ -64,7 +36,7 @@ export default function Topbar({
   const menuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    const mode = readThemeMode();
+    const mode = readStoredThemeMode();
     setThemeMode(mode);
     applyThemeMode(mode);
   }, []);
@@ -103,16 +75,14 @@ export default function Topbar({
     return "Light";
   }, [themeMode]);
 
-  const compact = !!isInbox;
-
   return (
-    <header className={"console-topbar" + (compact ? " console-topbar--compact" : "")}>
-      <div className="console-topbar-main">
-        <div className="console-topbar-left">
+    <header className="console-topbar">
+      <div className="console-topbar__main">
+        <div className="console-topbar__left">
           {showSidebarToggle && onToggleSidebar ? (
             <button
               type="button"
-              className="console-topbar-toggle"
+              className="console-topbar__toggle"
               onClick={onToggleSidebar}
               aria-label="Toggle navigation"
             >
@@ -122,28 +92,38 @@ export default function Topbar({
             </button>
           ) : null}
 
-          <div className="console-topbar-context">
-            <div className="console-topbar-kicker">{pageSection || "Workspace"}</div>
-            <div className="console-topbar-title-row">
-              <h1 className="console-topbar-title">{pageTitle || "Ujani Console"}</h1>
-              {user ? <span className="console-topbar-status">Live</span> : null}
+          <div className="console-topbar__context">
+            <div className="console-topbar__eyebrow">{pageSection || "Workspace"}</div>
+            <div className="console-topbar__title-row">
+              <div className="console-topbar__title">{pageTitle || "Ujani Console"}</div>
+              {user ? <span className="console-topbar__status">Live</span> : null}
             </div>
-            {!compact && pageDescription ? (
-              <div className="console-topbar-description">{pageDescription}</div>
+            {!isInbox && pageDescription ? (
+              <div className="console-topbar__description">{pageDescription}</div>
             ) : null}
           </div>
         </div>
 
-        <div className="console-topbar-actions" ref={menuRef}>
+        <div className="console-topbar__actions" ref={menuRef}>
           {!user ? (
-            <button type="button" className="console-topbar-login" onClick={() => router.push("/login")}>
+            <button type="button" className="console-topbar__login" onClick={() => router.push("/login")}>
               Login
             </button>
           ) : (
             <>
+              {!isInbox ? (
+                <button type="button" className="console-topbar__search-placeholder">
+                  <span className="console-topbar__search-icon" aria-hidden="true">
+                    /
+                  </span>
+                  <span>Global search</span>
+                  <span className="console-topbar__search-meta">Soon</span>
+                </button>
+              ) : null}
+
               <button
                 type="button"
-                className="console-chip-button"
+                className="console-topbar__theme"
                 onClick={() => {
                   const next = cycleTheme(themeMode);
                   setThemeMode(next);
@@ -157,23 +137,25 @@ export default function Topbar({
 
               <button
                 type="button"
-                className={"console-user-button" + (menuOpen ? " console-user-button--open" : "")}
+                className={"console-topbar__user" + (menuOpen ? " console-topbar__user--open" : "")}
                 onClick={() => setMenuOpen((value) => !value)}
                 aria-haspopup="menu"
                 aria-expanded={menuOpen}
               >
-                <span className="console-user-avatar">{initial}</span>
-                <span className="console-user-meta">
-                  <span className="console-user-email">{user.email}</span>
-                  <span className="console-user-role">{user.role === "admin" ? "Administrator" : "Operator"}</span>
+                <span className="console-topbar__avatar">{initial}</span>
+                <span className="console-topbar__user-meta">
+                  <span className="console-topbar__user-email">{user.email}</span>
+                  <span className="console-topbar__user-role">
+                    {user.role === "admin" ? "Administrator" : "Operator"}
+                  </span>
                 </span>
               </button>
 
               {menuOpen ? (
-                <div className="console-user-menu" role="menu" aria-label="User menu">
+                <div className="console-topbar__menu" role="menu" aria-label="User menu">
                   <button
                     type="button"
-                    className="console-user-menu-item"
+                    className="console-topbar__menu-item"
                     onClick={() => {
                       setMenuOpen(false);
                       router.push("/profile");
@@ -183,7 +165,7 @@ export default function Topbar({
                   </button>
                   <button
                     type="button"
-                    className="console-user-menu-item"
+                    className="console-topbar__menu-item"
                     onClick={() => {
                       setMenuOpen(false);
                       router.push("/settings");
@@ -194,7 +176,7 @@ export default function Topbar({
                   {user.role === "admin" ? (
                     <button
                       type="button"
-                      className="console-user-menu-item"
+                      className="console-topbar__menu-item"
                       onClick={() => {
                         setMenuOpen(false);
                         router.push("/setup");
@@ -205,7 +187,7 @@ export default function Topbar({
                   ) : null}
                   <button
                     type="button"
-                    className="console-user-menu-item console-user-menu-item--danger"
+                    className="console-topbar__menu-item console-topbar__menu-item--danger"
                     onClick={() => {
                       setMenuOpen(false);
                       logout();

@@ -3,6 +3,13 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
+import {
+  Alert,
+  Button,
+  EmptyState,
+  RefreshIndicator,
+  Textarea,
+} from "@/components/ui";
 
 type TimelineItem = {
   id: string;
@@ -100,86 +107,86 @@ export default function OperatorTimelineNotes({
   };
 
   return (
-    <div style={{ display: "grid", gap: 12 }}>
-      <div>
-        <div style={{ fontWeight: 700, fontSize: 14 }}>{title}</div>
-        <div style={{ color: "var(--muted, #6b7280)", fontSize: 12, marginTop: 4 }}>
+    <div className="timeline-notes">
+      <div className="timeline-notes__header">
+        <div className="panel-card-title">{title}</div>
+        <div className="timeline-notes__copy">
           Internal only. Notes here never go to the customer.
         </div>
       </div>
 
-      <div style={{ display: "grid", gap: 8 }}>
-        <textarea
+      <div className="timeline-notes__composer">
+        <Textarea
           value={noteBody}
           onChange={(e) => setNoteBody(e.target.value)}
           placeholder={notePlaceholder}
           rows={3}
-          style={{
-            width: "100%",
-            resize: "vertical",
-            borderRadius: 12,
-            border: "1px solid rgba(148, 163, 184, 0.35)",
-            padding: "10px 12px",
-            background: "transparent",
-            color: "inherit",
-            font: "inherit",
-          }}
         />
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
-          <div style={{ color: "var(--muted, #6b7280)", fontSize: 12 }}>
+        <div className="timeline-notes__composer-footer">
+          <div className="timeline-notes__hint">
             Best for payment checks, delivery handoff, and customer context.
           </div>
-          <button
+          <Button
             type="button"
+            variant="secondary"
+            size="sm"
             onClick={() => void handleSave()}
-            disabled={saving || !notePath}
-            style={{
-              borderRadius: 999,
-              border: "1px solid rgba(15, 23, 42, 0.12)",
-              padding: "8px 14px",
-              background: "var(--surface, #fff)",
-              color: "inherit",
-              fontWeight: 700,
-              cursor: saving ? "wait" : "pointer",
-            }}
+            disabled={!notePath}
+            loading={saving}
           >
             {saving ? "Saving..." : "Add note"}
-          </button>
+          </Button>
         </div>
       </div>
 
-      <div style={{ display: "grid", gap: 10 }}>
+      <div className="timeline-notes__history">
         {loading ? (
-          <div style={{ color: "var(--muted, #6b7280)", fontSize: 13 }}>Loading history...</div>
+          <div className="timeline-notes__refresh">
+            <RefreshIndicator label="Loading history" />
+          </div>
         ) : items.length === 0 ? (
-          <div style={{ color: "var(--muted, #6b7280)", fontSize: 13 }}>{emptyState}</div>
+          <div className="timeline-notes__empty">
+            <EmptyState
+              eyebrow="Notes"
+              title="No history yet"
+              description={emptyState}
+            />
+          </div>
         ) : (
           items.map((item) => (
             <div
               key={item.id}
-              style={{
-                border: "1px solid rgba(148, 163, 184, 0.18)",
-                borderRadius: 14,
-                padding: "10px 12px",
-                background: item.kind === "note" ? "rgba(15, 23, 42, 0.03)" : "transparent",
-              }}
+              className={
+                "timeline-notes__item" +
+                (item.kind === "note" ? " timeline-notes__item--note" : "")
+              }
             >
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline" }}>
-                <div style={{ fontWeight: 700, fontSize: 13 }}>{item.title}</div>
-                <div style={{ color: "var(--muted, #6b7280)", fontSize: 11 }}>{formatDateTime(item.created_at)}</div>
+              <div className="timeline-notes__item-top">
+                <div className="timeline-notes__item-title">{item.title}</div>
+                <div className="timeline-notes__item-time">
+                  {formatDateTime(item.created_at)}
+                </div>
               </div>
               {item.description ? (
-                <div style={{ marginTop: 6, fontSize: 12.5, lineHeight: 1.45 }}>{item.description}</div>
+                <div className="timeline-notes__item-body">{item.description}</div>
               ) : null}
-              <div style={{ marginTop: 6, color: "var(--muted, #6b7280)", fontSize: 11 }}>
+              <div className="timeline-notes__item-meta">
                 {item.kind === "note" ? "Internal note" : "Timeline event"}
-                {item.actor_label ? ` • ${item.actor_label}` : ""}
-                {item.scope ? ` • ${item.scope}` : ""}
+                {item.actor_label ? ` · ${item.actor_label}` : ""}
+                {item.scope ? ` · ${item.scope}` : ""}
               </div>
             </div>
           ))
         )}
       </div>
+
+      {!notePath ? (
+        <Alert
+          tone="neutral"
+          title="Notes unavailable"
+          description="This conversation does not currently support internal note entry."
+        />
+      ) : null}
     </div>
   );
 }

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { formatPhonePretty } from "@/lib/phone";
+import { ConversationListSkeleton, EmptyState, RefreshIndicator } from "@/components/ui";
 
 export type Convo = {
   id: string;
@@ -84,23 +85,32 @@ export default function ConversationList({
 }: Props) {
   const [items, setItems] = useState<Convo[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState("");
   const [view, setView] = useState<ViewKey>("all");
 
   const onLoadedRef = useRef<Props["onLoaded"]>(onLoaded);
+  const itemsRef = useRef<Convo[]>([]);
   useEffect(() => {
     onLoadedRef.current = onLoaded;
   }, [onLoaded]);
+  useEffect(() => {
+    itemsRef.current = items;
+  }, [items]);
 
   useEffect(() => {
     let cancelled = false;
 
-    const load = async () => {
+    const load = async (background = false) => {
+      if (background && itemsRef.current.length > 0) {
+        setRefreshing(true);
+      }
       try {
         const data = await api<{ items: Convo[] }>("/api/conversations");
         if (cancelled) return;
         const next = data?.items ?? [];
         setItems(next);
+        itemsRef.current = next;
         onLoadedRef.current?.(next);
       } catch (err) {
         if (cancelled) return;
@@ -109,6 +119,7 @@ export default function ConversationList({
       } finally {
         if (!cancelled) {
           setLoading(false);
+          setRefreshing(false);
         }
       }
     };
@@ -123,14 +134,14 @@ export default function ConversationList({
 
     const poll = () => {
       if (document.visibilityState !== "visible") return;
-      void load();
+      void load(true);
     };
 
     const timer = window.setInterval(poll, CONVERSATIONS_POLL_MS);
 
     const onVisibilityChange = () => {
       if (document.visibilityState === "visible") {
-        void load();
+        void load(true);
       }
     };
 
@@ -190,7 +201,9 @@ export default function ConversationList({
           <div className="conversation-list-header-title">Active conversations</div>
           <div className="conversation-list-header-subtitle">Live inbox updates for customer handling, payments, and fulfillment.</div>
         </div>
-        <div className="conversation-list-header-count">{counts.all}</div>
+        <div className="conversation-list-header-count">
+          {loading ? "—" : counts.all}
+        </div>
       </div>
 
       <div className="conversation-views">
@@ -247,10 +260,32 @@ export default function ConversationList({
         </div>
       </div>
 
+      {refreshing && items.length > 0 ? (
+        <div style={{ padding: "0 12px 12px" }}>
+          <RefreshIndicator label="Refreshing conversations" />
+        </div>
+      ) : null}
+
       {loading && items.length === 0 ? (
-        <div className="conversation-empty">Loading chats…</div>
+        <div style={{ padding: 12 }}>
+          <ConversationListSkeleton rows={7} />
+        </div>
+      ) : filtered.length === 0 && items.length === 0 ? (
+        <div style={{ padding: 12 }}>
+          <EmptyState
+            eyebrow="Inbox"
+            title="No conversations yet."
+            description="Active customer conversations will appear here as messages start coming in."
+          />
+        </div>
       ) : filtered.length === 0 ? (
-        <div className="conversation-empty">No conversations found.</div>
+        <div style={{ padding: 12 }}>
+          <EmptyState
+            eyebrow="Search"
+            title="No conversations match these filters."
+            description="Try another search term or switch to a broader view."
+          />
+        </div>
       ) : (
         <ul className="conversation-items">
           {filtered.map((c) => {

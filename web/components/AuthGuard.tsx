@@ -4,6 +4,7 @@
 import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "./AuthProvider";
+import { Card, PageSkeleton } from "@/components/ui";
 
 const PUBLIC_PATHS = ["/login", "/register-admin"];
 
@@ -40,13 +41,11 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
 
   if (!ready || !checked) {
     return (
-      <div className="shell-loading">
-        <div className="shell-loading-card">
-          <div className="shell-loading-mark">UJ</div>
-          <div className="shell-loading-copy">
-            <div className="shell-loading-title">Loading workspace</div>
-            <div className="shell-loading-subtitle">Preparing the Ujani business console...</div>
-          </div>
+      <div className="console-page">
+        <div className="console-page__container">
+          <Card padding="lg">
+            <PageSkeleton />
+          </Card>
         </div>
       </div>
     );

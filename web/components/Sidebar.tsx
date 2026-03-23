@@ -118,46 +118,46 @@ export default function Sidebar({
     <>
       <button
         type="button"
-        className={"sidebar-overlay" + (open ? " sidebar-overlay--open" : "")}
+        className={"console-sidebar-overlay" + (open ? " console-sidebar-overlay--open" : "")}
         onClick={onClose}
         aria-label="Close sidebar"
       />
 
-      <aside className={"sidebar" + (open ? " sidebar--open" : "")}>
-        <div className="sidebar-top">
-          <Link href="/inbox" className="sidebar-brand" onClick={onClose}>
-            <div className="sidebar-brand-mark">UJ</div>
-            <div className="sidebar-brand-copy">
-              <div className="sidebar-brand-title">{companyName}</div>
-              <div className="sidebar-brand-subtitle">Business Operations Console</div>
+      <aside className={"console-sidebar" + (open ? " console-sidebar--open" : "")}>
+        <div className="console-sidebar__top">
+          <Link href="/inbox" className="console-sidebar__brand" onClick={onClose}>
+            <div className="console-sidebar__brand-mark">UJ</div>
+            <div className="console-sidebar__brand-copy">
+              <div className="console-sidebar__brand-title">{companyName}</div>
+              <div className="console-sidebar__brand-subtitle">Commerce operations console</div>
             </div>
           </Link>
 
-          <div className="sidebar-workspace">
-            <div className="sidebar-workspace-label">Workspace</div>
-            <div className="sidebar-workspace-value">Single business live environment</div>
+          <div className="console-sidebar__workspace">
+            <div className="console-sidebar__workspace-label">Workspace</div>
+            <div className="console-sidebar__workspace-value">Single business live environment</div>
           </div>
         </div>
 
-        <div className="sidebar-scroll">
+        <div className="console-sidebar__scroll">
           {visibleSections.map((section) => (
-            <section key={section.title} className="sidebar-section">
-              <div className="sidebar-section-title">{section.title}</div>
-              <nav className="sidebar-nav">
+            <section key={section.title} className="console-sidebar__section">
+              <div className="console-sidebar__section-title">{section.title}</div>
+              <nav className="console-sidebar__nav">
                 {section.items.map((item) => {
                   const active = isActive(pathname, item.href);
                   return (
                     <Link
                       key={item.href}
                       href={item.href}
-                      className={"sidebar-link" + (active ? " sidebar-link--active" : "")}
+                      className={"console-sidebar__link" + (active ? " console-sidebar__link--active" : "")}
                       onClick={onClose}
                     >
-                      <span className="sidebar-link-mark" aria-hidden="true">
+                      <span className="console-sidebar__link-mark" aria-hidden="true">
                         {item.shortLabel}
                       </span>
-                      <span className="sidebar-link-copy">
-                        <span className="sidebar-link-label">{item.label}</span>
+                      <span className="console-sidebar__link-copy">
+                        <span className="console-sidebar__link-label">{item.label}</span>
                       </span>
                     </Link>
                   );
@@ -167,10 +167,12 @@ export default function Sidebar({
           ))}
         </div>
 
-        <div className="sidebar-footer">
-          <div className="sidebar-user-card">
-            <div className="sidebar-user-title">{user.email}</div>
-            <div className="sidebar-user-subtitle">{user.role === "admin" ? "Administrator" : "Operator"}</div>
+        <div className="console-sidebar__footer">
+          <div className="console-sidebar__user-card">
+            <div className="console-sidebar__user-title">{user.email}</div>
+            <div className="console-sidebar__user-subtitle">
+              {user.role === "admin" ? "Administrator" : "Operator"}
+            </div>
           </div>
         </div>
       </aside>

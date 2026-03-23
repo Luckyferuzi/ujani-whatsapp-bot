@@ -2,11 +2,9 @@
 
 import { useMemo, useState } from "react";
 import { usePathname } from "next/navigation";
-import { useAuth } from "@/components/AuthProvider";
 import Sidebar from "@/components/Sidebar";
 import Topbar from "@/components/Tobpar";
-
-const PUBLIC_PATHS = ["/login", "/register-admin"];
+import PageHeader from "@/components/PageHeader";
 
 function getPageMeta(pathname: string | null) {
   const p = pathname || "/";
@@ -16,6 +14,7 @@ function getPageMeta(pathname: string | null) {
       title: "Inbox",
       section: "Operations",
       description: "Live customer conversations, handover, and order context.",
+      immersive: true,
     };
   }
   if (p.startsWith("/orders")) {
@@ -23,6 +22,7 @@ function getPageMeta(pathname: string | null) {
       title: "Orders",
       section: "Operations",
       description: "Track fulfillment, payment progress, and delivery movement.",
+      immersive: false,
     };
   }
   if (p.startsWith("/broadcast")) {
@@ -30,6 +30,7 @@ function getPageMeta(pathname: string | null) {
       title: "Broadcast",
       section: "Operations",
       description: "Send controlled outbound updates to recent WhatsApp customers.",
+      immersive: false,
     };
   }
   if (p.startsWith("/products")) {
@@ -37,6 +38,7 @@ function getPageMeta(pathname: string | null) {
       title: "Products",
       section: "Commerce",
       description: "Manage the active catalog, pricing, stock, and sellable items.",
+      immersive: false,
     };
   }
   if (p.startsWith("/stats")) {
@@ -44,6 +46,7 @@ function getPageMeta(pathname: string | null) {
       title: "Reports",
       section: "Finance & Reports",
       description: "Review business performance, order activity, and delivery trends.",
+      immersive: false,
     };
   }
   if (p.startsWith("/expenses")) {
@@ -51,6 +54,7 @@ function getPageMeta(pathname: string | null) {
       title: "Expenses",
       section: "Finance & Reports",
       description: "Record and review operational spending.",
+      immersive: false,
     };
   }
   if (p.startsWith("/incomes")) {
@@ -58,6 +62,7 @@ function getPageMeta(pathname: string | null) {
       title: "Income",
       section: "Finance & Reports",
       description: "Review approved and pending business income records.",
+      immersive: false,
     };
   }
   if (p.startsWith("/profile")) {
@@ -65,6 +70,7 @@ function getPageMeta(pathname: string | null) {
       title: "Profile",
       section: "System",
       description: "Your account information and operator preferences.",
+      immersive: false,
     };
   }
   if (p.startsWith("/admin/users")) {
@@ -72,6 +78,7 @@ function getPageMeta(pathname: string | null) {
       title: "Users & Staff",
       section: "System",
       description: "Manage console access, roles, and internal operators.",
+      immersive: false,
     };
   }
   if (p.startsWith("/admin/audit")) {
@@ -79,6 +86,7 @@ function getPageMeta(pathname: string | null) {
       title: "Audit Log",
       section: "System",
       description: "Review important internal actions and governance records.",
+      immersive: false,
     };
   }
   if (p.startsWith("/admin/governance")) {
@@ -86,6 +94,7 @@ function getPageMeta(pathname: string | null) {
       title: "Governance",
       section: "System",
       description: "Administrative review and approval workflows.",
+      immersive: false,
     };
   }
   if (p.startsWith("/settings")) {
@@ -93,6 +102,7 @@ function getPageMeta(pathname: string | null) {
       title: "Settings",
       section: "System",
       description: "Operator settings and console configuration.",
+      immersive: false,
     };
   }
   if (p.startsWith("/setup")) {
@@ -100,6 +110,7 @@ function getPageMeta(pathname: string | null) {
       title: "Setup",
       section: "System",
       description: "Business setup, runtime checks, and WhatsApp configuration.",
+      immersive: false,
     };
   }
 
@@ -107,51 +118,42 @@ function getPageMeta(pathname: string | null) {
     title: "Ujani Console",
     section: "Workspace",
     description: "Business operations workspace for WhatsApp sales and support.",
+    immersive: false,
   };
 }
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
-  const { user } = useAuth();
   const pathname = usePathname();
   const [sidebarOpen, setSidebarOpen] = useState(false);
-
-  const isPublic = useMemo(() => {
-    const p = pathname || "/";
-    return PUBLIC_PATHS.includes(p);
-  }, [pathname]);
-
-  const isInbox = useMemo(() => {
-    const p = pathname || "/";
-    return p.startsWith("/inbox");
-  }, [pathname]);
-
   const pageMeta = useMemo(() => getPageMeta(pathname), [pathname]);
 
   return (
-    <div className={"app-shell" + (isPublic ? " app-shell--public" : "")}>
-      {user && (
-        <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
-      )}
+    <div className="console-shell">
+      <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 
-      <div className="app-main">
+      <div className="console-shell__main">
         <Topbar
           pageTitle={pageMeta.title}
           pageSection={pageMeta.section}
           pageDescription={pageMeta.description}
-          isInbox={isInbox}
-          showSidebarToggle={!!user && !isPublic}
+          isInbox={pageMeta.immersive}
+          showSidebarToggle
           onToggleSidebar={() => setSidebarOpen((v) => !v)}
         />
 
-        <main
-          className={"app-page " + (isInbox ? "app-page--flush" : "")}
-          aria-label={pageMeta.title}
-        >
-          {isInbox || isPublic ? (
-            children
+        <main className="console-shell__content" aria-label={pageMeta.title}>
+          {pageMeta.immersive ? (
+            <div className="console-page console-page--immersive">{children}</div>
           ) : (
-            <div className="page-container">
-              <div className="page-frame">{children}</div>
+            <div className="console-page">
+              <div className="console-page__container">
+                <PageHeader
+                  section={pageMeta.section}
+                  title={pageMeta.title}
+                  description={pageMeta.description}
+                />
+                <div className="console-page__frame">{children}</div>
+              </div>
             </div>
           )}
         </main>
