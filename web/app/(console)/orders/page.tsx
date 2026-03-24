@@ -944,10 +944,10 @@ async function deleteOrder(order: OrderListRow) {
       <form className="orders-controls" onSubmit={applyFilters}>
         <div className="orders-controls-head">
           <div>
-            <div className="orders-controls-kicker">Filters</div>
+            <div className="orders-controls-kicker">Queue controls</div>
             <div className="orders-controls-title">Refine the active fulfillment queue</div>
             <div className="orders-controls-copy">
-              Search by customer, phone, order code, payment state, or handoff context without leaving the ledger.
+              Search, segment, and hand off the live order ledger without leaving the page.
             </div>
           </div>
           <div className="orders-controls-meta">

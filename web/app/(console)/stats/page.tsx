@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
+import AnalyticsSubnav from "@/components/AnalyticsSubnav";
 import {
   BarChart,
   Bar,
@@ -208,15 +209,7 @@ export default function StatsPage() {
         </div>
 
         <div className="st-insights-actions">
-          <Link href="/incomes" className="st-btn">
-            Income ledger
-          </Link>
-          <Link href="/expenses" className="st-btn">
-            Expense ledger
-          </Link>
-          <Link href="/orders" className="st-btn">
-            Order operations
-          </Link>
+          <AnalyticsSubnav />
           <button
             type="button"
             className="st-btn st-btn-primary"

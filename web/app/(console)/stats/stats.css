@@ -903,14 +903,19 @@ html[data-theme="dark"] .stats-root .st-loading-ring {
 }
 
 .st-insights-actions {
-  display: grid;
-  align-content: start;
+  display: flex;
+  min-width: min(100%, 34rem);
+  flex-direction: column;
+  align-items: stretch;
   gap: 10px;
 }
 
-.st-insights-actions .st-btn,
+.st-insights-actions .analytics-subnav {
+  max-width: 100%;
+}
+
 .st-insights-actions .st-btn-primary {
-  justify-content: center;
+  align-self: flex-end;
 }
 
 .st-toolbar {

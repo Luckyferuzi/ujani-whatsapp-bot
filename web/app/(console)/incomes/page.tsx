@@ -3,6 +3,7 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { api, get } from "@/lib/api";
+import AnalyticsSubnav from "@/components/AnalyticsSubnav";
 import { toast } from "sonner";
 import { useCachedQuery } from "@/hooks/useCachedQuery";
 
@@ -500,11 +501,7 @@ function exportSelectedCsv() {
             Review approved revenue, pending approvals, and manual income entries from one business-grade ledger.
           </div>
         </div>
-        <div className="ic-report-links">
-          <Link href="/stats" className="ic-report-link">Performance overview</Link>
-          <Link href="/expenses" className="ic-report-link">Expense ledger</Link>
-          <Link href="/orders" className="ic-report-link">Order desk</Link>
-        </div>
+        <AnalyticsSubnav />
       </section>
 
       {/* Topbar */}

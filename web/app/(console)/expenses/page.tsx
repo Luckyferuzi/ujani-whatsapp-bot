@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { api, get, post, put } from "@/lib/api";
+import AnalyticsSubnav from "@/components/AnalyticsSubnav";
 import { toast } from "sonner";
 import { useCachedQuery } from "@/hooks/useCachedQuery";
 
@@ -471,11 +472,7 @@ export default function ExpensesPage() {
             Track cost categories, review business spending, and keep the outgoing cash ledger clean and searchable.
           </div>
         </div>
-        <div className="ex-report-links">
-          <Link href="/stats" className="ex-report-link">Performance overview</Link>
-          <Link href="/incomes" className="ex-report-link">Income ledger</Link>
-          <Link href="/orders" className="ex-report-link">Order desk</Link>
-        </div>
+        <AnalyticsSubnav />
       </section>
 
       {/* Topbar */}

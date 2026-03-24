@@ -657,44 +657,25 @@ function exportSelectedCsv() {
 
   return (
     <div className="products-page">
-      <section className="pr-hero">
-        <div className="pr-hero-copy">
-          <div className="pr-hero-kicker">Commerce workspace</div>
-          <div className="pr-hero-title">Product management</div>
-          <div className="pr-hero-text">
-            Keep the live catalog organized, spot stock risk quickly, and manage commercial readiness without changing
-            the current product workflow.
+      <section className="pr-hero pr-hero--compact">
+        <div className="pr-hero-main">
+          <div className="pr-hero-copy">
+            <div className="pr-hero-kicker">Commerce workspace</div>
+            <div className="pr-hero-title">Product management</div>
+            <div className="pr-hero-text">
+              Add, edit, stock, publish, deactivate, and remove products from one commercial control surface.
+            </div>
           </div>
-        </div>
-        <div className="pr-hero-metrics">
-          <div className="pr-hero-stat">
-            <span className="pr-hero-stat-label">Live products</span>
-            <strong className="pr-hero-stat-value">{stats.active}</strong>
-            <span className="pr-hero-stat-meta">active items currently available</span>
-          </div>
-          <div className="pr-hero-stat">
-            <span className="pr-hero-stat-label">Catalog ready</span>
-            <strong className="pr-hero-stat-value">{catalogReadyCount}</strong>
-            <span className="pr-hero-stat-meta">{catalogEnabled ? "products with image support" : "catalog disabled in setup"}</span>
-          </div>
-          <div className="pr-hero-stat">
-            <span className="pr-hero-stat-label">Installment items</span>
-            <strong className="pr-hero-stat-value">{installmentCount}</strong>
-            <span className="pr-hero-stat-meta">special payment products in catalog</span>
-          </div>
-        </div>
-      </section>
 
-      {/* Topbar */}
-      <div className="pr-topbar">
-        <div>
-          <div className="pr-title">Products desk</div>
-          <div className="pr-subtitle">
-            Add, edit, stock, publish, deactivate, and remove products from one commercial control surface.
-          </div>
-        </div>
+          <div className="pr-topbar">
+            <div>
+              <div className="pr-title">Products desk</div>
+              <div className="pr-subtitle">
+                Keep the live catalog organized, spot stock risk quickly, and keep commercial readiness visible.
+              </div>
+            </div>
 
-        <div className="pr-top-actions">
+            <div className="pr-top-actions">
           <Link href="/orders" className="pr-btn pr-btn-link">
             Orders
           </Link>
@@ -726,11 +707,31 @@ function exportSelectedCsv() {
   Import catalog
 </button>
 
-          <button type="button" className="pr-btn pr-btn-primary" onClick={openNew}>
-            + New product
-          </button>
+              <button type="button" className="pr-btn pr-btn-primary" onClick={openNew}>
+                + New product
+              </button>
+            </div>
+          </div>
         </div>
-      </div>
+
+        <div className="pr-hero-metrics">
+          <div className="pr-hero-stat">
+            <span className="pr-hero-stat-label">Live products</span>
+            <strong className="pr-hero-stat-value">{stats.active}</strong>
+            <span className="pr-hero-stat-meta">active items currently available</span>
+          </div>
+          <div className="pr-hero-stat">
+            <span className="pr-hero-stat-label">Catalog ready</span>
+            <strong className="pr-hero-stat-value">{catalogReadyCount}</strong>
+            <span className="pr-hero-stat-meta">{catalogEnabled ? "products with image support" : "catalog disabled in setup"}</span>
+          </div>
+          <div className="pr-hero-stat">
+            <span className="pr-hero-stat-label">Installment items</span>
+            <strong className="pr-hero-stat-value">{installmentCount}</strong>
+            <span className="pr-hero-stat-meta">special payment products in catalog</span>
+          </div>
+        </div>
+      </section>
 
       {/* Controls */}
       <div className="pr-controls">
