@@ -227,13 +227,6 @@ export default function Sidebar({
               <div className="console-sidebar__brand-subtitle">Commerce operations console</div>
             </div>
           </Link>
-
-          <div className="console-sidebar__workspace">
-            <div className="console-sidebar__workspace-label">Console map</div>
-            <div className="console-sidebar__workspace-value">
-              Operations, commerce, insights, workspace control, and account access.
-            </div>
-          </div>
         </div>
 
         <div className="console-sidebar__scroll">
@@ -267,15 +260,6 @@ export default function Sidebar({
               </nav>
             </section>
           ))}
-        </div>
-
-        <div className="console-sidebar__footer">
-          <div className="console-sidebar__user-card">
-            <div className="console-sidebar__user-title">{user.email}</div>
-            <div className="console-sidebar__user-subtitle">
-              {user.role === "admin" ? "Administrator" : "Operator"}
-            </div>
-          </div>
         </div>
       </aside>
     </>

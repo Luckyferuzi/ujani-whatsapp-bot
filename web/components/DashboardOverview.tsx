@@ -72,6 +72,13 @@ type SignalItem = {
   description: string;
   href: string;
   tone: "accent" | "warning" | "info" | "success";
+  ctaLabel?: string;
+  previews?: {
+    key: string;
+    title: string;
+    note: string;
+    href?: string;
+  }[];
 };
 
 function formatTzs(value: number) {
@@ -164,14 +171,14 @@ export default function DashboardOverview() {
           data.payments.pending_review > 0
             ? "Proofs are waiting for confirmation"
             : "No payments are blocked in review",
-        href: "/inbox",
+        href: "/orders?status=verifying",
         tone: toneForCount(data.payments.pending_review),
       },
       {
         label: "Fulfillment queue",
         value: data.orders.awaiting_fulfillment,
         hint: "Pending, verifying, or preparing orders",
-        href: "/orders",
+        href: "/orders?status=pending",
         tone: toneForCount(data.orders.awaiting_fulfillment),
       },
       {
@@ -187,6 +194,44 @@ export default function DashboardOverview() {
   const signals = useMemo<SignalItem[]>(() => {
     if (!data) return [];
 
+    const buildOrderQueueHref = (statusValue: string, searchValue?: string | null) => {
+      const params = new URLSearchParams();
+      params.set("status", statusValue);
+      if (searchValue && searchValue.trim()) params.set("q", searchValue.trim());
+      return `/orders?${params.toString()}`;
+    };
+
+    const paymentPreviewRows = data.recent_activity
+      .filter((item) => item.event_type === "payment.proof_submitted")
+      .slice(0, 2)
+      .map((item) => ({
+        key: `payment-${item.id}`,
+        title: item.customer_name || item.order_code || "Customer awaiting review",
+        note: item.order_code
+          ? `${item.order_code} - proof uploaded ${formatTime(item.created_at)}`
+          : `Proof uploaded ${formatTime(item.created_at)}`,
+        href: buildOrderQueueHref("verifying", item.order_code || item.customer_name),
+      }));
+
+    const fulfillmentPreviewRows = data.recent_activity
+      .filter(
+        (item) =>
+          item.event_type === "order.created" ||
+          (item.event_type === "order.status_changed" &&
+            ["pending", "verifying", "preparing"].includes(
+              String(item.payload?.next_status ?? "").toLowerCase()
+            ))
+      )
+      .slice(0, 2)
+      .map((item) => ({
+        key: `order-${item.id}`,
+        title: item.customer_name || item.order_code || `Order #${item.order_id ?? ""}`,
+        note: item.order_code
+          ? `${item.order_code} - ${formatTime(item.created_at)}`
+          : `Awaiting next action - ${formatTime(item.created_at)}`,
+        href: buildOrderQueueHref("pending", item.order_code || item.customer_name),
+      }));
+
     const next: SignalItem[] = [];
     if (data.inbox.unread_conversations > 0) {
       next.push({
@@ -194,22 +239,27 @@ export default function DashboardOverview() {
         description: "Customer conversations are waiting in the inbox.",
         href: "/inbox",
         tone: data.inbox.unread_conversations >= 5 ? "warning" : "accent",
+        ctaLabel: "Open inbox",
       });
     }
     if (data.payments.pending_review > 0) {
       next.push({
         title: `${data.payments.pending_review} payment proof${data.payments.pending_review === 1 ? "" : "s"} pending`,
         description: "Review submitted proofs to keep order flow moving.",
-        href: "/inbox",
+        href: "/orders?status=verifying",
         tone: "warning",
+        ctaLabel: "Open verification queue",
+        previews: paymentPreviewRows,
       });
     }
     if (data.orders.awaiting_fulfillment > 0) {
       next.push({
         title: `${data.orders.awaiting_fulfillment} order${data.orders.awaiting_fulfillment === 1 ? "" : "s"} awaiting fulfillment`,
         description: "The fulfillment queue needs operational follow-through.",
-        href: "/orders",
+        href: "/orders?status=pending",
         tone: data.orders.awaiting_fulfillment >= 5 ? "warning" : "accent",
+        ctaLabel: "Open pending orders",
+        previews: fulfillmentPreviewRows,
       });
     }
     if (next.length === 0) {
@@ -218,6 +268,7 @@ export default function DashboardOverview() {
         description: "No urgent inbox, payment, or fulfillment pressure is visible right now.",
         href: "/inbox",
         tone: "success",
+        ctaLabel: "Open inbox",
       });
     }
     return next.slice(0, 3);
@@ -416,6 +467,39 @@ export default function DashboardOverview() {
                 >
                   <div className="dashboard-command__signal-title">{signal.title}</div>
                   <div className="dashboard-command__signal-copy">{signal.description}</div>
+                  {signal.previews && signal.previews.length > 0 ? (
+                    <div className="dashboard-command__signal-preview-list">
+                      {signal.previews.map((preview) => (
+                        preview.href ? (
+                          <Link
+                            key={preview.key}
+                            href={preview.href}
+                            className="dashboard-command__signal-preview dashboard-command__signal-preview--link"
+                            onClick={(event) => event.stopPropagation()}
+                          >
+                            <div className="dashboard-command__signal-preview-title">
+                              {preview.title}
+                            </div>
+                            <div className="dashboard-command__signal-preview-note">
+                              {preview.note}
+                            </div>
+                          </Link>
+                        ) : (
+                          <div key={preview.key} className="dashboard-command__signal-preview">
+                            <div className="dashboard-command__signal-preview-title">
+                              {preview.title}
+                            </div>
+                            <div className="dashboard-command__signal-preview-note">
+                              {preview.note}
+                            </div>
+                          </div>
+                        )
+                      ))}
+                    </div>
+                  ) : null}
+                  <div className="dashboard-command__signal-cta">
+                    {signal.ctaLabel || "Open queue"}
+                  </div>
                 </Link>
               ))}
             </div>
