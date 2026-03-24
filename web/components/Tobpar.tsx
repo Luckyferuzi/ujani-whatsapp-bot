@@ -96,11 +96,7 @@ export default function Topbar({
             <div className="console-topbar__eyebrow">{pageSection || "Workspace"}</div>
             <div className="console-topbar__title-row">
               <div className="console-topbar__title">{pageTitle || "Ujani Console"}</div>
-              {user ? <span className="console-topbar__status">Live</span> : null}
             </div>
-            {!isInbox && pageDescription ? (
-              <div className="console-topbar__description">{pageDescription}</div>
-            ) : null}
           </div>
         </div>
 
@@ -111,16 +107,6 @@ export default function Topbar({
             </button>
           ) : (
             <>
-              {!isInbox ? (
-                <button type="button" className="console-topbar__search-placeholder">
-                  <span className="console-topbar__search-icon" aria-hidden="true">
-                    /
-                  </span>
-                  <span>Global search</span>
-                  <span className="console-topbar__search-meta">Soon</span>
-                </button>
-              ) : null}
-
               <button
                 type="button"
                 className="console-topbar__theme"
@@ -132,7 +118,7 @@ export default function Topbar({
                 aria-label={`Theme: ${themeLabel}`}
                 title={`Theme: ${themeLabel}`}
               >
-                Theme: {themeLabel}
+                {themeLabel}
               </button>
 
               <button

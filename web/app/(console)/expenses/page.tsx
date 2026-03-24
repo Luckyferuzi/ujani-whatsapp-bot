@@ -464,15 +464,17 @@ export default function ExpensesPage() {
 
   return (
     <div className="expenses-page">
-      <section className="ex-report-hero">
-        <div className="ex-report-copy">
-          <div className="ex-report-kicker">Finance workspace</div>
-          <div className="ex-report-title">Expense operations</div>
-          <div className="ex-report-text">
+      <section className="ex-report-hero ops-masthead">
+        <div className="ex-report-copy ops-masthead__main">
+          <div className="ex-report-kicker ops-masthead__eyebrow">Finance workspace</div>
+          <div className="ex-report-title ops-masthead__title">Expense operations</div>
+          <div className="ex-report-text ops-masthead__description">
             Track cost categories, review business spending, and keep the outgoing cash ledger clean and searchable.
           </div>
         </div>
-        <AnalyticsSubnav />
+        <div className="ops-masthead__actions">
+          <AnalyticsSubnav />
+        </div>
       </section>
 
       {/* Topbar */}
@@ -500,7 +502,7 @@ export default function ExpensesPage() {
       </div>
 
       {/* Controls */}
-      <div className="ex-controls">
+      <div className="ex-controls ops-toolbar">
         <div className="ex-field" style={{ minWidth: 260 }}>
           <div className="ex-label">Search</div>
           <input
@@ -545,7 +547,7 @@ export default function ExpensesPage() {
         </div>
       </div>
 
-      <div className="ex-summary-grid-top">
+      <div className="ex-summary-grid-top ops-metric-strip">
         <div className="ex-summary-top-card">
           <div className="ex-summary-top-label">Current filtered spend</div>
           <div className="ex-summary-top-value">{formatTzs(totals.total)} TZS</div>
@@ -564,7 +566,7 @@ export default function ExpensesPage() {
       </div>
 
       <div className="ex-card ex-summary-card">
-  <div className="ex-card-header">
+  <div className="ex-card-header ops-panel-head">
     <div>
       <div className="ex-card-title">Monthly summary</div>
       <div className="ex-card-sub">{monthlySummary.rangeLabel}</div>
@@ -627,7 +629,7 @@ export default function ExpensesPage() {
       <div className="ex-shell">
         {/* Left: Table */}
         <div className="ex-card">
-          <div className="ex-card-header">
+          <div className="ex-card-header ops-panel-head">
             <div>
               <div className="ex-card-title">Expense records</div>
               <div className="ex-card-sub">
@@ -819,7 +821,7 @@ export default function ExpensesPage() {
 
         {/* Right: Details */}
         <aside className="ex-card">
-          <div className="ex-card-header">
+          <div className="ex-card-header ops-panel-head">
             <div>
               <div className="ex-card-title">Expense details</div>
               <div className="ex-card-sub">{selected ? `#${selected.id}` : "Select a record"}</div>

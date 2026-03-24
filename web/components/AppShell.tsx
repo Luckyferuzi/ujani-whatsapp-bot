@@ -15,6 +15,7 @@ function getPageMeta(pathname: string | null) {
       section: "Operations",
       description: "What matters now across conversations, fulfillment, payments, and operational health.",
       immersive: false,
+      showPageHeader: false,
     };
   }
   if (p.startsWith("/inbox")) {
@@ -23,6 +24,7 @@ function getPageMeta(pathname: string | null) {
       section: "Operations",
       description: "Live customer conversations, handover, and order context.",
       immersive: true,
+      showPageHeader: false,
     };
   }
   if (p.startsWith("/orders")) {
@@ -31,6 +33,7 @@ function getPageMeta(pathname: string | null) {
       section: "Operations",
       description: "Track fulfillment, payment progress, and delivery movement.",
       immersive: false,
+      showPageHeader: false,
     };
   }
   if (p.startsWith("/broadcast")) {
@@ -39,6 +42,7 @@ function getPageMeta(pathname: string | null) {
       section: "Commerce",
       description: "Controlled outbound updates for recent WhatsApp customers.",
       immersive: false,
+      showPageHeader: false,
     };
   }
   if (p.startsWith("/products")) {
@@ -47,6 +51,7 @@ function getPageMeta(pathname: string | null) {
       section: "Commerce",
       description: "Manage products, pricing, stock posture, and catalog readiness.",
       immersive: false,
+      showPageHeader: false,
     };
   }
   if (p.startsWith("/stats")) {
@@ -55,6 +60,7 @@ function getPageMeta(pathname: string | null) {
       section: "Insights",
       description: "Performance metrics, order activity, and business insight signals.",
       immersive: false,
+      showPageHeader: false,
     };
   }
   if (p.startsWith("/expenses")) {
@@ -63,6 +69,7 @@ function getPageMeta(pathname: string | null) {
       section: "Insights",
       description: "Operational spending and cost visibility.",
       immersive: false,
+      showPageHeader: false,
     };
   }
   if (p.startsWith("/incomes")) {
@@ -71,6 +78,7 @@ function getPageMeta(pathname: string | null) {
       section: "Insights",
       description: "Approved and pending business income records.",
       immersive: false,
+      showPageHeader: false,
     };
   }
   if (p.startsWith("/profile")) {
@@ -79,6 +87,7 @@ function getPageMeta(pathname: string | null) {
       section: "Account",
       description: "Your identity, password, and operator preferences.",
       immersive: false,
+      showPageHeader: false,
     };
   }
   if (p.startsWith("/admin/users")) {
@@ -87,6 +96,7 @@ function getPageMeta(pathname: string | null) {
       section: "Admin",
       description: "Manage console access, roles, and internal operators.",
       immersive: false,
+      showPageHeader: false,
     };
   }
   if (p.startsWith("/admin/audit")) {
@@ -95,6 +105,7 @@ function getPageMeta(pathname: string | null) {
       section: "Admin",
       description: "Review important internal actions and governance records.",
       immersive: false,
+      showPageHeader: false,
     };
   }
   if (p.startsWith("/admin/governance")) {
@@ -103,6 +114,7 @@ function getPageMeta(pathname: string | null) {
       section: "Admin",
       description: "Administrative review, approvals, and policy controls.",
       immersive: false,
+      showPageHeader: false,
     };
   }
   if (p.startsWith("/settings")) {
@@ -111,6 +123,7 @@ function getPageMeta(pathname: string | null) {
       section: "Workspace",
       description: "Business profile, customer-facing menus, and system configuration.",
       immersive: false,
+      showPageHeader: false,
     };
   }
   if (p.startsWith("/setup")) {
@@ -119,6 +132,7 @@ function getPageMeta(pathname: string | null) {
       section: "Workspace",
       description: "Business setup, runtime checks, and WhatsApp configuration.",
       immersive: false,
+      showPageHeader: false,
     };
   }
 
@@ -127,6 +141,7 @@ function getPageMeta(pathname: string | null) {
     section: "Workspace",
     description: "Business operations workspace for WhatsApp sales and support.",
     immersive: false,
+    showPageHeader: true,
   };
 }
 
@@ -155,11 +170,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           ) : (
             <div className="console-page">
               <div className="console-page__container">
-                <PageHeader
-                  section={pageMeta.section}
-                  title={pageMeta.title}
-                  description={pageMeta.description}
-                />
+                {pageMeta.showPageHeader ? (
+                  <PageHeader
+                    section={pageMeta.section}
+                    title={pageMeta.title}
+                    description={pageMeta.description}
+                    compact
+                  />
+                ) : null}
                 <div className="console-page__frame">{children}</div>
               </div>
             </div>

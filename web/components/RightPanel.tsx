@@ -27,7 +27,7 @@ export default function RightPanel({ conversationId }: RightPanelProps) {
   const [orders, setOrders] = useState<OrderRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [activeView, setActiveView] = useState<"orders" | "settings">("orders");
+  const [activeView, setActiveView] = useState<"summary" | "activity" | "controls">("summary");
   const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null);
   const [updatingPayment, setUpdatingPayment] = useState(false);
   const [paymentAmountInput, setPaymentAmountInput] = useState("");
@@ -62,7 +62,7 @@ export default function RightPanel({ conversationId }: RightPanelProps) {
   }
 
   useEffect(() => { const mode = readStoredThemeMode(); setThemeMode(mode); applyThemeMode(mode); }, []);
-  useEffect(() => { void loadPanelData(true); setActiveView("orders"); setPaymentAmountInput(""); setPaymentError(null); setShowPaymentForm(false); setRiderPhoneInput(""); setStatusError(null); setShowRiderForm(false); }, [conversationId]);
+  useEffect(() => { void loadPanelData(true); setActiveView("summary"); setPaymentAmountInput(""); setPaymentError(null); setShowPaymentForm(false); setRiderPhoneInput(""); setStatusError(null); setShowRiderForm(false); }, [conversationId]);
 
   const handleOpenOrdersPage = () => { const phone = customer?.phone || latestOrder?.phone; router.push(phone ? `/orders?${new URLSearchParams({ phone }).toString()}` : "/orders"); };
   const handleUpdatePaymentStatus = async (status: "verifying" | "paid") => {
@@ -96,11 +96,12 @@ export default function RightPanel({ conversationId }: RightPanelProps) {
   return (
     <div className="right-panel">
       <div className="panel-header panel-header--tabs">
-        <button type="button" className={"panel-header-tab" + (activeView === "orders" ? " panel-header-tab--active" : "")} onClick={() => setActiveView("orders")}><span className="panel-header-tab-label">Operations</span></button>
-        <button type="button" className={"panel-header-tab" + (activeView === "settings" ? " panel-header-tab--active" : "")} onClick={() => setActiveView("settings")}><span className="panel-header-tab-label">Controls</span></button>
+        <button type="button" className={"panel-header-tab" + (activeView === "summary" ? " panel-header-tab--active" : "")} onClick={() => setActiveView("summary")}><span className="panel-header-tab-label">Summary</span></button>
+        <button type="button" className={"panel-header-tab" + (activeView === "activity" ? " panel-header-tab--active" : "")} onClick={() => setActiveView("activity")}><span className="panel-header-tab-label">Activity</span></button>
+        <button type="button" className={"panel-header-tab" + (activeView === "controls" ? " panel-header-tab--active" : "")} onClick={() => setActiveView("controls")}><span className="panel-header-tab-label">Controls</span></button>
         <button type="button" className="rp-icon-button" onClick={() => void loadPanelData(false)} disabled={loading || isRefreshing} title="Refresh context" aria-label="Refresh context">Refresh</button>
       </div>
-      {activeView === "orders" ? (
+      {activeView === "summary" ? (
         <div className="rp-stack">
           <div className="panel-card panel-card--hero">
             <div className="rp-hero-top">
@@ -177,6 +178,42 @@ export default function RightPanel({ conversationId }: RightPanelProps) {
               {showPaymentForm ? <div className="rp-inline-form"><div className="rp-inline-form-row"><input type="number" min={0} className="rp-input" placeholder="Amount in TZS" value={paymentAmountInput} onChange={(e) => { setPaymentAmountInput(e.target.value); if (paymentError) setPaymentError(null); }} /><button type="button" className="btn btn-success btn-xs" onClick={() => void handleUpdatePaymentStatus("paid")} disabled={updatingPayment}>{updatingPayment ? "Saving..." : "Confirm"}</button></div>{paymentError ? <div className="rp-error">{paymentError}</div> : null}</div> : null}
             </>}
           </div>
+
+        </div>
+      ) : activeView === "activity" ? (
+        <div className="rp-stack">
+          {orders.length > 1 ? (
+            <div className="panel-card">
+              <div className="rp-card-title-row">
+                <div>
+                  <div className="panel-card-title">Related orders</div>
+                  <div className="panel-card-body panel-card-body--muted">Recent order history for this conversation.</div>
+                </div>
+              </div>
+              <div className="rp-list">
+                {orders.slice(0, 8).map((order) => {
+                  const statusUi = normalizeOrderStatus(order.status);
+                  const selected = order.id === currentOrder?.id;
+                  return (
+                    <button
+                      key={order.id}
+                      type="button"
+                      className={"rp-list-row rp-list-row--button" + (selected ? " rp-list-row--active" : "")}
+                      onClick={() => setSelectedOrderId(order.id)}
+                    >
+                      <div className="rp-list-main">
+                        <div className="rp-list-title">{order.order_code || `Order #${order.id}`}</div>
+                        <div className="rp-list-sub">{formatDateTime(order.created_at)}</div>
+                      </div>
+                      <div className="rp-list-right">
+                        <span className={"rp-chip rp-chip--" + statusUi.tone}>{statusUi.label}</span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
 
           {(restock?.subscribed_count ?? 0) > 0 && restock?.items?.length ? <div className="panel-card"><div className="rp-card-title-row"><div className="panel-card-title">Stock alerts</div><span className="badge badge--restock">{restock.subscribed_count}</span></div><div className="rp-list">{restock.items.slice(0, 8).map((it) => <div key={it.product_id} className="rp-list-row"><div className="rp-list-main"><div className="rp-list-title">{it.name || "Product"}</div><div className="rp-list-sub">{it.sku}</div></div><div className="rp-list-right">{it.status}</div></div>)}{restock.items.length > 8 ? <div className="rp-muted">+{restock.items.length - 8} more</div> : null}</div></div> : null}
 

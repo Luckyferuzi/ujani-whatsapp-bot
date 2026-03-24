@@ -1075,3 +1075,65 @@ html[data-theme="dark"] .expenses-root .ex-loading-pill {
   0% { background-position: 200% 0; }
   100% { background-position: -200% 0; }
 }
+
+/* Shared operational-page alignment */
+.expenses-page {
+  gap: 14px;
+}
+
+.ex-report-hero.ops-masthead {
+  padding: var(--ds-space-4);
+  border-radius: var(--ds-radius-panel);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--ds-color-surface-raised) 96%, transparent), var(--ds-color-surface)),
+    var(--ds-color-surface);
+  border-color: var(--ds-color-border-soft);
+  box-shadow: var(--ds-shadow-sm);
+}
+
+.ex-report-title {
+  font-size: clamp(1.45rem, 2.5vw, 1.95rem);
+}
+
+.ex-report-text {
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+.ex-topbar {
+  align-items: end;
+  gap: 12px;
+}
+
+.ex-title {
+  font-size: 1rem;
+  line-height: 1.2;
+}
+
+.ex-subtitle {
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+.ex-controls.ops-toolbar {
+  padding: var(--ds-space-4);
+  border-radius: var(--ds-radius-panel);
+}
+
+.ex-summary-grid-top.ops-metric-strip {
+  gap: 12px;
+}
+
+.ex-summary-top-card {
+  border-radius: 18px;
+  box-shadow: none;
+}
+
+.ex-card {
+  border-radius: 20px;
+  box-shadow: none;
+}
+
+.ex-card-header.ops-panel-head {
+  padding: 12px 14px;
+}

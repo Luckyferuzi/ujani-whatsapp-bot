@@ -198,17 +198,17 @@ export default function StatsPage() {
 
   return (
     <div className="stats-page">
-      <section className="st-insights-hero">
-        <div className="st-insights-main">
-          <div className="st-insights-kicker">Insights</div>
-          <div className="st-insights-title">Performance overview</div>
-          <div className="st-insights-copy">
+      <section className="st-insights-hero ops-masthead">
+        <div className="st-insights-main ops-masthead__main">
+          <div className="st-insights-kicker ops-masthead__eyebrow">Insights</div>
+          <div className="st-insights-title ops-masthead__title">Performance overview</div>
+          <div className="st-insights-copy ops-masthead__description">
             Review revenue, costs, order throughput, and product movement in one calm reporting workspace built for
             daily operational decisions.
           </div>
         </div>
 
-        <div className="st-insights-actions">
+        <div className="st-insights-actions ops-masthead__actions">
           <AnalyticsSubnav />
           <button
             type="button"
@@ -224,11 +224,11 @@ export default function StatsPage() {
         </div>
       </section>
 
-      <section className="st-toolbar">
-        <div className="st-toolbar-main">
-          <div className="st-toolbar-copy">
-            <div className="st-toolbar-title">Reporting window</div>
-            <div className="st-toolbar-subtitle">
+      <section className="st-toolbar ops-toolbar">
+        <div className="st-toolbar-main ops-toolbar__head">
+          <div className="st-toolbar-copy ops-toolbar__copy">
+            <div className="st-toolbar-title ops-toolbar__title">Reporting window</div>
+            <div className="st-toolbar-subtitle ops-toolbar__description">
               Use a shorter range for sharper signals or broaden the period for calmer trend review.
             </div>
           </div>
@@ -256,14 +256,14 @@ export default function StatsPage() {
           </div>
         </div>
 
-        <div className="st-toolbar-meta">
+        <div className="st-toolbar-meta ops-toolbar__meta">
           <span className="st-chip">{periodLabel || humanRange}</span>
           <span className="st-chip">{loadingMain || refreshingMain ? "Updating metrics" : `Period: ${humanRange}`}</span>
           {error ? <span className="st-error">{error.message}</span> : null}
         </div>
       </section>
 
-      <section className="st-kpi-grid">
+      <section className="st-kpi-grid ops-metric-strip">
         <div className="st-kpi st-kpi--accent">
           <div className="st-kpi-top">
             <div className="st-kpi-label">Approved income</div>
@@ -308,7 +308,7 @@ export default function StatsPage() {
       <div className="st-shell">
         <div className="st-primary-column">
           <div className="st-card">
-            <div className="st-card-header">
+            <div className="st-card-header ops-panel-head">
               <div>
                 <div className="st-card-title">Daily approved income</div>
                 <div className="st-card-sub">Trendline for approved revenue only, without clutter from unrelated series.</div>
@@ -386,7 +386,7 @@ export default function StatsPage() {
           </div>
 
           <div className="st-card">
-            <div className="st-card-header">
+            <div className="st-card-header ops-panel-head">
               <div>
                 <div className="st-card-title">Top products</div>
                 <div className="st-card-sub">Products that are driving delivered and paid order value.</div>
@@ -449,7 +449,7 @@ export default function StatsPage() {
 
         <aside className="st-secondary-column">
           <div className="st-card">
-            <div className="st-card-header">
+            <div className="st-card-header ops-panel-head">
               <div>
                 <div className="st-card-title">Operating signals</div>
                 <div className="st-card-sub">A smaller summary for quick admin and owner review.</div>
@@ -496,7 +496,7 @@ export default function StatsPage() {
           </div>
 
           <div className="st-card">
-            <div className="st-card-header">
+            <div className="st-card-header ops-panel-head">
               <div>
                 <div className="st-card-title">Finance split</div>
                 <div className="st-card-sub">Profit versus expenses in the same reporting window.</div>

@@ -4259,3 +4259,48 @@ html[data-theme="dark"] .dashboard-command__signal-preview--link:hover {
     text-align: left;
   }
 }
+
+/* Operational page family tightening */
+.dashboard-command {
+  gap: var(--ds-space-4);
+}
+
+.dashboard-command__masthead {
+  padding: var(--ds-space-4);
+  border-radius: var(--ds-radius-panel);
+  box-shadow: var(--ds-shadow-sm);
+}
+
+.dashboard-command__masthead-title {
+  font-size: clamp(1.45rem, 2.5vw, 1.95rem);
+}
+
+.dashboard-command__masthead-copy {
+  max-width: 46rem;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+.dashboard-command__priority-grid {
+  gap: 12px;
+}
+
+.dashboard-command__priority {
+  padding: 14px;
+  border-radius: 18px;
+  box-shadow: none;
+}
+
+.dashboard-command__panel {
+  box-shadow: none;
+}
+
+.dashboard-command__panel-head {
+  gap: 12px;
+}
+
+.dashboard-command__health-card,
+.dashboard-command__quick-action,
+.dashboard-command__signal {
+  border-radius: 18px;
+}

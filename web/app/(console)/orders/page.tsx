@@ -882,16 +882,16 @@ async function deleteOrder(order: OrderListRow) {
   return (
     <div className="orders-page">
       {/* Topbar */}
-      <div className="orders-topbar">
-        <div>
-          <div className="orders-kicker">Order operations</div>
-          <div className="orders-title">Orders console</div>
-          <div className="orders-subtitle">
+      <div className="orders-topbar ops-masthead">
+        <div className="ops-masthead__main">
+          <div className="orders-kicker ops-masthead__eyebrow">Order operations</div>
+          <div className="orders-title ops-masthead__title">Orders console</div>
+          <div className="orders-subtitle ops-masthead__description">
             Process new orders, payment checks, fulfillment, and delivery transitions from one operator workspace.
           </div>
         </div>
 
-        <div className="orders-top-actions">
+        <div className="orders-top-actions ops-masthead__actions">
           <Link href="/inbox" className="or-btn or-btn-link">
             Inbox
           </Link>
@@ -913,12 +913,12 @@ async function deleteOrder(order: OrderListRow) {
         </div>
       </div>
 
-      <div className="orders-queue-grid">
+      <div className="orders-queue-grid ops-metric-strip">
         {queueCards.map((card) => (
-          <div key={card.title} className="or-queue-card">
-            <div className="or-queue-label">{card.title}</div>
-            <div className="or-queue-value">{card.value}</div>
-            <div className="or-queue-hint">{card.hint}</div>
+          <div key={card.title} className="or-queue-card ops-metric-card">
+            <div className="or-queue-label ops-metric-card__label">{card.title}</div>
+            <div className="or-queue-value ops-metric-card__value">{card.value}</div>
+            <div className="or-queue-hint ops-metric-card__meta">{card.hint}</div>
           </div>
         ))}
       </div>
@@ -941,16 +941,16 @@ async function deleteOrder(order: OrderListRow) {
       </div>
 
       {/* Controls */}
-      <form className="orders-controls" onSubmit={applyFilters}>
-        <div className="orders-controls-head">
-          <div>
-            <div className="orders-controls-kicker">Queue controls</div>
-            <div className="orders-controls-title">Refine the active fulfillment queue</div>
-            <div className="orders-controls-copy">
+      <form className="orders-controls ops-toolbar" onSubmit={applyFilters}>
+        <div className="orders-controls-head ops-toolbar__head">
+          <div className="ops-toolbar__copy">
+            <div className="orders-controls-kicker ops-toolbar__eyebrow">Queue controls</div>
+            <div className="orders-controls-title ops-toolbar__title">Refine the live order queue</div>
+            <div className="orders-controls-copy ops-toolbar__description">
               Search, segment, and hand off the live order ledger without leaving the page.
             </div>
           </div>
-          <div className="orders-controls-meta">
+          <div className="orders-controls-meta ops-toolbar__meta">
             <span className="orders-controls-count">{activeFilterCount} active</span>
             <span className="orders-controls-summary">{resultSummary}</span>
           </div>
@@ -1051,7 +1051,7 @@ async function deleteOrder(order: OrderListRow) {
       <div className="orders-shell">
         {/* Left: Table */}
         <div className="or-card">
-          <div className="or-card-header">
+          <div className="or-card-header ops-panel-head">
             <div>
               <div className="or-card-title">Fulfillment ledger</div>
               <div className="or-card-sub">Live operational queue for payment, packing, and delivery handoff.</div>
@@ -1352,7 +1352,7 @@ onChange={() => {}}
 
         {/* Right: Details */}
         <aside className="or-card">
-          <div className="or-card-header">
+          <div className="or-card-header ops-panel-head">
             <div>
               <div className="or-card-title">Active order</div>
               <div className="or-card-sub">{selectedTitle}</div>

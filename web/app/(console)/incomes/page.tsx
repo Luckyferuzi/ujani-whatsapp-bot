@@ -493,15 +493,17 @@ function exportSelectedCsv() {
 
   return (
     <div className="incomes-page">
-      <section className="ic-report-hero">
-        <div className="ic-report-copy">
-          <div className="ic-report-kicker">Finance workspace</div>
-          <div className="ic-report-title">Income operations</div>
-          <div className="ic-report-text">
+      <section className="ic-report-hero ops-masthead">
+        <div className="ic-report-copy ops-masthead__main">
+          <div className="ic-report-kicker ops-masthead__eyebrow">Finance workspace</div>
+          <div className="ic-report-title ops-masthead__title">Income operations</div>
+          <div className="ic-report-text ops-masthead__description">
             Review approved revenue, pending approvals, and manual income entries from one business-grade ledger.
           </div>
         </div>
-        <AnalyticsSubnav />
+        <div className="ops-masthead__actions">
+          <AnalyticsSubnav />
+        </div>
       </section>
 
       {/* Topbar */}
@@ -529,7 +531,7 @@ function exportSelectedCsv() {
       </div>
 
       {/* Controls */}
-      <div className="ic-controls">
+      <div className="ic-controls ops-toolbar">
         <div className="ic-field" style={{ minWidth: 260 }}>
           <div className="ic-label">Search</div>
           <input
@@ -583,7 +585,7 @@ function exportSelectedCsv() {
         </div>
       </div>
 
-      <div className="ic-summary-grid">
+      <div className="ic-summary-grid ops-metric-strip">
         <div className="ic-summary-card">
           <div className="ic-summary-label">Approved income</div>
           <div className="ic-summary-value">{formatTzs(totals.approvedSum)} TZS</div>
@@ -605,7 +607,7 @@ function exportSelectedCsv() {
       <div className="ic-shell">
         {/* Left: Table */}
         <div className="ic-card">
-          <div className="ic-card-header">
+          <div className="ic-card-header ops-panel-head">
             <div>
               <div className="ic-card-title">Income records</div>
               <div className="ic-card-sub">
@@ -827,7 +829,7 @@ function exportSelectedCsv() {
 
         {/* Right: Details */}
         <aside className="ic-card">
-          <div className="ic-card-header">
+          <div className="ic-card-header ops-panel-head">
             <div>
               <div className="ic-card-title">Income details</div>
               <div className="ic-card-sub">{selected ? `#${selected.id}` : "Select a record"}</div>

@@ -21,7 +21,6 @@ export default function PageHeader({
         <div className="page-header__eyebrow">{eyebrow || section || "Workspace"}</div>
         <div className="page-header__title-row">
           <h1 className="page-header__title">{title}</h1>
-          {section ? <span className="page-header__section">{section}</span> : null}
         </div>
         {description ? <p className="page-header__description">{description}</p> : null}
       </div>

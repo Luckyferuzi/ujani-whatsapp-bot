@@ -596,15 +596,25 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
   })();
 
   const scrollToBottom = (behavior: ScrollBehavior = "auto") => {
-    if (bottomRef.current) {
-      bottomRef.current.scrollIntoView({ behavior, block: "end" });
+    const el = messagesRef.current;
+    if (!el) return;
+
+    if (behavior === "smooth") {
+      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+      return;
     }
+
+    el.scrollTop = el.scrollHeight;
   };
 
   const scrollToOldestUnread = () => {
     if (oldestUnreadIndex < 0) return false;
-    if (!firstUnreadRef.current) return false;
-    firstUnreadRef.current.scrollIntoView({ behavior: "auto", block: "start" });
+    const container = messagesRef.current;
+    const target = firstUnreadRef.current;
+    if (!container || !target) return false;
+
+    const offset = Math.max(0, target.offsetTop - 12);
+    container.scrollTop = offset;
     return true;
   };
 
@@ -811,10 +821,10 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
             {onOpenContext ? (
               <button
                 type="button"
-                className="thread-header-action thread-header-action--mobile"
+                className="thread-header-action"
                 onClick={onOpenContext}
               >
-                Context
+                Summary
               </button>
             ) : null}
           </div>

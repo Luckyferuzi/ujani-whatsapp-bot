@@ -657,12 +657,12 @@ function exportSelectedCsv() {
 
   return (
     <div className="products-page">
-      <section className="pr-hero pr-hero--compact">
-        <div className="pr-hero-main">
+      <section className="pr-hero pr-hero--compact ops-masthead">
+        <div className="pr-hero-main ops-masthead__main">
           <div className="pr-hero-copy">
-            <div className="pr-hero-kicker">Commerce workspace</div>
-            <div className="pr-hero-title">Product management</div>
-            <div className="pr-hero-text">
+            <div className="pr-hero-kicker ops-masthead__eyebrow">Commerce workspace</div>
+            <div className="pr-hero-title ops-masthead__title">Product management</div>
+            <div className="pr-hero-text ops-masthead__description">
               Add, edit, stock, publish, deactivate, and remove products from one commercial control surface.
             </div>
           </div>
@@ -675,7 +675,7 @@ function exportSelectedCsv() {
               </div>
             </div>
 
-            <div className="pr-top-actions">
+            <div className="pr-top-actions ops-masthead__actions">
           <Link href="/orders" className="pr-btn pr-btn-link">
             Orders
           </Link>
@@ -714,27 +714,27 @@ function exportSelectedCsv() {
           </div>
         </div>
 
-        <div className="pr-hero-metrics">
-          <div className="pr-hero-stat">
-            <span className="pr-hero-stat-label">Live products</span>
-            <strong className="pr-hero-stat-value">{stats.active}</strong>
-            <span className="pr-hero-stat-meta">active items currently available</span>
+        <div className="pr-hero-metrics ops-metric-strip">
+          <div className="pr-hero-stat ops-metric-card">
+            <span className="pr-hero-stat-label ops-metric-card__label">Live products</span>
+            <strong className="pr-hero-stat-value ops-metric-card__value">{stats.active}</strong>
+            <span className="pr-hero-stat-meta ops-metric-card__meta">active items currently available</span>
           </div>
-          <div className="pr-hero-stat">
-            <span className="pr-hero-stat-label">Catalog ready</span>
-            <strong className="pr-hero-stat-value">{catalogReadyCount}</strong>
-            <span className="pr-hero-stat-meta">{catalogEnabled ? "products with image support" : "catalog disabled in setup"}</span>
+          <div className="pr-hero-stat ops-metric-card">
+            <span className="pr-hero-stat-label ops-metric-card__label">Catalog ready</span>
+            <strong className="pr-hero-stat-value ops-metric-card__value">{catalogReadyCount}</strong>
+            <span className="pr-hero-stat-meta ops-metric-card__meta">{catalogEnabled ? "products with image support" : "catalog disabled in setup"}</span>
           </div>
-          <div className="pr-hero-stat">
-            <span className="pr-hero-stat-label">Installment items</span>
-            <strong className="pr-hero-stat-value">{installmentCount}</strong>
-            <span className="pr-hero-stat-meta">special payment products in catalog</span>
+          <div className="pr-hero-stat ops-metric-card">
+            <span className="pr-hero-stat-label ops-metric-card__label">Installment items</span>
+            <strong className="pr-hero-stat-value ops-metric-card__value">{installmentCount}</strong>
+            <span className="pr-hero-stat-meta ops-metric-card__meta">special payment products in catalog</span>
           </div>
         </div>
       </section>
 
       {/* Controls */}
-      <div className="pr-controls">
+      <div className="pr-controls ops-toolbar">
         <div className="pr-field" style={{ minWidth: 260 }}>
           <div className="pr-label">Search</div>
           <input
@@ -796,7 +796,7 @@ function exportSelectedCsv() {
         </div>
       </div>
 
-      <div className="pr-summary-grid">
+      <div className="pr-summary-grid ops-metric-strip">
         <div className="pr-summary-card">
           <div className="pr-summary-label">Visible in current view</div>
           <div className="pr-summary-value">{filtered.length}</div>
@@ -818,7 +818,7 @@ function exportSelectedCsv() {
       <div className="pr-shell">
         {/* Left: Table */}
         <div className="pr-card">
-          <div className="pr-card-header">
+          <div className="pr-card-header ops-panel-head">
             <div>
               <div className="pr-card-title">Product ledger</div>
               <div className="pr-card-sub">
@@ -1036,7 +1036,7 @@ function exportSelectedCsv() {
 
         {/* Right: Details */}
         <aside className="pr-card">
-          <div className="pr-card-header">
+          <div className="pr-card-header ops-panel-head">
             <div>
               <div className="pr-card-title">Active product</div>
               <div className="pr-card-sub">{selected ? selected.name : "Select a product"}</div>

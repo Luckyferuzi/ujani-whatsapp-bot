@@ -1214,3 +1214,68 @@ html[data-theme="dark"] .products-root .pr-detail-fallback {
   background: rgba(22, 163, 148, 0.18);
   color: #7ff3e8;
 }
+
+/* Shared operational-page alignment */
+.products-page {
+  gap: 14px;
+}
+
+.pr-hero.ops-masthead {
+  grid-template-columns: minmax(0, 1.18fr) minmax(280px, 0.82fr);
+  padding: var(--ds-space-4);
+  border-radius: var(--ds-radius-panel);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--ds-color-surface-raised) 96%, transparent), var(--ds-color-surface)),
+    var(--ds-color-surface);
+  border-color: var(--ds-color-border-soft);
+  box-shadow: var(--ds-shadow-sm);
+}
+
+.pr-hero-title {
+  font-size: clamp(1.45rem, 2.5vw, 1.95rem);
+}
+
+.pr-topbar {
+  padding-top: 2px;
+}
+
+.pr-title {
+  font-size: 1rem;
+  line-height: 1.2;
+}
+
+.pr-subtitle {
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+.pr-hero-metrics.ops-metric-strip,
+.pr-summary-grid.ops-metric-strip {
+  gap: 12px;
+}
+
+.pr-hero-stat.ops-metric-card,
+.pr-summary-card {
+  border-radius: 18px;
+  box-shadow: none;
+}
+
+.pr-controls.ops-toolbar {
+  padding: var(--ds-space-4);
+  border-radius: var(--ds-radius-panel);
+}
+
+.pr-card {
+  border-radius: 20px;
+  box-shadow: none;
+}
+
+.pr-card-header.ops-panel-head {
+  padding: 12px 14px;
+}
+
+@media (max-width: 980px) {
+  .pr-hero.ops-masthead {
+    grid-template-columns: 1fr;
+  }
+}

@@ -528,3 +528,95 @@
     align-items: stretch;
   }
 }
+
+/* Final consistency hardening */
+.config-root {
+  padding: var(--ds-space-5);
+}
+
+.config-page {
+  gap: var(--ds-space-4);
+}
+
+.config-page .page-header {
+  box-shadow: var(--ds-shadow-sm);
+}
+
+.config-header-meta {
+  gap: var(--ds-space-2);
+}
+
+.config-stat-card,
+.config-runtime-item,
+.config-diagnostic-item,
+.config-step-card,
+.config-list-item,
+.config-issue-item,
+.config-note,
+.config-preview,
+.config-upload,
+.config-identity-card,
+.config-security-card,
+.config-empty {
+  box-shadow: none;
+}
+
+.config-stat-card,
+.config-runtime-item,
+.config-diagnostic-item,
+.config-step-card,
+.config-list-item,
+.config-issue-item {
+  border-radius: calc(var(--ds-radius-panel) - 0.125rem);
+}
+
+.config-section-card,
+.config-security-card {
+  border-radius: var(--ds-radius-panel);
+}
+
+.config-section-head {
+  gap: var(--ds-space-2);
+}
+
+.config-section-title {
+  font-size: 1rem;
+}
+
+.config-section-description,
+.config-field-hint,
+.config-list-copy,
+.config-progress-meta {
+  font-size: 0.75rem;
+}
+
+.config-preview-phone {
+  max-width: 22rem;
+  border-radius: 1.125rem;
+}
+
+.config-preview-bubble {
+  box-shadow: none;
+}
+
+.config-upload-button:focus-visible,
+.config-nav__item:focus-visible {
+  outline: none;
+  box-shadow: var(--ds-focus-ring);
+}
+
+html[data-theme="dark"] .config-page .page-header,
+html[data-theme="dark"] .config-stat-card,
+html[data-theme="dark"] .config-runtime-item,
+html[data-theme="dark"] .config-diagnostic-item,
+html[data-theme="dark"] .config-step-card,
+html[data-theme="dark"] .config-list-item,
+html[data-theme="dark"] .config-issue-item,
+html[data-theme="dark"] .config-note,
+html[data-theme="dark"] .config-preview,
+html[data-theme="dark"] .config-upload,
+html[data-theme="dark"] .config-identity-card,
+html[data-theme="dark"] .config-security-card,
+html[data-theme="dark"] .config-empty {
+  box-shadow: none;
+}

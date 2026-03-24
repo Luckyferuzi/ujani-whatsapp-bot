@@ -1160,3 +1160,53 @@ html[data-theme="dark"] .st-table-wrap {
   background: rgba(2, 6, 23, 0.58);
   border-color: rgba(226, 232, 240, 0.12);
 }
+
+/* Shared operational-page alignment */
+.stats-page {
+  gap: 14px;
+}
+
+.st-insights-hero.ops-masthead {
+  padding: var(--ds-space-4);
+  border-radius: var(--ds-radius-panel);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--ds-color-surface-raised) 96%, transparent), var(--ds-color-surface)),
+    var(--ds-color-surface);
+  border-color: var(--ds-color-border-soft);
+  box-shadow: var(--ds-shadow-sm);
+}
+
+.st-insights-title {
+  font-size: clamp(1.45rem, 2.5vw, 1.95rem);
+}
+
+.st-insights-copy {
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+.st-toolbar.ops-toolbar {
+  padding: var(--ds-space-4);
+  border-radius: var(--ds-radius-panel);
+  background: color-mix(in srgb, var(--ds-color-surface-raised) 94%, transparent);
+  box-shadow: var(--ds-shadow-sm);
+}
+
+.st-kpi-grid.ops-metric-strip {
+  gap: 12px;
+}
+
+.st-kpi {
+  padding: 14px;
+  border-radius: 18px;
+  box-shadow: none;
+}
+
+.st-card {
+  border-radius: 20px;
+  box-shadow: none;
+}
+
+.st-card-header.ops-panel-head {
+  padding: 12px 14px;
+}

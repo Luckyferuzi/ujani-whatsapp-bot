@@ -199,9 +199,7 @@ export default function ConversationList({
       <div className="conversation-list-header">
         <div>
           <div className="conversation-list-header-title">Active conversations</div>
-          <div className="conversation-list-header-subtitle">
-            Live customer handling, payment checks, and fulfillment follow-up.
-          </div>
+          <div className="conversation-list-header-subtitle">Live customer work.</div>
         </div>
         <div className="conversation-list-header-count">{loading ? "-" : counts.all}</div>
       </div>
@@ -256,7 +254,7 @@ export default function ConversationList({
         <div className="conversation-search-row">
           <input
             type="text"
-            placeholder="Search name, phone, or latest message"
+            placeholder="Search name, phone, or message"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="conversation-search-input"

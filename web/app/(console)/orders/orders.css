@@ -1729,3 +1729,69 @@ html[data-theme="dark"] .or-empty-callout {
   background: rgba(2, 6, 23, 0.58);
   border-color: rgba(226, 232, 240, 0.12);
 }
+
+/* Shared operational-page alignment */
+.orders-page {
+  gap: 14px;
+}
+
+.orders-topbar.ops-masthead {
+  padding: var(--ds-space-4);
+  border-radius: var(--ds-radius-panel);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--ds-color-surface-raised) 96%, transparent), var(--ds-color-surface)),
+    var(--ds-color-surface);
+  border-color: var(--ds-color-border-soft);
+  box-shadow: var(--ds-shadow-sm);
+}
+
+.orders-topbar .orders-title {
+  font-size: clamp(1.45rem, 2.5vw, 1.95rem);
+}
+
+.orders-queue-grid.ops-metric-strip {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.or-queue-card.ops-metric-card {
+  padding: 14px;
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--ds-color-surface-raised) 94%, transparent);
+  border: 1px solid var(--ds-color-border-soft);
+  box-shadow: none;
+}
+
+.orders-controls.ops-toolbar {
+  padding: var(--ds-space-4);
+  border-radius: var(--ds-radius-panel);
+}
+
+.orders-controls-grid {
+  align-items: end;
+}
+
+.or-card {
+  border-radius: 20px;
+  box-shadow: none;
+}
+
+.or-card-header.ops-panel-head {
+  padding: 12px 14px;
+}
+
+.or-ledger-summary {
+  min-height: 1.875rem;
+}
+
+@media (max-width: 1100px) {
+  .orders-queue-grid.ops-metric-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .orders-queue-grid.ops-metric-strip {
+    grid-template-columns: 1fr;
+  }
+}

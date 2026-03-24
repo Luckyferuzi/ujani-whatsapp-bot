@@ -158,7 +158,7 @@ export default function RegisterAdminPage() {
             type={showPass ? "text" : "password"}
             invalid={!!passwordError}
             className="auth-form__input"
-            placeholder="••••••••"
+            placeholder="Create a secure password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             autoComplete="new-password"
@@ -185,7 +185,7 @@ export default function RegisterAdminPage() {
             type={showConfirm ? "text" : "password"}
             invalid={!!confirmError}
             className="auth-form__input"
-            placeholder="••••••••"
+            placeholder="Repeat the password"
             value={confirm}
             onChange={(e) => setConfirm(e.target.value)}
             autoComplete="new-password"

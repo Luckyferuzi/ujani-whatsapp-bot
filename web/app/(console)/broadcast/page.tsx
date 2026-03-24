@@ -89,16 +89,16 @@ export default function BroadcastPage() {
 
   return (
     <div className="broadcast-page">
-      <section className="broadcast-hero">
-        <div className="broadcast-hero__copy">
-          <div className="broadcast-hero__kicker">Outbound control</div>
-          <div className="broadcast-hero__title">Broadcasts</div>
-          <div className="broadcast-hero__text">
+      <section className="broadcast-hero ops-masthead">
+        <div className="broadcast-hero__copy ops-masthead__main">
+          <div className="broadcast-hero__kicker ops-masthead__eyebrow">Outbound control</div>
+          <div className="broadcast-hero__title ops-masthead__title">Broadcasts</div>
+          <div className="broadcast-hero__text ops-masthead__description">
             Send careful service updates to recent customers with clear audience scope,
             message preview, and delivery results.
           </div>
         </div>
-        <div className="broadcast-hero__actions">
+        <div className="broadcast-hero__actions ops-masthead__actions">
           <Link href="/inbox" className="ui-button ui-button--secondary">
             Open inbox
           </Link>
@@ -110,7 +110,7 @@ export default function BroadcastPage() {
 
       <div className="broadcast-grid">
         <Card className="broadcast-panel" padding="lg">
-          <div className="broadcast-panel__head">
+          <div className="broadcast-panel__head ops-panel-head">
             <div>
               <div className="broadcast-panel__title">Campaign setup</div>
               <div className="broadcast-panel__copy">
@@ -184,7 +184,7 @@ export default function BroadcastPage() {
 
         <div className="broadcast-side">
           <Card className="broadcast-panel" padding="lg">
-            <div className="broadcast-panel__head">
+            <div className="broadcast-panel__head ops-panel-head">
               <div>
                 <div className="broadcast-panel__title">Message preview</div>
                 <div className="broadcast-panel__copy">
@@ -205,7 +205,7 @@ export default function BroadcastPage() {
           </Card>
 
           <Card className="broadcast-panel" padding="lg">
-            <div className="broadcast-panel__head">
+            <div className="broadcast-panel__head ops-panel-head">
               <div>
                 <div className="broadcast-panel__title">Delivery result</div>
                 <div className="broadcast-panel__copy">

@@ -218,7 +218,7 @@ export default function InboxPage() {
                     onClick={() => setShowMobileMenu((prev) => !prev)}
                     aria-label="Open context"
                   >
-                    Context
+                    Summary
                   </button>
                 </div>
 
@@ -248,31 +248,20 @@ export default function InboxPage() {
             ) : null}
 
             <div className="inbox-focus-region">
-              <div className="inbox-focus-toolbar">
-                <div className="inbox-focus-toolbar__left">
+              <div className="inbox-workspace-bar" role="toolbar" aria-label="Inbox workspace controls">
+                <div className="inbox-workspace-bar__group">
                   <button
                     type="button"
                     className="inbox-focus-toggle"
                     onClick={() => setDesktopListOpen((prev) => !prev)}
                   >
-                    {desktopListOpen ? "Hide conversations" : "Show conversations"}
+                    {desktopListOpen ? "Conversations on" : "Show conversations"}
                   </button>
-                  {active ? (
-                    <div className="inbox-focus-toolbar__active">
-                      <span className="inbox-focus-toolbar__label">Active thread</span>
-                      <span className="inbox-focus-toolbar__name">{displayName}</span>
-                    </div>
-                  ) : null}
                 </div>
-
-                {active ? (
-                  <button
-                    type="button"
-                    className="inbox-focus-toggle"
-                    onClick={() => setDesktopContextOpen((prev) => !prev)}
-                  >
-                    {desktopContextOpen ? "Hide context" : "Show context"}
-                  </button>
+                {active && !desktopContextOpen ? (
+                  <div className="inbox-workspace-bar__active" title={displayName}>
+                    Summary hidden
+                  </div>
                 ) : null}
               </div>
 
