@@ -831,6 +831,21 @@ async function deleteOrder(order: OrderListRow) {
     return Math.max(0, selectedOrder.total_tzs - paid);
   }, [selectedOrder]);
 
+  const activeFilterCount = useMemo(() => {
+    let count = 0;
+    if (q.trim()) count += 1;
+    if (status) count += 1;
+    if (phoneFilter.trim()) count += 1;
+    if (showFilters && product.trim()) count += 1;
+    if (showFilters && minTotal.trim()) count += 1;
+    if (showFilters && maxTotal.trim()) count += 1;
+    return count;
+  }, [maxTotal, minTotal, phoneFilter, product, q, showFilters, status]);
+
+  const selectedTitle = selectedOrder
+    ? `#${selectedOrder.order_code || selectedOrder.id}`
+    : "No order selected";
+
   function applyStatusSegment(nextStatus: string) {
     setStatus(nextStatus);
     setPage(1);
@@ -927,6 +942,21 @@ async function deleteOrder(order: OrderListRow) {
 
       {/* Controls */}
       <form className="orders-controls" onSubmit={applyFilters}>
+        <div className="orders-controls-head">
+          <div>
+            <div className="orders-controls-kicker">Filters</div>
+            <div className="orders-controls-title">Refine the active fulfillment queue</div>
+            <div className="orders-controls-copy">
+              Search by customer, phone, order code, payment state, or handoff context without leaving the ledger.
+            </div>
+          </div>
+          <div className="orders-controls-meta">
+            <span className="orders-controls-count">{activeFilterCount} active</span>
+            <span className="orders-controls-summary">{resultSummary}</span>
+          </div>
+        </div>
+
+        <div className="orders-controls-grid">
         <div className="or-field" style={{ minWidth: 240 }}>
           <div className="or-field-label">Search</div>
           <input
@@ -972,6 +1002,7 @@ async function deleteOrder(order: OrderListRow) {
           <button type="button" className="or-btn" onClick={clearFilters}>
             Clear
           </button>
+        </div>
         </div>
 
         {showFilters && (
@@ -1022,11 +1053,14 @@ async function deleteOrder(order: OrderListRow) {
         <div className="or-card">
           <div className="or-card-header">
             <div>
-              <div className="or-card-title">Orders</div>
-              <div className="or-card-sub">{resultSummary}</div>
+              <div className="or-card-title">Fulfillment ledger</div>
+              <div className="or-card-sub">Live operational queue for payment, packing, and delivery handoff.</div>
             </div>
 
-            {error ? <div style={{ color: "#b91c1c", fontSize: 12, fontWeight: 650 }}>{error}</div> : null}
+            <div className="or-card-header-meta">
+              <span className="or-ledger-summary">{resultSummary}</span>
+              {error ? <div className="or-inline-alert">{error}</div> : null}
+            </div>
           </div>
 
           {bulkSelected.size > 0 && (
@@ -1143,7 +1177,12 @@ async function deleteOrder(order: OrderListRow) {
                 ) : items.length === 0 ? (
                   <tr>
                     <td colSpan={10} className="or-table-empty">
-                      No orders match the current queue or filters.
+                      <div className="or-empty-state or-empty-state--table">
+                        <div className="or-empty-title">No orders match this queue.</div>
+                        <div className="or-empty">
+                          Try clearing filters or switch to a broader status segment to reopen the active workload.
+                        </div>
+                      </div>
                     </td>
                   </tr>
                 ) : (
@@ -1241,8 +1280,8 @@ onChange={() => {}}
                 {/* Quick actions */}
                 <button
                   type="button"
-                  className="or-icon-btn"
-                  title="Set Preparing"
+                  className="or-row-action"
+                  title="Prep"
                   disabled={!canPrep}
                   onClick={() => void setOrderStatus(order, "preparing")}
                 >
@@ -1251,8 +1290,8 @@ onChange={() => {}}
 
                 <button
                   type="button"
-                  className="or-icon-btn"
-                  title="Set Delivered"
+                  className="or-row-action"
+                  title="Done"
                   disabled={!canDeliver}
                   onClick={() => void setOrderStatus(order, "delivered")}
                 >
@@ -1260,13 +1299,13 @@ onChange={() => {}}
                 </button>
 
                 {/* Existing actions */}
-                <button type="button" className="or-icon-btn" title="Edit" onClick={() => openEdit(order)}>
+                <button type="button" className="or-row-action" title="Edit" onClick={() => openEdit(order)}>
                   ✏️
                 </button>
-                <button type="button" className="or-icon-btn" title="Cancel" onClick={() => void cancelOrder(order)}>
+                <button type="button" className="or-row-action" title="Cancel" onClick={() => void cancelOrder(order)}>
                   ❌
                 </button>
-                <button type="button" className="or-icon-btn" title="Delete" onClick={() => void deleteOrder(order)}>
+                <button type="button" className="or-row-action or-row-action--danger" title="Delete" onClick={() => void deleteOrder(order)}>
                   🗑️
                 </button>
               </div>
@@ -1315,8 +1354,8 @@ onChange={() => {}}
         <aside className="or-card">
           <div className="or-card-header">
             <div>
-              <div className="or-card-title">Order details</div>
-              <div className="or-card-sub">{selectedOrder ? `#${selectedOrder.order_code || selectedOrder.id}` : "Select an order"}</div>
+              <div className="or-card-title">Active order</div>
+              <div className="or-card-sub">{selectedTitle}</div>
             </div>
 
             {selectedOrder ? <span className={selectedBadge.className}>{selectedBadge.label}</span> : null}
@@ -1328,6 +1367,9 @@ onChange={() => {}}
                 <div className="or-empty-title">Pick an order to open the detail rail.</div>
                 <div className="or-empty">
                   Review customer info, delivery progress, payment state, product lines, and operator notes without leaving the list.
+                </div>
+                <div className="or-empty-callout">
+                  Keep the queue on the left and use this sidecar for payment checks, delivery handoff, and customer context.
                 </div>
               </div>
             ) : (
@@ -1367,6 +1409,8 @@ onChange={() => {}}
                   </div>
                 </div>
 
+                <div className="or-section-block">
+                  <div className="or-section-heading">Order overview</div>
                 <div className="or-kv">
                   <div className="or-kv-item">
                     <div className="or-kv-label">Customer</div>
@@ -1413,6 +1457,7 @@ onChange={() => {}}
                     </div>
                   </div>
                 </div>
+                </div>
 
                 <div className="or-detail-actions">
                   <button
@@ -1441,7 +1486,7 @@ onChange={() => {}}
                 </div>
 
                 <div className="or-items">
-                  <div className="or-items-title">Products</div>
+                  <div className="or-section-heading">Products</div>
 
                   {!selectedOrderItems ? (
                     <div className="or-items-loading">
@@ -1464,6 +1509,7 @@ onChange={() => {}}
                 </div>
 
                 <div className="or-items">
+                  <div className="or-section-heading">Timeline and notes</div>
                   <OperatorTimelineNotes
                     title="Timeline & Notes"
                     timelinePath={selectedOrder ? `/api/orders/${selectedOrder.id}/timeline` : null}
@@ -1475,6 +1521,7 @@ onChange={() => {}}
                 </div>
 
                 <div className="or-items" style={{ borderTop: "none", paddingTop: 12 }}>
+                  <div className="or-section-heading">Administrative actions</div>
                   <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                     <button type="button" className="or-btn or-btn-danger" onClick={() => void deleteOrder(selectedOrder)}>
                       Delete

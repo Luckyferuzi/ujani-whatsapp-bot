@@ -660,7 +660,7 @@ function exportSelectedCsv() {
       <section className="pr-hero">
         <div className="pr-hero-copy">
           <div className="pr-hero-kicker">Commerce workspace</div>
-          <div className="pr-hero-title">Products</div>
+          <div className="pr-hero-title">Product management</div>
           <div className="pr-hero-text">
             Keep the live catalog organized, spot stock risk quickly, and manage commercial readiness without changing
             the current product workflow.
@@ -688,9 +688,9 @@ function exportSelectedCsv() {
       {/* Topbar */}
       <div className="pr-topbar">
         <div>
-          <div className="pr-title">Product operations</div>
+          <div className="pr-title">Products desk</div>
           <div className="pr-subtitle">
-            Manage names, pricing, stock, installment flags, and publish readiness from one commercial workspace.
+            Add, edit, stock, publish, deactivate, and remove products from one commercial control surface.
           </div>
         </div>
 
@@ -819,9 +819,9 @@ function exportSelectedCsv() {
         <div className="pr-card">
           <div className="pr-card-header">
             <div>
-              <div className="pr-card-title">Products</div>
+              <div className="pr-card-title">Product ledger</div>
               <div className="pr-card-sub">
-                {loading ? "Loading..." : `${filtered.length} shown · ${items.length} total`}
+                {loading ? "Loading..." : `${filtered.length} shown - ${items.length} total`}
               </div>
             </div>
 
@@ -950,7 +950,12 @@ function exportSelectedCsv() {
                 ) : filtered.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="pr-table-empty">
-                      No products match your filters.
+                      <div className="pr-empty-state">
+                        <div className="pr-empty-title">No products match this view.</div>
+                        <div className="pr-empty">
+                          Clear filters or create a new product to reopen the active product-management workspace.
+                        </div>
+                      </div>
                     </td>
                   </tr>
                 ) : (
@@ -985,7 +990,7 @@ function exportSelectedCsv() {
                             <div className="pr-name-title">{p.name}</div>
                             <div className="pr-name-sub">
                               {p.is_active ? "Active" : "Inactive"}
-                              {p.is_installment ? " · Installment" : ""}
+                              {p.is_installment ? " - Installment" : ""}
                             </div>
                           </div>
                         </td>
@@ -1032,7 +1037,7 @@ function exportSelectedCsv() {
         <aside className="pr-card">
           <div className="pr-card-header">
             <div>
-              <div className="pr-card-title">Product details</div>
+              <div className="pr-card-title">Active product</div>
               <div className="pr-card-sub">{selected ? selected.name : "Select a product"}</div>
             </div>
 
@@ -1045,8 +1050,11 @@ function exportSelectedCsv() {
 
           <div className="pr-card-body">
             {!selected ? (
-              <div className="pr-empty">
-                Click a product row to review stock health, catalog readiness, and quick product actions.
+              <div className="pr-empty-state">
+                <div className="pr-empty-title">Select a product to open the management rail.</div>
+                <div className="pr-empty">
+                  Review stock health, catalog readiness, descriptions, and controlled product actions without leaving the list.
+                </div>
               </div>
             ) : (
               <>

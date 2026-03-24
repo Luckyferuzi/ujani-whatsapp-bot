@@ -456,6 +456,10 @@ html[data-theme="dark"] .pr-loading-pill {
   padding: 14px;
 }
 
+.pr-card-body .pr-empty-state {
+  padding: 4px 0;
+}
+
 /* Table */
 .pr-table-wrap {
   overflow: auto;
@@ -604,6 +608,18 @@ html[data-theme="dark"] .pr-loading-pill {
   font-weight: 600;
   color: var(--pr-muted);
   line-height: 1.45;
+}
+
+.pr-empty-state {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pr-empty-title {
+  font-size: 15px;
+  font-weight: 820;
+  color: var(--pr-text);
 }
 
 .pr-kv {

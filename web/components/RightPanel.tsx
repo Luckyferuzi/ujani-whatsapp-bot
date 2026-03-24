@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { formatPhonePretty } from "@/lib/phone";
 import { applyThemeMode, readStoredThemeMode, type ThemeMode } from "@/lib/theme";
-import { EmptyState, RefreshIndicator, SidePanelSkeleton } from "@/components/ui";
+import { EmptyState, SidePanelSkeleton } from "@/components/ui";
 import OperatorTimelineNotes from "@/components/OperatorTimelineNotes";
 
 export interface RightPanelProps { conversationId: string | null }
@@ -100,8 +100,6 @@ export default function RightPanel({ conversationId }: RightPanelProps) {
         <button type="button" className={"panel-header-tab" + (activeView === "settings" ? " panel-header-tab--active" : "")} onClick={() => setActiveView("settings")}><span className="panel-header-tab-label">Controls</span></button>
         <button type="button" className="rp-icon-button" onClick={() => void loadPanelData(false)} disabled={loading || isRefreshing} title="Refresh context" aria-label="Refresh context">Refresh</button>
       </div>
-      {isRefreshing ? <div className="right-panel-feedback"><RefreshIndicator label="Refreshing context" /></div> : null}
-
       {activeView === "orders" ? (
         <div className="rp-stack">
           <div className="panel-card panel-card--hero">

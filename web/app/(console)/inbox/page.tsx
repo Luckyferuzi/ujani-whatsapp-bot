@@ -57,6 +57,8 @@ export default function InboxPage() {
   const [isMobile, setIsMobile] = useState(false);
   const [mobileView, setMobileView] = useState<MobileView>("list");
   const [showMobileMenu, setShowMobileMenu] = useState(false);
+  const [desktopListOpen, setDesktopListOpen] = useState(true);
+  const [desktopContextOpen, setDesktopContextOpen] = useState(false);
 
   const searchParams = useSearchParams();
   const phoneFromUrl = searchParams.get("phone");
@@ -92,6 +94,8 @@ export default function InboxPage() {
     if (isMobile) {
       setMobileView("chat");
       setShowMobileMenu(false);
+    } else {
+      setDesktopContextOpen(false);
     }
 
     try {
@@ -111,6 +115,8 @@ export default function InboxPage() {
       if (isMobile) {
         setMobileView("list");
         setShowMobileMenu(false);
+      } else {
+        setDesktopContextOpen(false);
       }
     }
 
@@ -133,8 +139,13 @@ export default function InboxPage() {
         setSavedId(null);
       }
     } else if (savedId && !isMobile) {
-      clearSavedConversationId();
-      setSavedId(null);
+      const match = list.find((c) => c.id === savedId);
+      if (match) {
+        setActive(match);
+      } else {
+        clearSavedConversationId();
+        setSavedId(null);
+      }
     }
 
     setRestoreDone(true);
@@ -144,11 +155,6 @@ export default function InboxPage() {
     if (!isMobile) return;
     setMobileView("list");
     setShowMobileMenu(false);
-  };
-
-  const handleToggleMobileMenu = () => {
-    if (!active) return;
-    setShowMobileMenu((prev) => !prev);
   };
 
   const displayName = useMemo(() => {
@@ -161,7 +167,13 @@ export default function InboxPage() {
 
   return (
     <div className="inbox-root">
-      <div className="inbox-main">
+      <div
+        className={
+          "inbox-main" +
+          (!desktopListOpen && !isMobile ? " inbox-main--list-collapsed" : "") +
+          (!desktopContextOpen && !isMobile ? " inbox-main--context-collapsed" : "")
+        }
+      >
         {isMobile ? (
           <>
             {mobileView === "list" || !active ? (
@@ -186,12 +198,12 @@ export default function InboxPage() {
                   <div className="mobile-thread-nav-main">
                     <div className="mobile-thread-nav-title">
                       {displayName}
-                      {mobileRestockCount > 0 && (
+                      {mobileRestockCount > 0 ? (
                         <span className="badge badge--restock mobile-restock-badge">
                           Stock Alert
                           {mobileRestockCount > 1 ? ` ${mobileRestockCount}` : ""}
                         </span>
-                      )}
+                      ) : null}
                     </div>
                     {active ? (
                       <div className="mobile-thread-nav-sub">
@@ -203,7 +215,7 @@ export default function InboxPage() {
                   <button
                     type="button"
                     className="mobile-nav-button"
-                    onClick={handleToggleMobileMenu}
+                    onClick={() => setShowMobileMenu((prev) => !prev)}
                     aria-label="Open context"
                   >
                     Context
@@ -214,15 +226,9 @@ export default function InboxPage() {
               </div>
             )}
 
-            {isMobile && active && showMobileMenu ? (
-              <div
-                className="mobile-right-overlay"
-                onClick={() => setShowMobileMenu(false)}
-              >
-                <div
-                  className="mobile-right-panel-inner"
-                  onClick={(e) => e.stopPropagation()}
-                >
+            {active && showMobileMenu ? (
+              <div className="mobile-right-overlay" onClick={() => setShowMobileMenu(false)}>
+                <div className="mobile-right-panel-inner" onClick={(e) => e.stopPropagation()}>
                   <RightPanel conversationId={active.id} />
                 </div>
               </div>
@@ -230,28 +236,67 @@ export default function InboxPage() {
           </>
         ) : (
           <>
-            <ConversationList
-              activeId={active ? active.id : null}
-              onPick={handlePick}
-              phoneFilter={phoneFromUrl}
-              onLoaded={handleLoaded}
-            />
-
-            {active ? (
-              <Thread convo={active} onOpenContext={() => setShowMobileMenu(true)} />
-            ) : (
-              <div className="inbox-empty-state">
-                <div className="inbox-empty-kicker">Inbox cockpit</div>
-                <div className="inbox-empty-title">
-                  Pick a conversation to start operating.
-                </div>
-                <div className="inbox-empty-copy">
-                  Review customer history, payment status, delivery progress, and
-                  internal notes from one working view.
-                </div>
+            {desktopListOpen ? (
+              <div className="inbox-rail inbox-rail--list">
+                <ConversationList
+                  activeId={active ? active.id : null}
+                  onPick={handlePick}
+                  phoneFilter={phoneFromUrl}
+                  onLoaded={handleLoaded}
+                />
               </div>
-            )}
-            <RightPanel conversationId={active ? active.id : null} />
+            ) : null}
+
+            <div className="inbox-focus-region">
+              <div className="inbox-focus-toolbar">
+                <div className="inbox-focus-toolbar__left">
+                  <button
+                    type="button"
+                    className="inbox-focus-toggle"
+                    onClick={() => setDesktopListOpen((prev) => !prev)}
+                  >
+                    {desktopListOpen ? "Hide conversations" : "Show conversations"}
+                  </button>
+                  {active ? (
+                    <div className="inbox-focus-toolbar__active">
+                      <span className="inbox-focus-toolbar__label">Active thread</span>
+                      <span className="inbox-focus-toolbar__name">{displayName}</span>
+                    </div>
+                  ) : null}
+                </div>
+
+                {active ? (
+                  <button
+                    type="button"
+                    className="inbox-focus-toggle"
+                    onClick={() => setDesktopContextOpen((prev) => !prev)}
+                  >
+                    {desktopContextOpen ? "Hide context" : "Show context"}
+                  </button>
+                ) : null}
+              </div>
+
+              {active ? (
+                <Thread convo={active} onOpenContext={() => setDesktopContextOpen(true)} />
+              ) : (
+                <div className="inbox-empty-state">
+                  <div className="inbox-empty-kicker">Inbox cockpit</div>
+                  <div className="inbox-empty-title">
+                    Pick a conversation to start operating.
+                  </div>
+                  <div className="inbox-empty-copy">
+                    Review customer history, payment status, delivery progress, and
+                    internal notes from one focused working view.
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {active && desktopContextOpen ? (
+              <div className="inbox-rail inbox-rail--context">
+                <RightPanel conversationId={active.id} />
+              </div>
+            ) : null}
           </>
         )}
       </div>

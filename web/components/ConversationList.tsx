@@ -6,7 +6,6 @@ import { formatPhonePretty } from "@/lib/phone";
 import {
   ConversationListSkeleton,
   EmptyState,
-  RefreshIndicator,
 } from "@/components/ui";
 
 export type Convo = {
@@ -91,7 +90,6 @@ export default function ConversationList({
 }: Props) {
   const [items, setItems] = useState<Convo[]>([]);
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState("");
   const [view, setView] = useState<ViewKey>("all");
 
@@ -108,9 +106,6 @@ export default function ConversationList({
     let cancelled = false;
 
     const load = async (background = false) => {
-      if (background && itemsRef.current.length > 0) {
-        setRefreshing(true);
-      }
       try {
         const data = await api<{ items: Convo[] }>("/api/conversations");
         if (cancelled) return;
@@ -125,7 +120,6 @@ export default function ConversationList({
       } finally {
         if (!cancelled) {
           setLoading(false);
-          setRefreshing(false);
         }
       }
     };
@@ -269,12 +263,6 @@ export default function ConversationList({
           />
         </div>
       </div>
-
-      {refreshing && items.length > 0 ? (
-        <div className="conversation-list-feedback">
-          <RefreshIndicator label="Refreshing conversations" />
-        </div>
-      ) : null}
 
       {loading && items.length === 0 ? (
         <div className="conversation-list-state">

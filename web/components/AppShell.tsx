@@ -43,17 +43,17 @@ function getPageMeta(pathname: string | null) {
   }
   if (p.startsWith("/products")) {
     return {
-      title: "Catalog",
+      title: "Products",
       section: "Commerce",
-      description: "Manage the active catalog, pricing, stock posture, and sellable items.",
+      description: "Manage products, pricing, stock posture, and catalog readiness.",
       immersive: false,
     };
   }
   if (p.startsWith("/stats")) {
     return {
-      title: "Reports",
+      title: "Stats",
       section: "Insights",
-      description: "Business performance, order activity, and delivery trends.",
+      description: "Performance metrics, order activity, and business insight signals.",
       immersive: false,
     };
   }

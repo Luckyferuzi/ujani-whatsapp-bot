@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import {
@@ -26,8 +26,8 @@ type OverviewStats = {
 };
 
 type DailyPoint = {
-  date: string; // YYYY-MM-DD
-  total_tzs: number; // approved incomes sum
+  date: string;
+  total_tzs: number;
 };
 
 type DailyResponse = {
@@ -134,22 +134,22 @@ export default function StatsPage() {
   const earnings = overview?.total_revenue ?? 0;
   const expenses = overview?.total_expenses ?? 0;
   const profit = overview?.approximate_profit ?? earnings - expenses;
-  const financeSplit = useMemo(() => {
-  const p = Math.max(0, profit);
-  const e = Math.max(0, expenses);
-  const total = p + e;
-
-  return {
-    total,
-    rows: [
-      { name: "Profit", value: p, key: "profit" as const },
-      { name: "Expenses", value: e, key: "expenses" as const },
-    ],
-  };
-}, [profit, expenses]);
-
   const delivery = overview?.total_delivery_fees ?? 0;
   const orders = overview?.order_count ?? 0;
+
+  const financeSplit = useMemo(() => {
+    const p = Math.max(0, profit);
+    const e = Math.max(0, expenses);
+    const total = p + e;
+
+    return {
+      total,
+      rows: [
+        { name: "Profit", value: p, key: "profit" as const },
+        { name: "Expenses", value: e, key: "expenses" as const },
+      ],
+    };
+  }, [profit, expenses]);
 
   const series = useMemo(() => buildSeries(trendRaw, days), [trendRaw, days]);
 
@@ -187,10 +187,7 @@ export default function StatsPage() {
     if (!q) return products.slice(0, 12);
 
     return products
-      .filter((p) => {
-        const hay = [p.sku, p.name].join(" ").toLowerCase();
-        return hay.includes(q);
-      })
+      .filter((p) => [p.sku, p.name].join(" ").toLowerCase().includes(q))
       .slice(0, 12);
   }, [products, productSearch]);
 
@@ -200,37 +197,25 @@ export default function StatsPage() {
 
   return (
     <div className="stats-page">
-      <section className="st-report-hero">
-        <div className="st-report-copy">
-          <div className="st-report-kicker">Finance and reports</div>
-          <div className="st-report-title">Business performance</div>
-          <div className="st-report-text">
-            Review revenue, expenses, product movement, and simple operating signals without leaving the reporting
-            workspace.
-          </div>
-        </div>
-        <div className="st-report-links">
-          <Link href="/incomes" className="st-report-link">Income ledger</Link>
-          <Link href="/expenses" className="st-report-link">Expense ledger</Link>
-          <Link href="/orders" className="st-report-link">Order operations</Link>
-        </div>
-      </section>
-
-      {/* Topbar */}
-      <div className="st-topbar">
-        <div>
-          <div className="st-title">Business Stats</div>
-          <div className="st-subtitle">
-            Clear overview of revenue, costs, approximate profit, and best-selling products without clutter.
+      <section className="st-insights-hero">
+        <div className="st-insights-main">
+          <div className="st-insights-kicker">Insights</div>
+          <div className="st-insights-title">Performance overview</div>
+          <div className="st-insights-copy">
+            Review revenue, costs, order throughput, and product movement in one calm reporting workspace built for
+            daily operational decisions.
           </div>
         </div>
 
-        <div className="st-top-actions">
+        <div className="st-insights-actions">
           <Link href="/incomes" className="st-btn">
-            Income
+            Income ledger
           </Link>
           <Link href="/expenses" className="st-btn">
-            Expenses
+            Expense ledger
+          </Link>
+          <Link href="/orders" className="st-btn">
+            Order operations
           </Link>
           <button
             type="button"
@@ -244,88 +229,96 @@ export default function StatsPage() {
             {refreshingMain ? "Refreshing..." : "Refresh"}
           </button>
         </div>
-      </div>
+      </section>
 
-      {/* Controls */}
-      <div className="st-controls">
-        <div className="st-seg" aria-label="Range selector">
-          {(
-            [
-              ["day", "Day"],
-              ["week", "Week"],
-              ["month", "Month"],
-            ] as [RangeKey, string][]
-          ).map(([key, label]) => {
-            const active = range === key;
-            return (
-              <button
-                key={key}
-                type="button"
-                onClick={() => setRange(key)}
-                className={"st-seg-btn" + (active ? " st-seg-btn--active" : "")}
-              >
-                {label}
-              </button>
-            );
-          })}
+      <section className="st-toolbar">
+        <div className="st-toolbar-main">
+          <div className="st-toolbar-copy">
+            <div className="st-toolbar-title">Reporting window</div>
+            <div className="st-toolbar-subtitle">
+              Use a shorter range for sharper signals or broaden the period for calmer trend review.
+            </div>
+          </div>
+
+          <div className="st-seg" aria-label="Range selector">
+            {(
+              [
+                ["day", "Day"],
+                ["week", "Week"],
+                ["month", "Month"],
+              ] as [RangeKey, string][]
+            ).map(([key, label]) => {
+              const active = range === key;
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setRange(key)}
+                  className={"st-seg-btn" + (active ? " st-seg-btn--active" : "")}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
         </div>
 
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-          {periodLabel ? <span className="st-chip">{periodLabel}</span> : <span className="st-chip">{humanRange}</span>}
-          {loadingMain || refreshingMain ? <span className="st-chip">Loading...</span> : <span className="st-chip">Period: {humanRange}</span>}
+        <div className="st-toolbar-meta">
+          <span className="st-chip">{periodLabel || humanRange}</span>
+          <span className="st-chip">{loadingMain || refreshingMain ? "Updating metrics" : `Period: ${humanRange}`}</span>
           {error ? <span className="st-error">{error.message}</span> : null}
         </div>
-      </div>
+      </section>
 
-      {/* KPI Grid */}
-      <div className="st-kpi-grid">
-        <div className="st-kpi">
+      <section className="st-kpi-grid">
+        <div className="st-kpi st-kpi--accent">
           <div className="st-kpi-top">
-            <div className="st-kpi-label">Income (approved)</div>
-            <div className="st-kpi-icon">💰</div>
+            <div className="st-kpi-label">Approved income</div>
           </div>
-          <div className="st-kpi-value">{fmtTzs(earnings)} TZS</div>
+          <div className={"st-kpi-value" + (loadingMain ? " st-kpi-value--loading" : "")}>
+            {loadingMain ? "Loading" : `${fmtTzs(earnings)} TZS`}
+          </div>
           <div className="st-kpi-sub">Approved income records within {humanRange}.</div>
         </div>
 
         <div className="st-kpi">
           <div className="st-kpi-top">
             <div className="st-kpi-label">Expenses</div>
-            <div className="st-kpi-icon">💸</div>
           </div>
-          <div className="st-kpi-value">{fmtTzs(expenses)} TZS</div>
-          <div className="st-kpi-sub">Recorded business costs within {humanRange}.</div>
+          <div className={"st-kpi-value" + (loadingMain ? " st-kpi-value--loading" : "")}>
+            {loadingMain ? "Loading" : `${fmtTzs(expenses)} TZS`}
+          </div>
+          <div className="st-kpi-sub">Recorded business costs for the same reporting window.</div>
         </div>
 
         <div className="st-kpi">
           <div className="st-kpi-top">
             <div className="st-kpi-label">Approx. profit</div>
-            <div className="st-kpi-icon">📈</div>
           </div>
-          <div className="st-kpi-value">{fmtTzs(profit)} TZS</div>
-          <div className="st-kpi-sub">Income minus expenses (rough estimate) in {humanRange}.</div>
+          <div className={"st-kpi-value" + (loadingMain ? " st-kpi-value--loading" : "")}>
+            {loadingMain ? "Loading" : `${fmtTzs(profit)} TZS`}
+          </div>
+          <div className="st-kpi-sub">Income minus expenses, kept visible as a directional operating signal.</div>
         </div>
 
         <div className="st-kpi">
           <div className="st-kpi-top">
             <div className="st-kpi-label">Completed orders</div>
-            <div className="st-kpi-icon">📦</div>
           </div>
-          <div className="st-kpi-value">{orders}</div>
-          <div className="st-kpi-sub">Orders marked delivered within {humanRange}.</div>
+          <div className={"st-kpi-value" + (loadingMain ? " st-kpi-value--loading" : "")}>
+            {loadingMain ? "Loading" : orders}
+          </div>
+          <div className="st-kpi-sub">Delivered orders during the current reporting period.</div>
         </div>
-      </div>
+      </section>
 
-      {/* Main shell */}
       <div className="st-shell">
-        {/* Left column */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          {/* Trend */}
+        <div className="st-primary-column">
           <div className="st-card">
             <div className="st-card-header">
               <div>
                 <div className="st-card-title">Daily approved income</div>
-                <div className="st-card-sub">Bars represent approved income per day (not expenses).</div>
+                <div className="st-card-sub">Trendline for approved revenue only, without clutter from unrelated series.</div>
               </div>
               <span className="st-pill st-pill--accent">{humanRange}</span>
             </div>
@@ -344,60 +337,76 @@ export default function StatsPage() {
                   </div>
                 </div>
               ) : series.length === 0 ? (
-                <div className="st-muted">No data available for this period.</div>
-              ) : (
-                <div className="st-chart">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={series} margin={{ top: 10, right: 10, left: -12, bottom: 0 }}>
-                      <CartesianGrid stroke={gridStroke} strokeDasharray="3 3" />
-                      <XAxis dataKey="label" stroke={axisStroke} fontSize={11} tickMargin={8} />
-                      <YAxis
-                        stroke={axisStroke}
-                        fontSize={11}
-                        tickFormatter={(v) =>
-                          v >= 1_000_000 ? `${(v / 1_000_000).toFixed(1)}M` : v >= 1_000 ? `${(v / 1_000).toFixed(0)}k` : String(v)
-                        }
-                        domain={[0, maxIncome ? maxIncome * 1.1 : "auto"]}
-                      />
-                      <Tooltip
-                        formatter={(value: any) => `${Number(value).toLocaleString("sw-TZ")} TZS`}
-                        labelStyle={{ fontSize: 12 }}
-                        contentStyle={{
-                          borderRadius: 12,
-                          borderColor: "rgba(148, 163, 184, 0.35)",
-                          boxShadow: "0 10px 30px rgba(15, 23, 42, 0.12)",
-                          background: "rgba(255,255,255,0.92)",
-                        }}
-                      />
-                      <Bar dataKey="income" fill={barFill} radius={[7, 7, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
+                <div className="st-empty-state">
+                  <div className="st-empty-title">No reporting data in this window.</div>
+                  <div className="st-muted">Try a wider range to compare a fuller set of approved income activity.</div>
                 </div>
+              ) : (
+                <>
+                  <div className="st-chart">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={series} margin={{ top: 10, right: 10, left: -12, bottom: 0 }}>
+                        <CartesianGrid stroke={gridStroke} strokeDasharray="3 3" />
+                        <XAxis dataKey="label" stroke={axisStroke} fontSize={11} tickMargin={8} />
+                        <YAxis
+                          stroke={axisStroke}
+                          fontSize={11}
+                          tickFormatter={(v) =>
+                            v >= 1_000_000 ? `${(v / 1_000_000).toFixed(1)}M` : v >= 1_000 ? `${(v / 1_000).toFixed(0)}k` : String(v)
+                          }
+                          domain={[0, maxIncome ? maxIncome * 1.1 : "auto"]}
+                        />
+                        <Tooltip
+                          formatter={(value: number | string) => `${Number(value).toLocaleString("sw-TZ")} TZS`}
+                          labelStyle={{ fontSize: 12 }}
+                          contentStyle={{
+                            borderRadius: 12,
+                            borderColor: "rgba(148, 163, 184, 0.35)",
+                            boxShadow: "0 10px 30px rgba(15, 23, 42, 0.12)",
+                            background: "rgba(255,255,255,0.92)",
+                          }}
+                        />
+                        <Bar dataKey="income" fill={barFill} radius={[7, 7, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+
+                  <div className="st-chart-footer">
+                    <div className="st-chart-highlight">
+                      <span className="st-chart-highlight-label">Best day</span>
+                      <span className="st-chart-highlight-value">
+                        {insights.bestDay ? `${dateOnly(insights.bestDay.date)} - ${fmtTzs(insights.bestDay.income)} TZS` : "-"}
+                      </span>
+                    </div>
+                    <div className="st-chart-highlight">
+                      <span className="st-chart-highlight-label">Average per day</span>
+                      <span className="st-chart-highlight-value">{fmtTzs(insights.avgIncome)} TZS</span>
+                    </div>
+                  </div>
+                </>
               )}
 
               <div className="st-note">
-                Note: Profit is shown in KPI using total expenses for the same period (approximation).
+                Profit remains an operating estimate based on approved income and the same period&apos;s recorded expenses.
               </div>
             </div>
           </div>
 
-          {/* Products */}
           <div className="st-card">
             <div className="st-card-header">
               <div>
                 <div className="st-card-title">Top products</div>
-                <div className="st-card-sub">Based on paid and delivered orders overall.</div>
+                <div className="st-card-sub">Products that are driving delivered and paid order value.</div>
               </div>
 
-              <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+              <div className="st-products-header">
                 <input
                   className="st-input"
-                  style={{ width: 260 }}
                   value={productSearch}
                   onChange={(e) => setProductSearch(e.target.value)}
                   placeholder="Search SKU or name..."
                 />
-                {loadingProducts ? <span className="st-chip">Loading...</span> : <span className="st-chip">{products.length} total</span>}
+                <span className="st-chip">{loadingProducts ? "Updating products" : `${products.length} total`}</span>
               </div>
             </div>
 
@@ -413,7 +422,10 @@ export default function StatsPage() {
                   ))}
                 </div>
               ) : productsFiltered.length === 0 ? (
-                <div className="st-muted">No matching products.</div>
+                <div className="st-empty-state">
+                  <div className="st-empty-title">No products match this search.</div>
+                  <div className="st-muted">Try another SKU or product name to reopen the product ranking view.</div>
+                </div>
               ) : (
                 <div className="st-table-wrap">
                   <table className="st-table">
@@ -442,155 +454,158 @@ export default function StatsPage() {
           </div>
         </div>
 
-        {/* Right column: insights */}
-<aside style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-  {/* Quick insights */}
-  <div className="st-card">
-    <div className="st-card-header">
-      <div>
-        <div className="st-card-title">Quick insights</div>
-        <div className="st-card-sub">A few signals admins care about.</div>
-      </div>
-      <span className="st-pill">{humanRange}</span>
-    </div>
-
-    <div className="st-card-body">
-      <div className="st-kv">
-        <div className="st-kv-item">
-          <div className="st-kv-label">Avg income / day</div>
-          <div className="st-kv-value">{fmtTzs(insights.avgIncome)} TZS</div>
-        </div>
-
-        <div className="st-kv-item">
-          <div className="st-kv-label">Avg orders / day</div>
-          <div className="st-kv-value">{insights.avgOrders.toFixed(1)}</div>
-        </div>
-
-        <div className="st-kv-item">
-          <div className="st-kv-label">Profit margin</div>
-          <div className="st-kv-value">{Number.isFinite(insights.margin) ? `${insights.margin.toFixed(1)}%` : "—"}</div>
-        </div>
-
-        <div className="st-kv-item">
-          <div className="st-kv-label">Delivery fees</div>
-          <div className="st-kv-value">{fmtTzs(delivery)} TZS</div>
-        </div>
-      </div>
-
-      <div className="st-note">
-        {insights.bestDay ? (
-          <>
-            Best income day: <b>{dateOnly(insights.bestDay.date)}</b> -{" "}
-            <b>{fmtTzs(insights.bestDay.income)} TZS</b>.
-          </>
-        ) : (
-          <>Best income day: -</>
-        )}
-      </div>
-    </div>
-  </div>
-
-  {/* Finance split */}
-  <div className="st-card">
-    <div className="st-card-header">
-      <div>
-        <div className="st-card-title">Finance split</div>
-        <div className="st-card-sub">Profit vs Expenses (same period).</div>
-      </div>
-      <span className="st-pill st-pill--accent">{humanRange}</span>
-    </div>
-
-    <div className="st-card-body">
-      {loadingMain ? (
-        <div className="st-split-loading">
-          <span className="st-loading-ring" />
-          <div className="st-table-loading">
-            <div className="st-table-loading__row">
-              <span className="st-loading-line st-loading-line--md" />
-              <span className="st-loading-line st-loading-line--sm" />
+        <aside className="st-secondary-column">
+          <div className="st-card">
+            <div className="st-card-header">
+              <div>
+                <div className="st-card-title">Operating signals</div>
+                <div className="st-card-sub">A smaller summary for quick admin and owner review.</div>
+              </div>
+              <span className="st-pill">{humanRange}</span>
             </div>
-            <div className="st-table-loading__row">
-              <span className="st-loading-line st-loading-line--md" />
-              <span className="st-loading-line st-loading-line--sm" />
-            </div>
-          </div>
-        </div>
-      ) : financeSplit.total <= 0 ? (
-        <div className="st-muted">No profit/expense data for this period.</div>
-      ) : (
-        <div className="st-split">
-          <div className="st-split-chart">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={financeSplit.rows}
-                  dataKey="value"
-                  nameKey="name"
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={52}
-                  outerRadius={78}
-                  paddingAngle={2}
-                >
-                  {/* Do not hardcode colors; use CSS variables so theme controls it */}
-                  <Cell fill="var(--st-split-profit)" />
-                  <Cell fill="var(--st-split-expenses)" />
-                </Pie>
-                <Tooltip
-                  formatter={(value: any, name: any) => [`${Number(value).toLocaleString("sw-TZ")} TZS`, name]}
-                  contentStyle={{
-                    borderRadius: 12,
-                    borderColor: "rgba(148, 163, 184, 0.35)",
-                    boxShadow: "0 10px 30px rgba(15, 23, 42, 0.12)",
-                    background: "rgba(255,255,255,0.92)",
-                  }}
-                />
-              </PieChart>
-            </ResponsiveContainer>
 
-            <div className="st-split-center">
-              <div className="st-split-center-label">Total</div>
-              <div className="st-split-center-value">{fmtTzs(financeSplit.total)} TZS</div>
+            <div className="st-card-body">
+              <div className="st-kv">
+                <div className="st-kv-item">
+                  <div className="st-kv-label">Avg income / day</div>
+                  <div className="st-kv-value">{loadingMain ? "Loading" : `${fmtTzs(insights.avgIncome)} TZS`}</div>
+                </div>
+
+                <div className="st-kv-item">
+                  <div className="st-kv-label">Avg orders / day</div>
+                  <div className="st-kv-value">{loadingMain ? "Loading" : insights.avgOrders.toFixed(1)}</div>
+                </div>
+
+                <div className="st-kv-item">
+                  <div className="st-kv-label">Profit margin</div>
+                  <div className="st-kv-value">
+                    {loadingMain ? "Loading" : Number.isFinite(insights.margin) ? `${insights.margin.toFixed(1)}%` : "-"}
+                  </div>
+                </div>
+
+                <div className="st-kv-item">
+                  <div className="st-kv-label">Delivery fees</div>
+                  <div className="st-kv-value">{loadingMain ? "Loading" : `${fmtTzs(delivery)} TZS`}</div>
+                </div>
+              </div>
+
+              <div className="st-note">
+                {insights.bestDay ? (
+                  <>
+                    Strongest revenue day: <b>{dateOnly(insights.bestDay.date)}</b> with{" "}
+                    <b>{fmtTzs(insights.bestDay.income)} TZS</b>.
+                  </>
+                ) : (
+                  <>Strongest revenue day: -</>
+                )}
+              </div>
             </div>
           </div>
 
-          <div className="st-split-legend">
-            <div className="st-split-row">
-              <div className="st-split-left">
-                <span className="st-dot st-dot--profit" />
-                <span className="st-split-name">Profit</span>
+          <div className="st-card">
+            <div className="st-card-header">
+              <div>
+                <div className="st-card-title">Finance split</div>
+                <div className="st-card-sub">Profit versus expenses in the same reporting window.</div>
               </div>
-              <div className="st-split-val">
-                {fmtTzs(Math.max(0, profit))} TZS
-                <span className="st-split-pct">
-                  {financeSplit.total > 0 ? ` · ${Math.round((Math.max(0, profit) / financeSplit.total) * 100)}%` : ""}
-                </span>
-              </div>
+              <span className="st-pill st-pill--accent">{humanRange}</span>
             </div>
 
-            <div className="st-split-row">
-              <div className="st-split-left">
-                <span className="st-dot st-dot--expenses" />
-                <span className="st-split-name">Expenses</span>
-              </div>
-              <div className="st-split-val">
-                {fmtTzs(Math.max(0, expenses))} TZS
-                <span className="st-split-pct">
-                  {financeSplit.total > 0 ? ` · ${Math.round((Math.max(0, expenses) / financeSplit.total) * 100)}%` : ""}
-                </span>
-              </div>
-            </div>
+            <div className="st-card-body">
+              {loadingMain ? (
+                <div className="st-split-loading">
+                  <span className="st-loading-ring" />
+                  <div className="st-table-loading">
+                    <div className="st-table-loading__row">
+                      <span className="st-loading-line st-loading-line--md" />
+                      <span className="st-loading-line st-loading-line--sm" />
+                    </div>
+                    <div className="st-table-loading__row">
+                      <span className="st-loading-line st-loading-line--md" />
+                      <span className="st-loading-line st-loading-line--sm" />
+                    </div>
+                  </div>
+                </div>
+              ) : financeSplit.total <= 0 ? (
+                <div className="st-empty-state">
+                  <div className="st-empty-title">No finance split available.</div>
+                  <div className="st-muted">This period does not yet have enough profit and expense activity to chart.</div>
+                </div>
+              ) : (
+                <div className="st-split">
+                  <div className="st-split-chart">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={financeSplit.rows}
+                          dataKey="value"
+                          nameKey="name"
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={52}
+                          outerRadius={78}
+                          paddingAngle={2}
+                        >
+                          <Cell fill="var(--st-split-profit)" />
+                          <Cell fill="var(--st-split-expenses)" />
+                        </Pie>
+                        <Tooltip
+                          formatter={(value: number | string, name: string) => [
+                            `${Number(value).toLocaleString("sw-TZ")} TZS`,
+                            name,
+                          ]}
+                          contentStyle={{
+                            borderRadius: 12,
+                            borderColor: "rgba(148, 163, 184, 0.35)",
+                            boxShadow: "0 10px 30px rgba(15, 23, 42, 0.12)",
+                            background: "rgba(255,255,255,0.92)",
+                          }}
+                        />
+                      </PieChart>
+                    </ResponsiveContainer>
 
-            <div className="st-split-foot">
-              Profit is clamped to 0 if negative (keeps chart readable).
+                    <div className="st-split-center">
+                      <div className="st-split-center-label">Total</div>
+                      <div className="st-split-center-value">{fmtTzs(financeSplit.total)} TZS</div>
+                    </div>
+                  </div>
+
+                  <div className="st-split-legend">
+                    <div className="st-split-row">
+                      <div className="st-split-left">
+                        <span className="st-dot st-dot--profit" />
+                        <span className="st-split-name">Profit</span>
+                      </div>
+                      <div className="st-split-val">
+                        {fmtTzs(Math.max(0, profit))} TZS
+                        <span className="st-split-pct">
+                          {financeSplit.total > 0 ? ` - ${Math.round((Math.max(0, profit) / financeSplit.total) * 100)}%` : ""}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="st-split-row">
+                      <div className="st-split-left">
+                        <span className="st-dot st-dot--expenses" />
+                        <span className="st-split-name">Expenses</span>
+                      </div>
+                      <div className="st-split-val">
+                        {fmtTzs(Math.max(0, expenses))} TZS
+                        <span className="st-split-pct">
+                          {financeSplit.total > 0 ? ` - ${Math.round((Math.max(0, expenses) / financeSplit.total) * 100)}%` : ""}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="st-split-foot">
+                      Profit is clamped to zero if negative to keep the split calm and readable.
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
-        </div>
-      )}
-    </div>
-  </div>
-</aside>
-
+        </aside>
       </div>
     </div>
   );

@@ -51,9 +51,9 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       {
         href: "/products",
-        label: "Catalog",
-        description: "Products, stock posture, pricing, and availability.",
-        shortLabel: "CA",
+        label: "Products",
+        description: "Add, edit, stock, pricing, and catalog readiness.",
+        shortLabel: "PR",
         moduleKey: "products",
       },
       {
@@ -70,9 +70,9 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       {
         href: "/stats",
-        label: "Reports",
-        description: "Performance, activity, and operational reporting.",
-        shortLabel: "RP",
+        label: "Stats",
+        description: "Performance metrics, revenue trends, and business insights.",
+        shortLabel: "ST",
         moduleKey: "analytics",
       },
       {

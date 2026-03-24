@@ -15,7 +15,7 @@ import { socket } from "@/lib/socket";
 import type { Convo } from "./ConversationList";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { EmptyState, RefreshIndicator, ThreadSkeleton } from "@/components/ui";
+import { EmptyState, ThreadSkeleton } from "@/components/ui";
 
 type ThreadProps = {
   convo: Convo;
@@ -468,6 +468,7 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
   const [text, setText] = useState("");
   const [toggling, setToggling] = useState(false);
   const [sending, setSending] = useState(false);
+  const [showBotModeHint, setShowBotModeHint] = useState(false);
   const [productNames, setProductNames] = useState<Record<string, string>>({});
   const [activeMediaActionsId, setActiveMediaActionsId] = useState<string | number | null>(null);
 
@@ -486,6 +487,12 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
   }
 
   function handleInputKeyDown(e: KeyboardEvent<HTMLInputElement>) {
+    if (!agentAllowed && e.key !== "Tab") {
+      e.preventDefault();
+      revealBotModeHint();
+      return;
+    }
+
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend(e as unknown as FormEvent);
@@ -554,7 +561,15 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
   }
 
   function handleAttachClick() {
+    if (!agentAllowed) {
+      revealBotModeHint();
+      return;
+    }
     fileInputRef.current?.click();
+  }
+
+  function revealBotModeHint() {
+    setShowBotModeHint(true);
   }
 
   useEffect(() => {
@@ -630,10 +645,17 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
     setMessages([]);
     setText("");
     setActiveMediaActionsId(null);
+    setShowBotModeHint(false);
     initialScrolledRef.current = false;
     setIsAtBottom(true);
     void loadMessages({ preserveExisting: false });
   }, [convo.id, convo.agent_allowed]);
+
+  useEffect(() => {
+    if (agentAllowed) {
+      setShowBotModeHint(false);
+    }
+  }, [agentAllowed]);
 
   useEffect(() => {
     if (!messages.length) return;
@@ -704,7 +726,7 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
     if (!value) return;
 
     if (!agentAllowed) {
-      toast.error("Bot mode is active. Switch to Agent Mode before sending a manual reply.");
+      revealBotModeHint();
       return;
     }
 
@@ -817,11 +839,6 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
       </div>
 
       <div className="thread-body">
-        {refreshing && messages.length > 0 ? (
-          <div className="thread-loading-banner">
-            <RefreshIndicator label="Refreshing thread" />
-          </div>
-        ) : null}
         {loading && messages.length === 0 ? (
           <div className="thread-loading-state">
             <ThreadSkeleton rows={8} />
@@ -934,9 +951,13 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
       </div>
 
       <div className="thread-footer">
-        {!agentAllowed ? (
-          <div className="thread-composer-notice">
-            Bot mode is active. Switch to Agent Mode before sending a manual reply.
+        {showBotModeHint && !agentAllowed ? (
+          <div
+            className="thread-composer-inline-hint"
+            role="status"
+            aria-live="polite"
+          >
+            Bot mode is active. Switch to Agent Mode to send a manual reply.
           </div>
         ) : null}
         <div className="thread-input-row">
@@ -961,9 +982,23 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
           <input
             className="thread-input"
             value={text}
-            onChange={(e) => setText(e.target.value)}
-            placeholder="Write a reply..."
+            onChange={(e) => {
+              if (!agentAllowed) {
+                revealBotModeHint();
+                return;
+              }
+              setText(e.target.value);
+            }}
+            onFocus={() => {
+              if (!agentAllowed) revealBotModeHint();
+            }}
+            onClick={() => {
+              if (!agentAllowed) revealBotModeHint();
+            }}
+            placeholder={agentAllowed ? "Write a reply..." : "Switch to Agent Mode to reply"}
             onKeyDown={handleInputKeyDown}
+            readOnly={!agentAllowed}
+            aria-describedby={showBotModeHint && !agentAllowed ? "thread-bot-mode-hint" : undefined}
           />
 
           <button
@@ -975,6 +1010,11 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
             {sending ? "Sending..." : "Send"}
           </button>
         </div>
+        {showBotModeHint && !agentAllowed ? (
+          <div id="thread-bot-mode-hint" className="thread-composer-inline-meta">
+            Use the mode toggle above to hand the conversation to an operator.
+          </div>
+        ) : null}
       </div>
     </div>
   );

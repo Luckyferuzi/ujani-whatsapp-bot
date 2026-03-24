@@ -3,24 +3,44 @@ import { Card, ChartSkeleton, StatCardSkeleton, TableSkeleton } from "@/componen
 export default function StatsLoading() {
   return (
     <div className="stats-page">
-      <div className="st-topbar">
-        <div className="st-title-wrap">
-          <div className="st-title">Loading reports...</div>
+      <section className="st-insights-hero">
+        <div className="st-insights-main">
+          <div className="st-insights-kicker">Insights</div>
+          <div className="st-insights-title">Loading performance overview...</div>
         </div>
-      </div>
-      <div className="st-stat-grid">
+      </section>
+
+      <section className="st-toolbar">
+        <div className="st-seg">
+          <span className="st-chip">Preparing filters</span>
+        </div>
+      </section>
+
+      <div className="st-kpi-grid">
         <StatCardSkeleton />
         <StatCardSkeleton />
         <StatCardSkeleton />
         <StatCardSkeleton />
       </div>
-      <div className="st-report-grid">
-        <Card className="st-card" padding="lg">
-          <ChartSkeleton />
-        </Card>
-        <Card className="st-card" padding="lg">
-          <TableSkeleton rows={6} />
-        </Card>
+
+      <div className="st-shell">
+        <div className="st-primary-column">
+          <Card className="st-card" padding="lg">
+            <ChartSkeleton />
+          </Card>
+          <Card className="st-card" padding="lg">
+            <TableSkeleton rows={6} />
+          </Card>
+        </div>
+
+        <div className="st-secondary-column">
+          <Card className="st-card" padding="lg">
+            <TableSkeleton rows={4} />
+          </Card>
+          <Card className="st-card" padding="lg">
+            <ChartSkeleton />
+          </Card>
+        </div>
       </div>
     </div>
   );
