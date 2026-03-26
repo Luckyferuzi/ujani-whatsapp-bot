@@ -1,5 +1,6 @@
 import {
   sendButtonsMessage,
+  getWhatsAppMessageId,
   sendListMessage,
   sendText,
   getRememberedPhoneNumberId,
@@ -59,7 +60,7 @@ export async function sendBotText(
   body: string,
   phoneNumberId?: string | null
 ) {
-  await sendText(user, body, { phoneNumberId: phoneNumberId ?? null });
+  const waResponse = await sendText(user, body, { phoneNumberId: phoneNumberId ?? null });
 
   try {
     const { id: customerId } = await upsertCustomerByWa(user, undefined, user);
@@ -68,7 +69,11 @@ export async function sendBotText(
       phoneNumberId ?? null
     );
 
-    const inserted = await insertOutboundMessage(conversationId, "text", body);
+    const inserted = await insertOutboundMessage(conversationId, "text", body, {
+      waMessageId: getWhatsAppMessageId(waResponse),
+      status: "sent",
+      messageKind: "freeform",
+    });
 
     emit("message.created", {
       conversation_id: conversationId,
@@ -148,7 +153,10 @@ export async function sendListMessageSafe(p: SafeListPayload) {
       customerId,
       getRememberedPhoneNumberId(p.to) ?? null
     );
-    const inserted = await insertOutboundMessage(conversationId, "text", summaryBody);
+    const inserted = await insertOutboundMessage(conversationId, "text", summaryBody, {
+      status: "sent",
+      messageKind: "freeform",
+    });
 
     emit("message.created", {
       conversation_id: conversationId,
@@ -192,7 +200,10 @@ export async function sendButtonsMessageSafe(
       customerId,
       getRememberedPhoneNumberId(to) ?? null
     );
-    const inserted = await insertOutboundMessage(conversationId, "text", summaryBody);
+    const inserted = await insertOutboundMessage(conversationId, "text", summaryBody, {
+      status: "sent",
+      messageKind: "freeform",
+    });
 
     emit("message.created", {
       conversation_id: conversationId,

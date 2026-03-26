@@ -278,7 +278,7 @@ companyRoutes.post("/setup/test-send", async (req, res) => {
   }
 
   try {
-    await sendText(parsed.data.to, parsed.data.text);
+    const waResponse = await sendText(parsed.data.to, parsed.data.text);
 
     // Also persist in inbox so test sends are visible in the interface.
     const { id: customerId } = await upsertCustomerByWa(
@@ -293,7 +293,12 @@ companyRoutes.post("/setup/test-send", async (req, res) => {
     const inserted = await insertOutboundMessage(
       conversationId,
       "text",
-      parsed.data.text
+      parsed.data.text,
+      {
+        waMessageId: typeof waResponse?.messages?.[0]?.id === "string" ? waResponse.messages[0].id : null,
+        status: "sent",
+        messageKind: "freeform",
+      }
     );
 
     emit("message.created", { conversation_id: conversationId, message: inserted });

@@ -2,20 +2,475 @@
 import { Router } from "express";
 import db from "../db/knex.js";
 import multer from "multer";
-import { sendText, sendMediaById, uploadMedia } from "../whatsapp.js";
-
+import {
+  getInboxTemplateByKey,
+  getInboxTemplateRegistry,
+  type InboxTemplateConfig,
+  type TemplateParameterMeta,
+} from "../runtime/companySettings.js";
+import {
+  getWhatsAppMessageId,
+  sendMediaById,
+  sendTemplateMessage,
+  sendText,
+  uploadMedia,
+  type WhatsAppSendResponse,
+} from "../whatsapp.js";
+import {
+  getConversationLastInboundAt,
+  insertOutboundMessage,
+  updateMessageTransportState,
+} from "../db/queries.js";
 
 export const sendRoutes = Router();
-const upload = multer(); // memory storage
+const upload = multer();
 
-/**
- * POST /api/send
- * body: { conversationId: number, text?: string }
- *
- * Rules:
- * - conversation.agent_allowed must be true (customer chose ACTION_TALK_TO_AGENT)
- * - we log message in DB and send via WhatsApp
- */
+export const FREE_REPLY_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+export function getFreeReplyWindowState(
+  lastInboundAt: string | null | undefined,
+  now = Date.now()
+) {
+  if (!lastInboundAt) {
+    return {
+      allowed: false,
+      state: "template_required" as const,
+      expiresAt: null,
+      remainingMs: 0,
+    };
+  }
+
+  const openedAt = new Date(lastInboundAt).getTime();
+  if (!Number.isFinite(openedAt)) {
+    return {
+      allowed: false,
+      state: "template_required" as const,
+      expiresAt: null,
+      remainingMs: 0,
+    };
+  }
+
+  const expiresAtMs = openedAt + FREE_REPLY_WINDOW_MS;
+  const remainingMs = Math.max(0, expiresAtMs - now);
+
+  return {
+    allowed: expiresAtMs > now,
+    state: expiresAtMs > now ? ("free_reply_open" as const) : ("template_required" as const),
+    expiresAt: new Date(expiresAtMs).toISOString(),
+    remainingMs,
+  };
+}
+
+export function parseWhatsAppApiError(err: any) {
+  const rawMessage = String(err?.message ?? "");
+  const payloadMatch = rawMessage.match(/WhatsApp API error \d+:\s+(.+)$/);
+  let payload: any = err?.payload;
+
+  if (!payload && payloadMatch?.[1]) {
+    try {
+      payload = JSON.parse(payloadMatch[1]);
+    } catch {
+      payload = null;
+    }
+  }
+
+  const waError = payload?.error ?? null;
+  const details = waError?.error_data?.details;
+
+  return {
+    code: waError?.code != null ? String(waError.code) : null,
+    title: typeof waError?.title === "string" ? waError.title : null,
+    details: typeof details === "string" ? details : rawMessage || null,
+  };
+}
+
+export function validateTemplateParams(
+  parameterMeta: TemplateParameterMeta[],
+  params: Record<string, unknown>
+) {
+  const normalized: Record<string, string> = {};
+  const missing: string[] = [];
+
+  for (const field of parameterMeta) {
+    const value = String(params?.[field.key] ?? "").trim();
+    if (field.required && !value) {
+      missing.push(field.key);
+      continue;
+    }
+    if (value) {
+      normalized[field.key] = value;
+    }
+  }
+
+  return {
+    ok: missing.length === 0,
+    missing,
+    normalized,
+  };
+}
+
+export function buildTemplatePreview(
+  template: Pick<InboxTemplateConfig, "key" | "category">,
+  params: Record<string, string>
+) {
+  const customerName = params.customer_name || "customer";
+  const orderCode = params.order_code || "your order";
+  const amountDue = params.amount_due || "the outstanding balance";
+  const productName = params.product_name || "your requested item";
+
+  if (template.key === "payment_reminder_sw") {
+    return `Payment reminder for ${customerName} on ${orderCode}. Outstanding amount: ${amountDue}.`;
+  }
+  if (template.key === "order_followup_sw") {
+    return `Order follow-up for ${customerName} about ${orderCode}.`;
+  }
+  if (template.key === "restock_reengagement_sw") {
+    return `Restock / re-engagement for ${customerName} about ${productName}.`;
+  }
+
+  return `${template.category} template for ${customerName}.`;
+}
+
+function buildTemplateUiLabel(template: InboxTemplateConfig) {
+  if (template.category === "payment_reminder") return "Payment reminder";
+  if (template.category === "order_followup") return "Order follow-up";
+  return "Restock / re-engagement";
+}
+
+async function finalizeOutboundMessage(args: {
+  messageId: number;
+  waResponse?: WhatsAppSendResponse | null;
+  status: "sent" | "failed";
+  messageKind?: "freeform" | "template";
+  statusReason?: string | null;
+  errorCode?: string | null;
+  errorTitle?: string | null;
+  errorDetails?: string | null;
+  templateName?: string | null;
+  templateLanguage?: string | null;
+}) {
+  return updateMessageTransportState(args.messageId, {
+    waMessageId:
+      args.status === "sent" ? getWhatsAppMessageId(args.waResponse) : undefined,
+    status: args.status,
+    messageKind: args.messageKind ?? "freeform",
+    statusReason: args.statusReason ?? null,
+    errorCode: args.errorCode ?? null,
+    errorTitle: args.errorTitle ?? null,
+    errorDetails: args.errorDetails ?? null,
+    templateName: args.templateName ?? null,
+    templateLanguage: args.templateLanguage ?? null,
+  });
+}
+
+function sendTemplateRequired(res: any, transport: any) {
+  return res.status(409).json({
+    ok: false,
+    code: "template_required",
+    message: "Customer is outside the free reply window",
+    error: "Customer is outside the free reply window",
+    transport,
+  });
+}
+
+async function loadConversation(id: number) {
+  return db("conversations as c")
+    .leftJoin("customers as u", "u.id", "c.customer_id")
+    .where("c.id", id)
+    .select("c.id", "c.agent_allowed", "c.phone_number_id", "c.customer_id", "u.wa_id", "u.name", "u.lang")
+    .first();
+}
+
+export async function sendConfiguredTemplateForConversation(args: {
+  conversationId: number;
+  templateKey: string;
+  params: Record<string, unknown>;
+  app?: { get?: (name: string) => any } | null;
+}) {
+  const id = Number(args.conversationId);
+  const convo = await loadConversation(id);
+  if (!convo) {
+    return { ok: false as const, status: 404, body: { error: "Conversation not found", code: "conversation_not_found" } };
+  }
+
+  if (!convo.wa_id) {
+    return { ok: false as const, status: 400, body: { error: "Customer wa_id missing; cannot send", code: "missing_customer_wa_id" } };
+  }
+
+  const template = await getInboxTemplateByKey(String(args.templateKey ?? "").trim());
+  if (!template) {
+    return { ok: false as const, status: 404, body: { error: "Template is not configured", code: "template_missing" } };
+  }
+
+  if (!template.enabled) {
+    return { ok: false as const, status: 409, body: { error: "Template is disabled", code: "template_disabled" } };
+  }
+
+  const validation = validateTemplateParams(template.parameter_meta, args.params ?? {});
+  if (!validation.ok) {
+    return {
+      ok: false as const,
+      status: 400,
+      body: {
+        error: "Missing required template parameters",
+        code: "template_params_missing",
+        missing: validation.missing,
+      },
+    };
+  }
+
+  const parameterValues = template.parameter_meta
+    .map((item) => validation.normalized[item.key] ?? "")
+    .filter((value, index) => {
+      const field = template.parameter_meta[index];
+      return field.required || value.length > 0;
+    });
+
+  const preview = buildTemplatePreview(template, validation.normalized);
+  const pendingMessage = await insertOutboundMessage(id, "text", preview, {
+    status: "pending",
+    messageKind: "template",
+    templateName: template.template_name,
+    templateLanguage: template.language_code,
+  });
+
+  args.app?.get?.("io")?.emit("message.created", {
+    conversation_id: id,
+    message: pendingMessage,
+  });
+
+  try {
+    const waResponse = await sendTemplateMessage({
+      to: String(convo.wa_id),
+      templateName: template.template_name,
+      languageCode: template.language_code,
+      bodyParameters: parameterValues,
+      phoneNumberId: (convo as any).phone_number_id ?? null,
+    });
+
+    const message = await finalizeOutboundMessage({
+      messageId: Number(pendingMessage.id),
+      waResponse,
+      status: "sent",
+      messageKind: "template",
+      templateName: template.template_name,
+      templateLanguage: template.language_code,
+    });
+
+    args.app?.get?.("io")?.emit("message.created", {
+      conversation_id: id,
+      message: message ?? pendingMessage,
+    });
+
+    return {
+      ok: true as const,
+      status: 200,
+      body: {
+        ok: true,
+        message: message ?? pendingMessage,
+        template: {
+          key: template.key,
+          template_name: template.template_name,
+          language_code: template.language_code,
+        },
+        transport: waResponse,
+      },
+    };
+  } catch (err: any) {
+    const parsed = parseWhatsAppApiError(err);
+    const message = await finalizeOutboundMessage({
+      messageId: Number(pendingMessage.id),
+      status: "failed",
+      messageKind: "template",
+      statusReason: "transport_failed",
+      errorCode: parsed.code,
+      errorTitle: parsed.title,
+      errorDetails: parsed.details,
+      templateName: template.template_name,
+      templateLanguage: template.language_code,
+    });
+
+    args.app?.get?.("io")?.emit("message.created", {
+      conversation_id: id,
+      message: message ?? pendingMessage,
+    });
+
+    return {
+      ok: false as const,
+      status: 502,
+      body: {
+        error: parsed.details ?? "Failed to send template message",
+        code: "template_send_failed",
+        transport: message ?? pendingMessage,
+      },
+    };
+  }
+}
+
+async function loadConversationTemplateContext(conversationId: number) {
+  const convo = await db("conversations as c")
+    .leftJoin("customers as u", "u.id", "c.customer_id")
+    .where("c.id", conversationId)
+    .select(
+      "c.id",
+      "c.customer_id",
+      "c.phone_number_id",
+      "u.wa_id",
+      "u.name",
+      "u.lang",
+      "u.phone"
+    )
+    .first();
+
+  if (!convo?.customer_id) {
+    return null;
+  }
+
+  const order = await db("orders as o")
+    .leftJoin("payments as p", "p.order_id", "o.id")
+    .where("o.customer_id", convo.customer_id)
+    .select(
+      "o.id",
+      "o.order_code",
+      "o.status",
+      "o.total_tzs",
+      "p.amount_tzs as paid_amount",
+      "p.status as payment_status"
+    )
+    .orderBy("o.created_at", "desc")
+    .first();
+
+  const restockItems = await db("restock_subscriptions as rs")
+    .join("products as p", "p.id", "rs.product_id")
+    .where("rs.customer_id", convo.customer_id)
+    .andWhere("rs.status", "subscribed")
+    .select("p.name")
+    .orderBy("rs.updated_at", "desc")
+    .limit(3);
+
+  return {
+    convo,
+    latestOrder: order
+      ? {
+          id: Number(order.id),
+          orderCode: String(order.order_code ?? `UJ-${order.id}`),
+          status: String(order.status ?? ""),
+          totalTzs: Number(order.total_tzs ?? 0) || 0,
+          paidAmount: Number(order.paid_amount ?? 0) || 0,
+          paymentStatus: String(order.payment_status ?? "awaiting"),
+        }
+      : null,
+    restockItems: (restockItems as any[]).map((row) => String(row.name ?? "")).filter(Boolean),
+  };
+}
+
+export function buildTemplateSuggestionCategory(context: {
+  latestOrder: {
+    status: string;
+    totalTzs: number;
+    paidAmount: number;
+    paymentStatus: string;
+  } | null;
+  restockItems: string[];
+}) {
+  if (
+    context.latestOrder &&
+    context.latestOrder.totalTzs > context.latestOrder.paidAmount &&
+    context.latestOrder.paymentStatus !== "paid"
+  ) {
+    return "payment_reminder";
+  }
+
+  if (
+    context.latestOrder &&
+    ["pending", "preparing", "out_for_delivery"].includes(context.latestOrder.status)
+  ) {
+    return "order_followup";
+  }
+
+  if (context.restockItems.length > 0) {
+    return "restock_reengagement";
+  }
+
+  return null;
+}
+
+function buildTemplateDefaults(
+  template: InboxTemplateConfig,
+  context: Awaited<ReturnType<typeof loadConversationTemplateContext>>
+) {
+  const customerName = String(context?.convo?.name ?? "").trim() || "Customer";
+  const defaults: Record<string, string> = {
+    customer_name: customerName,
+  };
+
+  if (context?.latestOrder) {
+    defaults.order_code = context.latestOrder.orderCode;
+    defaults.amount_due = `${Math.max(
+      0,
+      context.latestOrder.totalTzs - context.latestOrder.paidAmount
+    ).toLocaleString("sw-TZ")} TZS`;
+  }
+
+  if (context?.restockItems?.[0]) {
+    defaults.product_name = context.restockItems[0];
+  }
+
+  return {
+    defaults,
+    preview: buildTemplatePreview(template, defaults),
+  };
+}
+
+sendRoutes.get("/conversations/:id/template-options", async (req, res) => {
+  try {
+    const conversationId = Number(req.params.id);
+    if (!Number.isFinite(conversationId)) {
+      return res.status(400).json({ error: "Invalid conversation id", code: "invalid_conversation_id" });
+    }
+
+    const context = await loadConversationTemplateContext(conversationId);
+    if (!context) {
+      return res.status(404).json({ error: "Conversation not found", code: "conversation_not_found" });
+    }
+
+    const registry = await getInboxTemplateRegistry();
+    const enabledTemplates = registry.filter((item) => item.enabled);
+    const suggestedCategory = buildTemplateSuggestionCategory({
+      latestOrder: context.latestOrder,
+      restockItems: context.restockItems,
+    });
+
+    const items = enabledTemplates.map((template) => {
+      const { defaults, preview } = buildTemplateDefaults(template, context);
+      return {
+        key: template.key,
+        template_name: template.template_name,
+        language_code: template.language_code,
+        category: template.category,
+        label: buildTemplateUiLabel(template),
+        enabled: template.enabled,
+        parameter_meta: template.parameter_meta,
+        default_params: defaults,
+        preview,
+        suggested: suggestedCategory != null && template.category === suggestedCategory,
+      };
+    });
+
+    return res.json({
+      items,
+      suggested_category: suggestedCategory,
+      context: {
+        latest_order: context.latestOrder,
+        restock_items: context.restockItems,
+      },
+    });
+  } catch (err: any) {
+    console.error("GET /api/conversations/:id/template-options failed", err);
+    return res.status(500).json({ error: err?.message ?? "Failed to load template options" });
+  }
+});
+
 sendRoutes.post("/send", async (req, res) => {
   try {
     const { conversationId, text } = req.body ?? {};
@@ -29,11 +484,7 @@ sendRoutes.post("/send", async (req, res) => {
       return res.status(400).json({ error: "text required" });
     }
 
-    const convo = await db("conversations as c")
-      .leftJoin("customers as u", "u.id", "c.customer_id")
-      .where("c.id", id)
-      .select("c.id", "c.agent_allowed", "c.phone_number_id", "u.wa_id")
-      .first();
+    const convo = await loadConversation(id);
 
     if (!convo) {
       return res.status(404).json({ error: "Conversation not found" });
@@ -47,175 +498,206 @@ sendRoutes.post("/send", async (req, res) => {
     }
 
     if (!convo.wa_id) {
-      return res
-        .status(400)
-        .json({ error: "Customer wa_id missing; cannot send" });
+      return res.status(400).json({ error: "Customer wa_id missing; cannot send" });
     }
 
     const trimmed = String(text).trim();
+    const eligibility = getFreeReplyWindowState(await getConversationLastInboundAt(id));
 
-    // Send via WhatsApp – if this fails, throw and let the outer catch handle it
-    await sendText(convo.wa_id, trimmed, { phoneNumberId: (convo as any).phone_number_id ?? null });
+    if (!eligibility.allowed) {
+      const failedMessage = await insertOutboundMessage(id, "text", trimmed, {
+        status: "failed",
+        messageKind: "freeform",
+        statusReason: "template_required",
+        errorTitle: "Template required",
+        errorDetails:
+          "Customer is outside the free reply window. Send a WhatsApp template before another manual free-text reply.",
+      });
 
-    // Log outgoing message
-    const [msg] = await db("messages")
-      .insert({
+      req.app.get("io")?.emit("message.created", {
         conversation_id: id,
-        direction: "out",
-        type: "text",
-        body: trimmed,
-        status: "sent",
-      })
-      .returning([
-        "id",
-        "conversation_id",
-        "direction",
-        "type",
-        "body",
-        "status",
-        "created_at",
-      ]);
+        message: failedMessage,
+      });
 
-    // Let UI know
-    req.app.get("io")?.emit("message.created", {
-      conversation_id: id,
-      message: msg,
+      return sendTemplateRequired(res, failedMessage);
+    }
+
+    const pendingMessage = await insertOutboundMessage(id, "text", trimmed, {
+      status: "pending",
+      messageKind: "freeform",
     });
 
-    return res.json({ ok: true, message: msg });
+    req.app.get("io")?.emit("message.created", {
+      conversation_id: id,
+      message: pendingMessage,
+    });
+
+    try {
+      const waResponse = await sendText(convo.wa_id, trimmed, {
+        phoneNumberId: (convo as any).phone_number_id ?? null,
+      });
+
+      const message = await finalizeOutboundMessage({
+        messageId: Number(pendingMessage.id),
+        waResponse,
+        status: "sent",
+      });
+
+      req.app.get("io")?.emit("message.created", {
+        conversation_id: id,
+        message: message ?? pendingMessage,
+      });
+
+      return res.json({ ok: true, message: message ?? pendingMessage, transport: waResponse });
+    } catch (err: any) {
+      const parsed = parseWhatsAppApiError(err);
+      const message = await finalizeOutboundMessage({
+        messageId: Number(pendingMessage.id),
+        status: "failed",
+        statusReason: "transport_failed",
+        errorCode: parsed.code,
+        errorTitle: parsed.title,
+        errorDetails: parsed.details,
+      });
+
+      req.app.get("io")?.emit("message.created", {
+        conversation_id: id,
+        message: message ?? pendingMessage,
+      });
+
+      throw err;
+    }
   } catch (e: any) {
     console.error("POST /api/send failed", e);
-    return res
-      .status(500)
-      .json({ error: e?.message ?? "send failed (WhatsApp error)" });
+    return res.status(500).json({
+      error: e?.message ?? "send failed (WhatsApp error)",
+      code: "send_failed",
+    });
   }
 });
 
+sendRoutes.post("/send-template", async (req, res) => {
+  try {
+    const { conversationId, templateKey, params } = req.body ?? {};
+    const result = await sendConfiguredTemplateForConversation({
+      conversationId: Number(conversationId),
+      templateKey: String(templateKey ?? ""),
+      params: (params ?? {}) as Record<string, unknown>,
+      app: req.app,
+    });
+    return res.status(result.status).json(result.body);
+  } catch (err: any) {
+    console.error("POST /api/send-template failed", err);
+    return res.status(500).json({
+      error: err?.message ?? "Failed to send template",
+      code: "template_send_failed",
+    });
+  }
+});
 
-/**
- * POST /api/upload-media
- * multipart/form-data:
- *  - file: binary
- *  - conversationId: number
- *  - kind?: "image" | "video" | "audio" | "document"
- */
-sendRoutes.post(
-  "/upload-media",
-  upload.single("file"),
-  async (req, res) => {
+sendRoutes.post("/upload-media", upload.single("file"), async (req, res) => {
+  try {
+    const { conversationId, kind } = req.body ?? {};
+    const id = Number(conversationId);
+    const file = req.file;
+
+    if (!file) {
+      return res.status(400).json({ error: "Missing file" });
+    }
+
+    if (!Number.isFinite(id)) {
+      return res.status(400).json({ error: "Invalid conversationId" });
+    }
+
+    const convo = await db("conversations")
+      .where({ "conversations.id": id })
+      .join("customers as cu", "cu.id", "conversations.customer_id")
+      .select("conversations.agent_allowed", "conversations.phone_number_id", "cu.wa_id")
+      .first();
+
+    if (!convo) {
+      return res.status(404).json({ error: "Conversation not found" });
+    }
+
+    if (!convo.agent_allowed) {
+      return res.status(403).json({ error: "Agent is not allowed for this conversation" });
+    }
+
+    const waId = (convo as any).wa_id as string | null;
+    if (!waId) {
+      return res.status(400).json({ error: "Customer wa_id missing; cannot send media" });
+    }
+
+    const mime = file.mimetype || "application/octet-stream";
+    const filename = file.originalname || "file";
+
+    let type: "image" | "video" | "audio" | "document" = "document";
+
+    if (kind === "image" || kind === "video" || kind === "audio" || kind === "document") {
+      type = kind;
+    } else if (mime.startsWith("image/")) {
+      type = mime === "image/svg+xml" ? "document" : "image";
+    } else if (mime.startsWith("video/")) {
+      type = "video";
+    } else if (mime.startsWith("audio/")) {
+      type = "audio";
+    }
+
+    const mediaId = await uploadMedia(file.buffer, filename, mime, {
+      phoneNumberId: (convo as any).phone_number_id ?? null,
+    });
+
+    const pendingMessage = await insertOutboundMessage(id, type, `MEDIA:${type}:${mediaId}`, {
+      status: "pending",
+      messageKind: "freeform",
+    });
+
+    req.app.get("io")?.emit("message.created", {
+      conversation_id: id,
+      message: pendingMessage,
+    });
+
     try {
-      const { conversationId, kind } = req.body ?? {};
-      const id = Number(conversationId);
-      const file = req.file;
-
-      if (!file) {
-        return res.status(400).json({ error: "Missing file" });
-      }
-
-      if (!Number.isFinite(id)) {
-        return res.status(400).json({ error: "Invalid conversationId" });
-      }
-
-      // Find conversation + customer wa_id + agent_allowed (same as /send)
-      const convo = await db("conversations")
-        .where({ "conversations.id": id })
-        .join("customers as cu", "cu.id", "conversations.customer_id")
-        .select("conversations.agent_allowed", "conversations.phone_number_id", "cu.wa_id")
-        .first();
-
-      if (!convo) {
-        return res.status(404).json({ error: "Conversation not found" });
-      }
-
-      if (!convo.agent_allowed) {
-        return res
-          .status(403)
-          .json({ error: "Agent is not allowed for this conversation" });
-      }
-
-      const waId = (convo as any).wa_id as string | null;
-      if (!waId) {
-        return res
-          .status(400)
-          .json({ error: "Customer wa_id missing; cannot send media" });
-      }
-
-      const mime = file.mimetype || "application/octet-stream";
-      const filename = file.originalname || "file";
-
-          // Infer type if not provided.
-      // NOTE: WhatsApp does NOT accept SVG as an "image" message,
-      // so we send SVG as a generic document instead.
-      let type: "image" | "video" | "audio" | "document" = "document";
-
-      if (
-        kind === "image" ||
-        kind === "video" ||
-        kind === "audio" ||
-        kind === "document"
-      ) {
-        type = kind;
-      } else if (mime.startsWith("image/")) {
-        if (mime === "image/svg+xml") {
-          // SVG -> send as document
-          type = "document";
-        } else {
-          type = "image";
-        }
-      } else if (mime.startsWith("video/")) {
-        type = "video";
-      } else if (mime.startsWith("audio/")) {
-        type = "audio";
-      }
-
-
-      // 1) Upload media to WhatsApp → get mediaId
-      const mediaId = await uploadMedia(file.buffer, filename, mime, {
+      const waResponse = await sendMediaById(waId, type, mediaId, undefined, {
         phoneNumberId: (convo as any).phone_number_id ?? null,
       });
 
-      // 2) Send media message
-      await sendMediaById(waId, type, mediaId, undefined, {
-        phoneNumberId: (convo as any).phone_number_id ?? null,
+      const message = await finalizeOutboundMessage({
+        messageId: Number(pendingMessage.id),
+        waResponse,
+        status: "sent",
       });
 
-      // 3) Store outbound message in DB with MEDIA marker
-      const [msg] = await db("messages")
-        .insert({
-          conversation_id: id,
-          direction: "outbound",
-          type,
-          body: `MEDIA:${type}:${mediaId}`,
-          status: "sent",
-        })
-        .returning([
-          "id",
-          "conversation_id",
-          "direction",
-          "type",
-          "body",
-          "status",
-          "created_at",
-        ]);
-
-      // 4) Emit socket event so UI updates in real-time
       req.app.get("io")?.emit("message.created", {
         conversation_id: id,
-        message: msg,
+        message: message ?? pendingMessage,
       });
 
-      res.json({ ok: true, message: msg });
-    } catch (e: any) {
-      console.error("POST /api/upload-media failed", e);
-      res
-        .status(500)
-        .json({ error: e?.message ?? "Failed to upload / send media" });
-    }
-  }
-);
+      return res.json({ ok: true, message: message ?? pendingMessage, transport: waResponse });
+    } catch (err: any) {
+      const parsed = parseWhatsAppApiError(err);
+      const message = await finalizeOutboundMessage({
+        messageId: Number(pendingMessage.id),
+        status: "failed",
+        statusReason: "transport_failed",
+        errorCode: parsed.code,
+        errorTitle: parsed.title,
+        errorDetails: parsed.details,
+      });
 
-// POST /api/send-media
-// body: { conversationId: number, kind: "image" | "video" | "audio" | "document", mediaId: string }
+      req.app.get("io")?.emit("message.created", {
+        conversation_id: id,
+        message: message ?? pendingMessage,
+      });
+
+      throw err;
+    }
+  } catch (e: any) {
+    console.error("POST /api/upload-media failed", e);
+    return res.status(500).json({ error: e?.message ?? "Failed to upload / send media" });
+  }
+});
+
 sendRoutes.post("/send-media", async (req, res) => {
   try {
     const { conversationId, kind, mediaId } = req.body ?? {};
@@ -229,12 +711,7 @@ sendRoutes.post("/send-media", async (req, res) => {
       return res.status(400).json({ error: "Missing mediaId" });
     }
 
-    // Load conversation + customer
-    const convo = await db("conversations as c")
-      .leftJoin("customers as u", "u.id", "c.customer_id")
-      .where("c.id", id)
-      .select("c.id", "c.agent_allowed", "c.phone_number_id", "u.wa_id")
-      .first();
+    const convo = await loadConversation(id);
 
     if (!convo) {
       return res.status(404).json({ error: "Conversation not found" });
@@ -249,57 +726,61 @@ sendRoutes.post("/send-media", async (req, res) => {
 
     const waId = (convo as any).wa_id as string | null;
     if (!waId) {
-      return res
-        .status(400)
-        .json({ error: "Customer wa_id missing; cannot send media" });
+      return res.status(400).json({ error: "Customer wa_id missing; cannot send media" });
     }
 
-    // Normalise media type
     let type: "image" | "video" | "audio" | "document" = "document";
-    if (
-      kind === "image" ||
-      kind === "video" ||
-      kind === "audio" ||
-      kind === "document"
-    ) {
+    if (kind === "image" || kind === "video" || kind === "audio" || kind === "document") {
       type = kind;
     }
 
-    // 1) Re-send media via WhatsApp
-    await sendMediaById(waId, type, mediaId, undefined, {
-      phoneNumberId: (convo as any).phone_number_id ?? null,
+    const pendingMessage = await insertOutboundMessage(id, type, `MEDIA:${type}:${mediaId}`, {
+      status: "pending",
+      messageKind: "freeform",
     });
 
-    // 2) Log outgoing message
-    const [msg] = await db("messages")
-      .insert({
-        conversation_id: id,
-        direction: "out",
-        type,
-        body: `MEDIA:${type}:${mediaId}`,
-        status: "sent",
-      })
-      .returning([
-        "id",
-        "conversation_id",
-        "direction",
-        "type",
-        "body",
-        "status",
-        "created_at",
-      ]);
-
-    // 3) Notify UI
     req.app.get("io")?.emit("message.created", {
       conversation_id: id,
-      message: msg,
+      message: pendingMessage,
     });
 
-    return res.json({ ok: true, message: msg });
+    try {
+      const waResponse = await sendMediaById(waId, type, mediaId, undefined, {
+        phoneNumberId: (convo as any).phone_number_id ?? null,
+      });
+
+      const message = await finalizeOutboundMessage({
+        messageId: Number(pendingMessage.id),
+        waResponse,
+        status: "sent",
+      });
+
+      req.app.get("io")?.emit("message.created", {
+        conversation_id: id,
+        message: message ?? pendingMessage,
+      });
+
+      return res.json({ ok: true, message: message ?? pendingMessage, transport: waResponse });
+    } catch (err: any) {
+      const parsed = parseWhatsAppApiError(err);
+      const message = await finalizeOutboundMessage({
+        messageId: Number(pendingMessage.id),
+        status: "failed",
+        statusReason: "transport_failed",
+        errorCode: parsed.code,
+        errorTitle: parsed.title,
+        errorDetails: parsed.details,
+      });
+
+      req.app.get("io")?.emit("message.created", {
+        conversation_id: id,
+        message: message ?? pendingMessage,
+      });
+
+      throw err;
+    }
   } catch (e: any) {
     console.error("POST /api/send-media failed", e);
-    return res
-      .status(500)
-      .json({ error: e?.message ?? "Failed to resend media" });
+    return res.status(500).json({ error: e?.message ?? "Failed to resend media" });
   }
 });

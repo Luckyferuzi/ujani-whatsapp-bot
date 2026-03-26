@@ -181,7 +181,25 @@ async function apiFetch(path: string, body: unknown) {
     );
   }
 
-  return res;
+  const text = await res.text().catch(() => "");
+  if (!text) return null;
+
+  try {
+    return JSON.parse(text) as any;
+  } catch {
+    return text;
+  }
+}
+
+export type WhatsAppSendResponse = {
+  messaging_product?: string;
+  contacts?: Array<{ input?: string; wa_id?: string }>;
+  messages?: Array<{ id?: string; message_status?: string }>;
+};
+
+export function getWhatsAppMessageId(response: WhatsAppSendResponse | null | undefined): string | null {
+  const messageId = response?.messages?.[0]?.id;
+  return typeof messageId === "string" && messageId.trim().length > 0 ? messageId : null;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -192,7 +210,7 @@ export async function sendText(
   to: string,
   body: string,
   opts?: { phoneNumberId?: string | null }
-) {
+): Promise<WhatsAppSendResponse | null> {
 const phoneId = resolvePhoneNumberId(opts?.phoneNumberId ?? null, to);
 if (!phoneId) {
   throw new Error("[whatsapp] Missing PHONE_NUMBER_ID in env");
@@ -204,7 +222,7 @@ if (!phoneId) {
     type: 'text',
     text: { body },
   };
-  await apiFetch(`${phoneId}/messages`, payload);
+  return (await apiFetch(`${phoneId}/messages`, payload)) as WhatsAppSendResponse | null;
 }
 
 type ListRow = { id: string; title: string; description?: string };
@@ -219,7 +237,7 @@ export async function sendListMessage(args: {
   buttonText: string;
   sections: ListSection[];
   phoneNumberId?: string | null;
-}) {
+}): Promise<WhatsAppSendResponse | null> {
   const phoneId = resolvePhoneNumberId(args.phoneNumberId ?? null, args.to);
   if (!phoneId) {
     throw new Error(
@@ -255,7 +273,7 @@ export async function sendListMessage(args: {
     },
   };
 
-  await apiFetch(`${phoneId}/messages`, payload);
+  return (await apiFetch(`${phoneId}/messages`, payload)) as WhatsAppSendResponse | null;
 }
 
 type Button = { id: string; title: string };
@@ -266,7 +284,7 @@ export async function sendButtonsMessage(
   body: string,
   buttons: Button[],
   opts?: { phoneNumberId?: string | null }
-) {
+): Promise<WhatsAppSendResponse | null> {
   const phoneId = resolvePhoneNumberId(opts?.phoneNumberId ?? null, to);
   if (!phoneId) {
     throw new Error(
@@ -289,7 +307,7 @@ export async function sendButtonsMessage(
       },
     },
   };
-  await apiFetch(`${phoneId}/messages`, payload);
+  return (await apiFetch(`${phoneId}/messages`, payload)) as WhatsAppSendResponse | null;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -300,7 +318,7 @@ export async function sendCatalogMessage(
   to: string,
   body: string,
   opts?: { phoneNumberId?: string | null; thumbnailProductRetailerId?: string | null }
-) {
+): Promise<WhatsAppSendResponse | null> {
   const phoneId = resolvePhoneNumberId(opts?.phoneNumberId ?? null, to);
   if (!phoneId) {
     throw new Error(
@@ -328,7 +346,7 @@ export async function sendCatalogMessage(
     payload.interactive.action.parameters.thumbnail_product_retailer_id = thumb;
   }
 
-  await apiFetch(`${phoneId}/messages`, payload);
+  return (await apiFetch(`${phoneId}/messages`, payload)) as WhatsAppSendResponse | null;
 }
 
 /**
@@ -340,7 +358,7 @@ export async function sendCtaUrlMessage(
   displayText: string,
   url: string,
   opts?: { phoneNumberId?: string | null }
-) {
+): Promise<WhatsAppSendResponse | null> {
   const phoneId = resolvePhoneNumberId(opts?.phoneNumberId ?? null, to);
   if (!phoneId) {
     throw new Error(
@@ -366,7 +384,7 @@ export async function sendCtaUrlMessage(
     },
   };
 
-  await apiFetch(`${phoneId}/messages`, payload);
+  return (await apiFetch(`${phoneId}/messages`, payload)) as WhatsAppSendResponse | null;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -707,7 +725,7 @@ export async function sendMediaById(
   mediaId: string,
   caption?: string,
   opts?: { phoneNumberId?: string | null }
-) {
+): Promise<WhatsAppSendResponse | null> {
   const phoneId = resolvePhoneNumberId(opts?.phoneNumberId ?? null, to);
   if (!phoneId) {
     throw new Error(
@@ -729,7 +747,50 @@ export async function sendMediaById(
     payload[kind].caption = caption;
   }
 
-  await apiFetch(`${phoneId}/messages`, payload);
+  return (await apiFetch(`${phoneId}/messages`, payload)) as WhatsAppSendResponse | null;
+}
+
+export async function sendTemplateMessage(args: {
+  to: string;
+  templateName: string;
+  languageCode: string;
+  bodyParameters?: string[];
+  phoneNumberId?: string | null;
+}): Promise<WhatsAppSendResponse | null> {
+  const phoneId = resolvePhoneNumberId(args.phoneNumberId ?? null, args.to);
+  if (!phoneId) {
+    throw new Error(
+      "[whatsapp] PHONE_NUMBER_ID missing; cannot send template message. Set PHONE_NUMBER_ID in Setup or .env."
+    );
+  }
+
+  const params = (args.bodyParameters ?? [])
+    .map((value) => String(value ?? "").trim())
+    .filter((value) => value.length > 0)
+    .map((text) => ({ type: "text", text }));
+
+  const payload: any = {
+    messaging_product: "whatsapp",
+    to: args.to,
+    type: "template",
+    template: {
+      name: args.templateName,
+      language: {
+        code: args.languageCode,
+      },
+    },
+  };
+
+  if (params.length > 0) {
+    payload.template.components = [
+      {
+        type: "body",
+        parameters: params,
+      },
+    ];
+  }
+
+  return (await apiFetch(`${phoneId}/messages`, payload)) as WhatsAppSendResponse | null;
 }
 
 export type WhatsAppBusinessProfile = {

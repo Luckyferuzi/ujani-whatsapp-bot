@@ -1,87 +1,184 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { post } from "@/lib/api";
+import { api } from "@/lib/api";
 import { toast } from "sonner";
-import { Alert, Badge, Button, Card, EmptyState, Select, Textarea } from "@/components/ui";
+import { Alert, Badge, Button, Card, EmptyState, Select } from "@/components/ui";
 
-type BroadcastResponse = {
-  ok: boolean;
-  total?: number;
-  sent: number;
-  failed: number;
-  within_hours?: number | null;
+type AudienceKey =
+  | "marketing_eligible"
+  | "previous_buyers"
+  | "recent_customers"
+  | "all_previous_chatters";
+
+type TemplateField = {
+  key: string;
+  label: string;
+  required: boolean;
 };
 
-type Audience = "24h" | "all";
+type TemplateOption = {
+  key: string;
+  template_name: string;
+  language_code: string;
+  category: string;
+  enabled: boolean;
+  parameter_meta: TemplateField[];
+};
+
+type AudienceOption = {
+  key: AudienceKey;
+  label: string;
+  description: string;
+  advanced: boolean;
+};
+
+type BroadcastOptionsResponse = {
+  audiences: AudienceOption[];
+  templates: TemplateOption[];
+};
+
+type BroadcastPreview = {
+  audience: AudienceKey;
+  label: string;
+  recipient_count: number;
+  excluded_count: number;
+  sample_recipients: Array<{
+    customer_id: number;
+    customer_name: string | null;
+    customer_phone: string | null;
+    conversation_id: number;
+    last_interaction_at: string | null;
+  }>;
+};
+
+type BroadcastResult = {
+  ok: boolean;
+  total: number;
+  audience: AudienceKey;
+  mode: "test" | "send";
+  excluded_count: number;
+  sent: number;
+  failed: number;
+  errors?: Array<{
+    conversation_id: number | null;
+    customer_name: string | null;
+    error: string;
+  }>;
+};
+
+function formatCategory(category: string) {
+  if (category === "payment_reminder") return "Payment";
+  if (category === "order_followup") return "Order";
+  return "Restock";
+}
+
+function formatDate(value?: string | null) {
+  if (!value) return "No recent interaction";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString("sw-TZ", {
+    month: "short",
+    day: "2-digit",
+  });
+}
 
 export default function BroadcastPage() {
-  const [message, setMessage] = useState("");
-  const [audience, setAudience] = useState<Audience>("24h");
-  const [confirmOptIn, setConfirmOptIn] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
-  const [result, setResult] = useState<BroadcastResponse | null>(null);
+  const [options, setOptions] = useState<BroadcastOptionsResponse | null>(null);
+  const [audience, setAudience] = useState<AudienceKey>("marketing_eligible");
+  const [templateKey, setTemplateKey] = useState("");
+  const [params, setParams] = useState<Record<string, string>>({});
+  const [preview, setPreview] = useState<BroadcastPreview | null>(null);
+  const [result, setResult] = useState<BroadcastResult | null>(null);
 
-  const maxLength = 1000;
-  const remaining = maxLength - message.length;
+  const selectedTemplate = useMemo(
+    () => options?.templates.find((item) => item.key === templateKey) ?? null,
+    [options, templateKey]
+  );
 
-  const canSubmit = useMemo(() => {
-    return message.trim().length > 0 && confirmOptIn;
-  }, [message, confirmOptIn]);
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
 
-  const audienceMeta = useMemo(() => {
-    if (audience === "24h") {
-      return {
-        title: "Recent customers",
-        copy: "Safer delivery window for customers who have messaged within the last 24 hours.",
-        tone: "accent" as const,
-      };
-    }
+    void api<BroadcastOptionsResponse>("/api/broadcast/options")
+      .then((data) => {
+        if (cancelled) return;
+        setOptions(data);
+        setAudience((data.audiences[0]?.key ?? "marketing_eligible") as AudienceKey);
+        setTemplateKey(data.templates[0]?.key ?? "");
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        console.error("Failed to load broadcast options", err);
+        toast.error("Unable to load broadcast options.");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
 
-    return {
-      title: "All-time audience",
-      copy: "Higher failure risk for customers outside the WhatsApp service window.",
-      tone: "warning" as const,
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!audience) return;
+    let cancelled = false;
+    void api<BroadcastPreview>(`/api/broadcast/audience-preview?audience=${encodeURIComponent(audience)}`)
+      .then((data) => {
+        if (!cancelled) setPreview(data);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        console.error("Failed to load audience preview", err);
+        setPreview(null);
+      });
+
+    return () => {
+      cancelled = true;
     };
   }, [audience]);
 
-  const previewText = useMemo(() => {
-    const trimmed = message.trim();
-    return trimmed || "Write a service update to preview the outgoing message here.";
-  }, [message]);
+  useEffect(() => {
+    if (!selectedTemplate) return;
+    setParams((current) => {
+      const next: Record<string, string> = {};
+      for (const field of selectedTemplate.parameter_meta) {
+        next[field.key] = current[field.key] ?? "";
+      }
+      return next;
+    });
+  }, [selectedTemplate?.key]);
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  const canSend = Boolean(selectedTemplate && preview && preview.recipient_count > 0);
 
-    const trimmed = message.trim();
-    if (!trimmed) {
-      toast.error("Write a message before sending.");
-      return;
-    }
-
-    if (!confirmOptIn) {
-      toast.error("Confirm that recipients are eligible for this message.");
+  async function handleBroadcast(mode: "test" | "send") {
+    if (!selectedTemplate) {
+      toast.error("Choose a template before sending.");
       return;
     }
 
     setSending(true);
     setResult(null);
-
     try {
-      const payload: { message: string; within_hours?: number } = { message: trimmed };
-      if (audience === "24h") payload.within_hours = 24;
-
-      const res = await post<BroadcastResponse>("/api/customers/broadcast", payload);
-      setResult(res);
-      toast.success("Broadcast sent", {
-        description: `Sent ${res.sent}. Failed ${res.failed}.`,
+      const res = await api<BroadcastResult>("/api/customers/broadcast", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          audience,
+          templateKey: selectedTemplate.key,
+          params,
+          mode,
+        }),
       });
+      setResult(res);
+      toast.success(mode === "test" ? "Test send complete" : "Broadcast complete");
     } catch (err: any) {
       console.error("Broadcast failed", err);
-      toast.error("Broadcast failed", {
-        description: err?.message ?? "Please try again shortly.",
-      });
+      toast.error(err?.message ?? "Broadcast failed");
     } finally {
       setSending(false);
     }
@@ -91,19 +188,19 @@ export default function BroadcastPage() {
     <div className="broadcast-page">
       <section className="broadcast-hero ops-masthead">
         <div className="broadcast-hero__copy ops-masthead__main">
-          <div className="broadcast-hero__kicker ops-masthead__eyebrow">Outbound control</div>
-          <div className="broadcast-hero__title ops-masthead__title">Broadcasts</div>
+          <div className="broadcast-hero__kicker ops-masthead__eyebrow">Segmented outreach</div>
+          <div className="broadcast-hero__title ops-masthead__title">Template broadcasts</div>
           <div className="broadcast-hero__text ops-masthead__description">
-            Send careful service updates to recent customers with clear audience scope,
-            message preview, and delivery results.
+            Select an audience first, choose an approved template, preview who will receive it,
+            then send with clear result totals.
           </div>
         </div>
         <div className="broadcast-hero__actions ops-masthead__actions">
-          <Link href="/inbox" className="ui-button ui-button--secondary">
-            Open inbox
+          <Link href="/followups" className="ui-button ui-button--secondary">
+            Open follow-ups
           </Link>
-          <Link href="/" className="ui-button ui-button--ghost">
-            Command Center
+          <Link href="/inbox" className="ui-button ui-button--ghost">
+            Open inbox
           </Link>
         </div>
       </section>
@@ -112,114 +209,141 @@ export default function BroadcastPage() {
         <Card className="broadcast-panel" padding="lg">
           <div className="broadcast-panel__head ops-panel-head">
             <div>
-              <div className="broadcast-panel__title">Campaign setup</div>
+              <div className="broadcast-panel__title">Broadcast setup</div>
               <div className="broadcast-panel__copy">
-                Keep the message short, practical, and clearly service-oriented.
+                Bulk sends now use approved templates only. Raw free-text is no longer the primary path.
               </div>
             </div>
-            <Badge tone={audienceMeta.tone}>{audienceMeta.title}</Badge>
+            {selectedTemplate ? <Badge tone="accent">{formatCategory(selectedTemplate.category)}</Badge> : null}
           </div>
 
-          <form className="broadcast-form" onSubmit={(e) => void handleSubmit(e)}>
-            <div className="broadcast-field">
-              <label className="broadcast-label" htmlFor="broadcast-audience">
-                Audience
-              </label>
-              <Select
-                id="broadcast-audience"
-                value={audience}
-                onChange={(e) => setAudience(e.target.value as Audience)}
-                disabled={sending}
-              >
-                <option value="24h">Recent customers from the last 24 hours</option>
-                <option value="all">All-time customer audience</option>
-              </Select>
-            </div>
+          {loading || !options ? (
+            <div className="broadcast-note">Loading broadcast options…</div>
+          ) : (
+            <div className="broadcast-form">
+              <div className="broadcast-field">
+                <label className="broadcast-label" htmlFor="broadcast-audience">
+                  Audience
+                </label>
+                <Select
+                  id="broadcast-audience"
+                  value={audience}
+                  onChange={(e) => setAudience(e.target.value as AudienceKey)}
+                  disabled={sending}
+                >
+                  {options.audiences.map((item) => (
+                    <option key={item.key} value={item.key}>
+                      {item.label}{item.advanced ? " (Advanced)" : ""}
+                    </option>
+                  ))}
+                </Select>
+              </div>
 
-            <Alert tone={audienceMeta.tone} title={audienceMeta.title} description={audienceMeta.copy} />
+              <div className="broadcast-field">
+                <label className="broadcast-label" htmlFor="broadcast-template">
+                  Template
+                </label>
+                <Select
+                  id="broadcast-template"
+                  value={templateKey}
+                  onChange={(e) => setTemplateKey(e.target.value)}
+                  disabled={sending}
+                >
+                  {options.templates.map((item) => (
+                    <option key={item.key} value={item.key}>
+                      {item.template_name} · {item.language_code}
+                    </option>
+                  ))}
+                </Select>
+              </div>
 
-            <div className="broadcast-field">
-              <label className="broadcast-label" htmlFor="broadcast-message">
-                Message
-              </label>
-              <Textarea
-                id="broadcast-message"
-                className="broadcast-textarea"
-                value={message}
-                onChange={(e) => setMessage(e.target.value)}
-                maxLength={maxLength}
-                placeholder="Example: Hello, we need to confirm your order today. Reply YES to continue or NO to cancel."
-                disabled={sending}
-              />
-              <div className="broadcast-meta-row">
-                <div className="broadcast-note">
-                  Best results usually come from 1 to 3 short lines.
+              {selectedTemplate?.parameter_meta.length ? (
+                <div className="broadcast-form">
+                  {selectedTemplate.parameter_meta.map((field) => (
+                    <div key={field.key} className="broadcast-field">
+                      <label className="broadcast-label">{field.label}</label>
+                      <input
+                        className="ui-input"
+                        value={params[field.key] ?? ""}
+                        onChange={(e) =>
+                          setParams((current) => ({
+                            ...current,
+                            [field.key]: e.target.value,
+                          }))
+                        }
+                        disabled={sending}
+                      />
+                    </div>
+                  ))}
                 </div>
-                <div className="broadcast-count ui-tabular-nums">{remaining} characters</div>
-              </div>
-            </div>
+              ) : null}
 
-            <label className="broadcast-check">
-              <input
-                type="checkbox"
-                checked={confirmOptIn}
-                onChange={(e) => setConfirmOptIn(e.target.checked)}
-                disabled={sending}
+              <Alert
+                tone={audience === "all_previous_chatters" ? "warning" : "accent"}
+                title={preview ? `${preview.recipient_count} recipients selected` : "Previewing audience"}
+                description={
+                  preview
+                    ? `${preview.excluded_count} recipients excluded from the broader chatter pool.`
+                    : "Loading audience preview…"
+                }
               />
-              <span>
-                I confirm this is a service message and the recipients are valid for outreach.
-              </span>
-            </label>
 
-            <div className="broadcast-form__footer">
-              <div className="broadcast-form__hint">
-                Review the preview and audience before sending.
+              <div className="broadcast-form__footer">
+                <div className="broadcast-form__hint">
+                  Audience must be explicit before any template is sent.
+                </div>
+                <div className="broadcast-hero__actions">
+                  <Button variant="secondary" disabled={!canSend} loading={sending} onClick={() => void handleBroadcast("test")}>
+                    Send test
+                  </Button>
+                  <Button disabled={!canSend} loading={sending} onClick={() => void handleBroadcast("send")}>
+                    Send now
+                  </Button>
+                </div>
               </div>
-              <Button type="submit" loading={sending} disabled={!canSubmit}>
-                {sending ? "Sending..." : "Send broadcast"}
-              </Button>
             </div>
-          </form>
+          )}
         </Card>
 
         <div className="broadcast-side">
           <Card className="broadcast-panel" padding="lg">
             <div className="broadcast-panel__head ops-panel-head">
               <div>
-                <div className="broadcast-panel__title">Message preview</div>
+                <div className="broadcast-panel__title">Audience preview</div>
                 <div className="broadcast-panel__copy">
-                  How the outgoing update will read inside the customer thread.
+                  Preview count and a few sample recipients before sending.
                 </div>
               </div>
-              <Badge tone="neutral">WhatsApp</Badge>
             </div>
 
-            <div className="broadcast-preview">
-              <div className="broadcast-preview__bubble broadcast-preview__bubble--system">
-                Service update preview
+            {!preview ? (
+              <EmptyState eyebrow="Audience" title="No audience preview yet." description="Choose an audience to load recipient counts." />
+            ) : (
+              <div className="broadcast-preview">
+                <div className="broadcast-preview__bubble broadcast-preview__bubble--system">
+                  {preview.label}: {preview.recipient_count} recipients
+                </div>
+                {preview.sample_recipients.map((item) => (
+                  <div key={item.conversation_id} className="broadcast-preview__bubble">
+                    {(item.customer_name || item.customer_phone || "Customer") + " · " + formatDate(item.last_interaction_at)}
+                  </div>
+                ))}
               </div>
-              <div className="broadcast-preview__bubble broadcast-preview__bubble--out">
-                {previewText}
-              </div>
-            </div>
+            )}
           </Card>
 
           <Card className="broadcast-panel" padding="lg">
             <div className="broadcast-panel__head ops-panel-head">
               <div>
-                <div className="broadcast-panel__title">Delivery result</div>
+                <div className="broadcast-panel__title">Result summary</div>
                 <div className="broadcast-panel__copy">
-                  Sent and failed counts from the latest broadcast attempt.
+                  Sent, failed, and excluded counts from the latest run.
                 </div>
               </div>
             </div>
 
             {!result ? (
-              <EmptyState
-                eyebrow="Results"
-                title="No broadcast sent yet."
-                description="Run a broadcast to see delivery totals here."
-              />
+              <EmptyState eyebrow="Results" title="No send yet." description="Run a test or full broadcast to see results here." />
             ) : (
               <div className="broadcast-results">
                 <div className="broadcast-result-card">
@@ -231,11 +355,12 @@ export default function BroadcastPage() {
                   <div className="broadcast-result-card__value ui-tabular-nums">{result.failed}</div>
                 </div>
                 <div className="broadcast-result-card">
-                  <div className="broadcast-result-card__label">Total</div>
-                  <div className="broadcast-result-card__value ui-tabular-nums">
-                    {typeof result.total === "number" ? result.total : "-"}
-                  </div>
+                  <div className="broadcast-result-card__label">Excluded</div>
+                  <div className="broadcast-result-card__value ui-tabular-nums">{result.excluded_count}</div>
                 </div>
+                {result.errors?.length ? (
+                  <Alert tone="warning" title="Some recipients failed" description={result.errors.map((item) => `${item.customer_name || "Customer"}: ${item.error}`).join(" | ")} />
+                ) : null}
               </div>
             )}
           </Card>

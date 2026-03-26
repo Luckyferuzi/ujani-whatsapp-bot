@@ -121,6 +121,7 @@ export function createWebhookProcessor(deps: ProcessorDeps) {
           conversation_id: convoId,
           wa_message_id: emsg?.id ?? null,
           direction: "out",
+          message_kind: "freeform",
           type,
           body,
           status: "delivered",
@@ -133,6 +134,11 @@ export function createWebhookProcessor(deps: ProcessorDeps) {
           "type",
           "body",
           "status",
+          "message_kind",
+          "status_reason",
+          "error_code",
+          "error_title",
+          "error_details",
           "created_at",
         ]);
 

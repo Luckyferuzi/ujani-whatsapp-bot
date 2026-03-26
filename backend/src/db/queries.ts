@@ -790,6 +790,7 @@ export async function insertInboundMessage(
       conversation_id: conversationId,
       wa_message_id: waMessageId ?? null,
       direction: "inbound",
+      message_kind: "freeform",
       type,
       body,
       status: "delivered"
@@ -801,6 +802,14 @@ export async function insertInboundMessage(
       "type",
       "body",
       "status",
+      "message_kind",
+      "status_reason",
+      "error_code",
+      "error_title",
+      "error_details",
+      "template_name",
+      "template_language",
+      "wa_message_id",
       "created_at",
     ]);
 
@@ -811,7 +820,23 @@ export async function findMessageByWaMessageId(waMessageId: string) {
   if (!waMessageId) return null;
   const row = await db("messages")
     .where({ wa_message_id: waMessageId })
-    .select("id", "conversation_id", "wa_message_id", "direction", "type", "body", "status", "created_at")
+    .select(
+      "id",
+      "conversation_id",
+      "wa_message_id",
+      "direction",
+      "type",
+      "body",
+      "status",
+      "message_kind",
+      "status_reason",
+      "error_code",
+      "error_title",
+      "error_details",
+      "template_name",
+      "template_language",
+      "created_at"
+    )
     .first();
   return row ?? null;
 }
@@ -819,26 +844,156 @@ export async function findMessageByWaMessageId(waMessageId: string) {
 export async function insertOutboundMessage(
   conversationId: number,
   type: string,
-  body: string
+  body: string,
+  options?: {
+    waMessageId?: string | null;
+    status?: string | null;
+    messageKind?: string | null;
+    statusReason?: string | null;
+    errorCode?: string | null;
+    errorTitle?: string | null;
+    errorDetails?: string | null;
+    templateName?: string | null;
+    templateLanguage?: string | null;
+  }
 ) {
   const [inserted] = await db("messages")
     .insert({
       conversation_id: conversationId,
+      wa_message_id: options?.waMessageId ?? null,
       direction: "out",
       type,
       body,
+      status: options?.status ?? "pending",
+      message_kind: options?.messageKind ?? "freeform",
+      status_reason: options?.statusReason ?? null,
+      error_code: options?.errorCode ?? null,
+      error_title: options?.errorTitle ?? null,
+      error_details: options?.errorDetails ?? null,
+      template_name: options?.templateName ?? null,
+      template_language: options?.templateLanguage ?? null,
     })
     .returning([
       "id",
       "conversation_id",
+      "wa_message_id",
       "direction",
       "type",
       "body",
       "status",
+      "message_kind",
+      "status_reason",
+      "error_code",
+      "error_title",
+      "error_details",
+      "template_name",
+      "template_language",
       "created_at",
     ]);
 
   return inserted;
+}
+
+export async function getConversationLastInboundAt(conversationId: number): Promise<string | null> {
+  const row = await db("conversations")
+    .where({ id: conversationId })
+    .select("last_user_message_at")
+    .first();
+
+  return (row?.last_user_message_at as string | null | undefined) ?? null;
+}
+
+export async function updateMessageTransportState(
+  messageId: number,
+  input: {
+    waMessageId?: string | null;
+    status?: string | null;
+    messageKind?: string | null;
+    statusReason?: string | null;
+    errorCode?: string | null;
+    errorTitle?: string | null;
+    errorDetails?: string | null;
+    templateName?: string | null;
+    templateLanguage?: string | null;
+  }
+) {
+  const patch: Record<string, unknown> = {};
+
+  if (input.waMessageId !== undefined) patch.wa_message_id = input.waMessageId;
+  if (input.status !== undefined) patch.status = input.status;
+  if (input.messageKind !== undefined) patch.message_kind = input.messageKind;
+  if (input.statusReason !== undefined) patch.status_reason = input.statusReason;
+  if (input.errorCode !== undefined) patch.error_code = input.errorCode;
+  if (input.errorTitle !== undefined) patch.error_title = input.errorTitle;
+  if (input.errorDetails !== undefined) patch.error_details = input.errorDetails;
+  if (input.templateName !== undefined) patch.template_name = input.templateName;
+  if (input.templateLanguage !== undefined) patch.template_language = input.templateLanguage;
+
+  const [updated] = await db("messages")
+    .where({ id: messageId })
+    .update(patch)
+    .returning([
+      "id",
+      "conversation_id",
+      "wa_message_id",
+      "direction",
+      "type",
+      "body",
+      "status",
+      "message_kind",
+      "status_reason",
+      "error_code",
+      "error_title",
+      "error_details",
+      "template_name",
+      "template_language",
+      "created_at",
+    ]);
+
+  return updated ?? null;
+}
+
+export async function updateMessageTransportStateByWaMessageId(
+  waMessageId: string,
+  input: {
+    status?: string | null;
+    statusReason?: string | null;
+    errorCode?: string | null;
+    errorTitle?: string | null;
+    errorDetails?: string | null;
+  }
+) {
+  if (!waMessageId) return null;
+
+  const patch: Record<string, unknown> = {};
+  if (input.status !== undefined) patch.status = input.status;
+  if (input.statusReason !== undefined) patch.status_reason = input.statusReason;
+  if (input.errorCode !== undefined) patch.error_code = input.errorCode;
+  if (input.errorTitle !== undefined) patch.error_title = input.errorTitle;
+  if (input.errorDetails !== undefined) patch.error_details = input.errorDetails;
+
+  const [updated] = await db("messages")
+    .where({ wa_message_id: waMessageId })
+    .update(patch)
+    .returning([
+      "id",
+      "conversation_id",
+      "wa_message_id",
+      "direction",
+      "type",
+      "body",
+      "status",
+      "message_kind",
+      "status_reason",
+      "error_code",
+      "error_title",
+      "error_details",
+      "template_name",
+      "template_language",
+      "created_at",
+    ]);
+
+  return updated ?? null;
 }
 
 export async function updateConversationLastUserMessageAt(
@@ -907,10 +1062,18 @@ export async function listMessages(conversationId: number, limit = 500) {
     .select(
       "id",
       "conversation_id",
+      "wa_message_id",
       "direction",
       "type",
       "body",
       "status",
+      "message_kind",
+      "status_reason",
+      "error_code",
+      "error_title",
+      "error_details",
+      "template_name",
+      "template_language",
       "created_at"
     )
     .orderBy("created_at", "asc")

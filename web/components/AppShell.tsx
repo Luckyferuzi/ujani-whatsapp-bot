@@ -36,11 +36,20 @@ function getPageMeta(pathname: string | null) {
       showPageHeader: false,
     };
   }
+  if (p.startsWith("/followups")) {
+    return {
+      title: "Follow-ups",
+      section: "Operations",
+      description: "Operational queues for payment reminders, order action, and restock outreach.",
+      immersive: false,
+      showPageHeader: false,
+    };
+  }
   if (p.startsWith("/broadcast")) {
     return {
       title: "Broadcasts",
       section: "Commerce",
-      description: "Controlled outbound updates for recent WhatsApp customers.",
+      description: "Segmented template outreach for selected WhatsApp audiences.",
       immersive: false,
       showPageHeader: false,
     };

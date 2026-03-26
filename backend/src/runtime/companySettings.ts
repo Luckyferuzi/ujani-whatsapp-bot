@@ -25,6 +25,21 @@ export type PaymentMethodConfig = {
   value: string;
 };
 
+export type TemplateParameterMeta = {
+  key: string;
+  label: string;
+  required: boolean;
+};
+
+export type InboxTemplateConfig = {
+  key: string;
+  template_name: string;
+  language_code: string;
+  category: "payment_reminder" | "order_followup" | "restock_reengagement";
+  enabled: boolean;
+  parameter_meta: TemplateParameterMeta[];
+};
+
 export type BusinessTextOverrideKey =
   | "faq.intro"
   | "order.preparing_message"
@@ -116,6 +131,43 @@ export const DEFAULT_COMPANY_SETTINGS: CompanySettings = {
 
   is_setup_complete: false,
 };
+
+export const DEFAULT_INBOX_TEMPLATES: InboxTemplateConfig[] = [
+  {
+    key: "payment_reminder_sw",
+    template_name: "payment_reminder_sw",
+    language_code: "sw",
+    category: "payment_reminder",
+    enabled: true,
+    parameter_meta: [
+      { key: "customer_name", label: "Customer name", required: true },
+      { key: "order_code", label: "Order code", required: true },
+      { key: "amount_due", label: "Amount due", required: true },
+    ],
+  },
+  {
+    key: "order_followup_sw",
+    template_name: "order_followup_sw",
+    language_code: "sw",
+    category: "order_followup",
+    enabled: true,
+    parameter_meta: [
+      { key: "customer_name", label: "Customer name", required: true },
+      { key: "order_code", label: "Order code", required: true },
+    ],
+  },
+  {
+    key: "restock_reengagement_sw",
+    template_name: "restock_reengagement_sw",
+    language_code: "sw",
+    category: "restock_reengagement",
+    enabled: true,
+    parameter_meta: [
+      { key: "customer_name", label: "Customer name", required: true },
+      { key: "product_name", label: "Product name", required: false },
+    ],
+  },
+];
 
 let cached: CompanySettings = { ...DEFAULT_COMPANY_SETTINGS };
 
@@ -316,6 +368,50 @@ export function getCatalogEnabledEffective(): boolean {
 
   const raw = String(process.env.CATALOG_ENABLED ?? "false").toLowerCase().trim();
   return raw === "1" || raw === "true" || raw === "yes" || raw === "on";
+}
+
+function normalizeTemplateParameterMeta(
+  value: TemplateParameterMeta[] | null | undefined
+): TemplateParameterMeta[] {
+  return (value ?? [])
+    .map((item) => ({
+      key: String(item?.key ?? "").trim(),
+      label: String(item?.label ?? "").trim() || String(item?.key ?? "").trim(),
+      required: item?.required !== false,
+    }))
+    .filter((item) => item.key.length > 0);
+}
+
+function normalizeInboxTemplateConfig(
+  value: InboxTemplateConfig,
+  fallback: InboxTemplateConfig
+): InboxTemplateConfig {
+  return {
+    key: String(value?.key ?? fallback.key).trim() || fallback.key,
+    template_name:
+      String(value?.template_name ?? fallback.template_name).trim() || fallback.template_name,
+    language_code:
+      String(value?.language_code ?? fallback.language_code).trim() || fallback.language_code,
+    category: (value?.category ?? fallback.category) as InboxTemplateConfig["category"],
+    enabled: value?.enabled !== false,
+    parameter_meta: normalizeTemplateParameterMeta(value?.parameter_meta ?? fallback.parameter_meta),
+  };
+}
+
+export async function getInboxTemplateRegistry(): Promise<InboxTemplateConfig[]> {
+  const stored = await getJsonSetting<InboxTemplateConfig[] | null>("whatsapp_templates", null);
+  const source = Array.isArray(stored) && stored.length > 0 ? stored : DEFAULT_INBOX_TEMPLATES;
+
+  return source.map((item, index) =>
+    normalizeInboxTemplateConfig(item, DEFAULT_INBOX_TEMPLATES[index] ?? item)
+  );
+}
+
+export async function getInboxTemplateByKey(templateKey: string): Promise<InboxTemplateConfig | null> {
+  const key = String(templateKey ?? "").trim();
+  if (!key) return null;
+  const registry = await getInboxTemplateRegistry();
+  return registry.find((item) => item.key === key) ?? null;
 }
 
 export function getEmbeddedConfigIdEffective(): string | null {

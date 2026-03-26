@@ -3,16 +3,18 @@
 import {
   Fragment,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ChangeEvent,
   type KeyboardEvent,
   type FormEvent,
 } from "react";
-import { api, API } from "@/lib/api";
+import { api, API, type ApiError } from "@/lib/api";
 import { formatPhonePretty } from "@/lib/phone";
 import { socket } from "@/lib/socket";
 import type { Convo } from "./ConversationList";
+import TemplateSendModal from "./TemplateSendModal";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { EmptyState, ThreadSkeleton } from "@/components/ui";
@@ -49,14 +51,23 @@ function formatDayLabel(iso: string) {
 }
 
 const GROUP_GAP_MINUTES = 6;
+const FREE_REPLY_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 type Msg = {
   id: string | number;
   conversation_id: string | number;
+  wa_message_id?: string | null;
   direction: "in" | "inbound" | "out" | "outbound";
   type: string;
   body: string | null;
   status?: string | null;
+  message_kind?: string | null;
+  status_reason?: string | null;
+  error_code?: string | null;
+  error_title?: string | null;
+  error_details?: string | null;
+  template_name?: string | null;
+  template_language?: string | null;
   created_at: string;
 };
 
@@ -278,8 +289,93 @@ function formatInteractiveDisplay(id: string, products: Record<string, string>):
 
 type Role = "customer" | "agent" | "bot";
 
+function isInboundMessage(msg: Pick<Msg, "direction">) {
+  return msg.direction === "in" || msg.direction === "inbound";
+}
+
+function isOutboundMessage(msg: Pick<Msg, "direction">) {
+  return !isInboundMessage(msg);
+}
+
+function getFreeReplyState(lastInboundAt?: string | null, now = Date.now()) {
+  if (!lastInboundAt) {
+    return {
+      label: "Template required",
+      className: "thread-state-badge thread-state-badge--closed",
+      allowed: false,
+      expiresAt: null as string | null,
+    };
+  }
+
+  const openedAt = new Date(lastInboundAt).getTime();
+  if (!Number.isFinite(openedAt)) {
+    return {
+      label: "Template required",
+      className: "thread-state-badge thread-state-badge--closed",
+      allowed: false,
+      expiresAt: null as string | null,
+    };
+  }
+
+  const expiresAtMs = openedAt + FREE_REPLY_WINDOW_MS;
+  if (expiresAtMs > now) {
+    return {
+      label: "Free reply open",
+      className: "thread-state-badge thread-state-badge--open",
+      allowed: true,
+      expiresAt: new Date(expiresAtMs).toISOString(),
+    };
+  }
+
+  return {
+    label: "Template required",
+    className: "thread-state-badge thread-state-badge--closed",
+    allowed: false,
+    expiresAt: new Date(expiresAtMs).toISOString(),
+  };
+}
+
+function describeMessageTransport(msg: Msg) {
+  const status = String(msg.status ?? "").toLowerCase();
+
+  if (status === "failed") {
+    return { label: "Failed", className: "thread-ticks thread-ticks--failed" };
+  }
+  if (status === "read") {
+    return { label: "Read", className: "thread-ticks" };
+  }
+  if (status === "delivered") {
+    return { label: "Delivered", className: "thread-ticks thread-ticks--delivered" };
+  }
+  if (status === "sent") {
+    return { label: "Sent", className: "thread-ticks thread-ticks--sent" };
+  }
+
+  return { label: "Sending", className: "thread-ticks thread-ticks--pending" };
+}
+
+function describeFailure(msg: Msg) {
+  if ((msg.status_reason ?? "").toLowerCase() === "template_required") {
+    return "Customer is outside WhatsApp's free reply window. A template message is required before another manual text can be sent.";
+  }
+
+  if (msg.error_details) return msg.error_details;
+  if (msg.error_title) return msg.error_title;
+  return "WhatsApp could not deliver this message.";
+}
+
+function formatTemplateDisplayName(value?: string | null) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "Template";
+  return raw
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
 function getRole(msg: Msg): Role {
-  const inbound = msg.direction === "in" || msg.direction === "inbound";
+  const inbound = isInboundMessage(msg);
   if (inbound) return "customer";
 
   const body = msg.body ?? "";
@@ -469,6 +565,8 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
   const [toggling, setToggling] = useState(false);
   const [sending, setSending] = useState(false);
   const [showBotModeHint, setShowBotModeHint] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
+  const [templateModalOpen, setTemplateModalOpen] = useState(false);
   const [productNames, setProductNames] = useState<Record<string, string>>({});
   const [activeMediaActionsId, setActiveMediaActionsId] = useState<string | number | null>(null);
 
@@ -490,6 +588,14 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
     if (!agentAllowed && e.key !== "Tab") {
       e.preventDefault();
       revealBotModeHint();
+      return;
+    }
+
+    if (composerBlockedByWindow && e.key !== "Tab") {
+      e.preventDefault();
+      setSendError(
+        "Customer is outside WhatsApp's free reply window. A template message will be required before another manual text can be sent."
+      );
       return;
     }
 
@@ -565,11 +671,22 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
       revealBotModeHint();
       return;
     }
+
+    if (composerBlockedByWindow) {
+      setSendError(
+        "Customer is outside WhatsApp's free reply window. A template message will be required before another manual text can be sent."
+      );
+      return;
+    }
     fileInputRef.current?.click();
   }
 
   function revealBotModeHint() {
     setShowBotModeHint(true);
+  }
+
+  async function handleTemplateSent() {
+    await loadMessages({ preserveExisting: true });
   }
 
   useEffect(() => {
@@ -656,6 +773,8 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
     setText("");
     setActiveMediaActionsId(null);
     setShowBotModeHint(false);
+    setSendError(null);
+    setTemplateModalOpen(false);
     initialScrolledRef.current = false;
     setIsAtBottom(true);
     void loadMessages({ preserveExisting: false });
@@ -734,6 +853,7 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
     e.preventDefault();
     const value = text.trim();
     if (!value) return;
+    setSendError(null);
 
     if (!agentAllowed) {
       revealBotModeHint();
@@ -771,13 +891,34 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
       console.error("Failed to send message", err);
       setMessages((prev) => prev.filter((m) => String(m.id) !== optimisticId));
       setText(value);
-      toast.error("Unable to send the message right now.");
+      const apiErr = err as ApiError;
+      if (apiErr.code === "template_required") {
+        setSendError(
+          "Customer is outside WhatsApp's free reply window. A template message will be required before another manual text can be sent."
+        );
+        await loadMessages({ preserveExisting: true });
+      } else {
+        toast.error("Unable to send the message right now.");
+      }
     } finally {
       setSending(false);
     }
   }
 
   const title = convo.name || formatPhonePretty(convo.phone);
+  const freeReplyState = useMemo(
+    () => getFreeReplyState(convo.last_user_message_at),
+    [convo.last_user_message_at]
+  );
+  const latestOutbound = useMemo(
+    () => [...messages].reverse().find((msg) => isOutboundMessage(msg)) ?? null,
+    [messages]
+  );
+  const latestFailedOutbound =
+    latestOutbound && String(latestOutbound.status ?? "").toLowerCase() === "failed"
+      ? latestOutbound
+      : null;
+  const composerBlockedByWindow = agentAllowed && !freeReplyState.allowed;
 
   return (
     <div className="thread">
@@ -795,6 +936,7 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
             >
               {agentAllowed ? "Human handover" : "Bot managed"}
             </span>
+            <span className={freeReplyState.className}>{freeReplyState.label}</span>
           </div>
           <div className="thread-subtitle">
             {formatPhonePretty(convo.phone)}
@@ -827,6 +969,15 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
                 Summary
               </button>
             ) : null}
+            {composerBlockedByWindow ? (
+              <button
+                type="button"
+                className="thread-header-action"
+                onClick={() => setTemplateModalOpen(true)}
+              >
+                Use template
+              </button>
+            ) : null}
           </div>
         </div>
         <button
@@ -847,6 +998,13 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
           </span>
         </button>
       </div>
+
+      {latestFailedOutbound ? (
+        <div className="thread-failure-banner" role="status" aria-live="polite">
+          <div className="thread-failure-banner-title">Latest outbound message failed</div>
+          <div className="thread-failure-banner-copy">{describeFailure(latestFailedOutbound)}</div>
+        </div>
+      ) : null}
 
       <div className="thread-body">
         {loading && messages.length === 0 ? (
@@ -898,14 +1056,17 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
               const showMeta = !groupedWithNext;
               const showBotLabel = role === "bot" && !groupedWithPrev;
               const isFirstUnread = idx === oldestUnreadIndex;
-              const isSending = outbound && m.status === "sending";
+              const transport = outbound ? describeMessageTransport(m) : null;
+              const isSending = outbound && (m.status === "sending" || m.status === "pending");
+              const isFailed = outbound && String(m.status ?? "").toLowerCase() === "failed";
 
               const bubbleClass =
                 "thread-bubble" +
                 (role === "bot" ? " thread-bubble--bot" : "") +
                 (groupedWithPrev ? " thread-bubble--stacked-prev" : "") +
                 (groupedWithNext ? " thread-bubble--stacked-next" : "") +
-                (isSending ? " thread-bubble--pending" : "");
+                (isSending ? " thread-bubble--pending" : "") +
+                (isFailed ? " thread-bubble--failed" : "");
 
               const msgClass =
                 "thread-message " +
@@ -923,6 +1084,12 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
 
                   <div ref={isFirstUnread ? firstUnreadRef : null} className={msgClass}>
                     {showBotLabel && <div className="thread-role-label">Bot</div>}
+                    {m.message_kind === "template" && !groupedWithPrev ? (
+                      <div className="thread-role-label">
+                        Template
+                        {m.template_name ? ` · ${formatTemplateDisplayName(m.template_name)}` : ""}
+                      </div>
+                    ) : null}
 
                     <div className={bubbleClass}>
                       {renderBody(
@@ -937,18 +1104,16 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
                       {showMeta && (
                         <div className="thread-meta">
                           <span className="thread-time">{formatTime(m.created_at)}</span>
-                          {outbound && m.status === "read" && (
-                            <span className="thread-ticks" aria-label="read">
-                              Read
-                            </span>
-                          )}
-                          {isSending && (
-                            <span className="thread-ticks thread-ticks--pending" aria-label="sending">
-                              Sending
+                          {outbound && transport && (
+                            <span className={transport.className} aria-label={transport.label.toLowerCase()}>
+                              {transport.label}
                             </span>
                           )}
                         </div>
                       )}
+                      {isFailed ? (
+                        <div className="thread-failure-copy">{describeFailure(m)}</div>
+                      ) : null}
                     </div>
                   </div>
                 </Fragment>
@@ -968,6 +1133,32 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
             aria-live="polite"
           >
             Bot mode is active. Switch to Agent Mode to send a manual reply.
+          </div>
+        ) : null}
+        {composerBlockedByWindow ? (
+          <div className="thread-composer-inline-hint" role="status" aria-live="polite">
+            Free-text sending is unavailable because the customer is outside WhatsApp&apos;s free
+            reply window. A template send will be needed next.
+          </div>
+        ) : null}
+        {composerBlockedByWindow ? (
+          <div className="thread-template-cta">
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setTemplateModalOpen(true)}
+            >
+              Use template
+            </button>
+          </div>
+        ) : null}
+        {sendError ? (
+          <div
+            className="thread-composer-inline-hint thread-composer-inline-hint--danger"
+            role="status"
+            aria-live="polite"
+          >
+            {sendError}
           </div>
         ) : null}
         <div className="thread-input-row">
@@ -997,17 +1188,40 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
                 revealBotModeHint();
                 return;
               }
+              if (composerBlockedByWindow) {
+                setSendError(
+                  "Customer is outside WhatsApp's free reply window. A template message will be required before another manual text can be sent."
+                );
+                return;
+              }
+              if (sendError) setSendError(null);
               setText(e.target.value);
             }}
             onFocus={() => {
               if (!agentAllowed) revealBotModeHint();
+              if (composerBlockedByWindow) {
+                setSendError(
+                  "Customer is outside WhatsApp's free reply window. A template message will be required before another manual text can be sent."
+                );
+              }
             }}
             onClick={() => {
               if (!agentAllowed) revealBotModeHint();
+              if (composerBlockedByWindow) {
+                setSendError(
+                  "Customer is outside WhatsApp's free reply window. A template message will be required before another manual text can be sent."
+                );
+              }
             }}
-            placeholder={agentAllowed ? "Write a reply..." : "Switch to Agent Mode to reply"}
+            placeholder={
+              !agentAllowed
+                ? "Switch to Agent Mode to reply"
+                : composerBlockedByWindow
+                  ? "Template required before the next manual reply"
+                  : "Write a reply..."
+            }
             onKeyDown={handleInputKeyDown}
-            readOnly={!agentAllowed}
+            readOnly={!agentAllowed || composerBlockedByWindow}
             aria-describedby={showBotModeHint && !agentAllowed ? "thread-bot-mode-hint" : undefined}
           />
 
@@ -1015,7 +1229,7 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
             type="button"
             className="thread-send-button"
             onClick={handleSend}
-            disabled={sending}
+            disabled={sending || !agentAllowed || composerBlockedByWindow}
           >
             {sending ? "Sending..." : "Send"}
           </button>
@@ -1026,6 +1240,12 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
           </div>
         ) : null}
       </div>
+      <TemplateSendModal
+        conversationId={convo.id}
+        open={templateModalOpen}
+        onClose={() => setTemplateModalOpen(false)}
+        onSent={handleTemplateSent}
+      />
     </div>
   );
 }

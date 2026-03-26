@@ -8,7 +8,11 @@ export const API = getWebRuntimeEnv().apiBase;
 const INBOX_KEY = getWebRuntimeEnv().inboxAccessKey;
 
 // Small helper type so consumers can see HTTP status if needed
-export type ApiError = Error & { status?: number };
+export type ApiError = Error & {
+  status?: number;
+  code?: string;
+  body?: any;
+};
 
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (!API) {
@@ -42,8 +46,10 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
       // ignore parse errors – some error responses are not JSON
     }
     console.error("[api] non-OK response", res.status, body ?? {});
-    const e: ApiError = new Error(body?.error ?? `API error (${res.status})`);
+    const e: ApiError = new Error(body?.message ?? body?.error ?? `API error (${res.status})`);
     e.status = res.status;
+    e.code = body?.code;
+    e.body = body;
     throw e;
   }
 

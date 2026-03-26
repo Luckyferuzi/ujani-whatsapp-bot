@@ -44,6 +44,12 @@ const NAV_SECTIONS: NavSection[] = [
         shortLabel: "OR",
         moduleKey: "orders",
       },
+      {
+        href: "/followups",
+        label: "Follow-ups",
+        description: "Operational outreach queues.",
+        shortLabel: "FU",
+      },
     ],
   },
   {

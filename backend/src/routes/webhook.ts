@@ -9,6 +9,7 @@ import {
 } from '../runtime/companySettings.js';
 import { t, Lang } from '../i18n.js';
 import {
+  getWhatsAppMessageId,
   sendText,
   sendListMessage,
   sendButtonsMessage,
@@ -42,6 +43,7 @@ import {
   getOrCreateConversationForPhone,
   insertInboundMessage,
   insertOutboundMessage,
+  updateMessageTransportStateByWaMessageId,
   updateConversationLastUserMessageAt,
   createOrderWithPayment,
   findOrderById,
@@ -61,6 +63,48 @@ import { emit } from '../sockets.js';
 import db from '../db/knex.js';
 
 export const webhook = Router();
+
+export function normalizeWebhookStatusUpdate(status: any) {
+  const rawStatus = String(status?.status ?? "").trim().toLowerCase();
+  const errors = Array.isArray(status?.errors) ? status.errors : [];
+  const firstError = errors[0] ?? null;
+  const errorData = firstError?.error_data ?? null;
+
+  let nextStatus = rawStatus;
+  if (rawStatus === "failed") nextStatus = "failed";
+  else if (rawStatus === "read") nextStatus = "read";
+  else if (rawStatus === "delivered") nextStatus = "delivered";
+  else if (rawStatus === "sent") nextStatus = "sent";
+
+  return {
+    waMessageId:
+      typeof status?.id === "string" && status.id.trim().length > 0 ? status.id : null,
+    status: nextStatus || null,
+    statusReason: typeof status?.conversation?.origin?.type === "string"
+      ? status.conversation.origin.type
+      : rawStatus === "failed"
+        ? "transport_failed"
+        : null,
+    errorCode:
+      firstError?.code != null
+        ? String(firstError.code)
+        : status?.pricing?.billable === false && rawStatus === "failed"
+          ? "transport_failed"
+          : null,
+    errorTitle:
+      typeof firstError?.title === "string"
+        ? firstError.title
+        : rawStatus === "failed"
+          ? "Delivery failed"
+          : null,
+    errorDetails:
+      typeof errorData?.details === "string"
+        ? errorData.details
+        : typeof status?.status === "string" && rawStatus === "failed"
+          ? `WhatsApp reported message status "${status.status}".`
+          : null,
+  };
+}
 /**
  * Send a text message from the bot and ALSO log it as an outbound message
  * so that it appears in the Inbox thread.
@@ -101,7 +145,7 @@ const webhookProcessor = createWebhookProcessor({
 
 async function sendBotText(user: string, body: string, phoneNumberId?: string | null) {
   // 1) Send to WhatsApp (use the correct business number if known)
-  await sendText(user, body, { phoneNumberId: phoneNumberId ?? null });
+  const waResponse = await sendText(user, body, { phoneNumberId: phoneNumberId ?? null });
 
   // 2) Persist and emit for the inbox. The admin thread view depends on bot
   // replies being logged here, so keep this side effect aligned with sendText.
@@ -112,7 +156,11 @@ async function sendBotText(user: string, body: string, phoneNumberId?: string | 
       phoneNumberId ?? null
     );
 
-    const inserted = await insertOutboundMessage(conversationId, "text", body);
+    const inserted = await insertOutboundMessage(conversationId, "text", body, {
+      waMessageId: getWhatsAppMessageId(waResponse),
+      status: "sent",
+      messageKind: "freeform",
+    });
 
     emit("message.created", {
       conversation_id: conversationId,
@@ -247,7 +295,11 @@ async function sendListMessageSafe(p: SafeListPayload) {
     const inserted = await insertOutboundMessage(
       conversationId,
       "text",
-      summaryBody
+      summaryBody,
+      {
+        status: "sent",
+        messageKind: "freeform",
+      }
     );
 
     emit("message.created", {
@@ -301,7 +353,11 @@ async function sendButtonsMessageSafe(
     const inserted = await insertOutboundMessage(
       conversationId,
       "text",
-      summaryBody
+      summaryBody,
+      {
+        status: "sent",
+        messageKind: "freeform",
+      }
     );
 
     emit("message.created", {
@@ -535,6 +591,27 @@ webhook.post("/webhook", async (req: Request, res: Response) => {
     for (const entry of legacyEntries) {
       const changes = entry?.changes ?? [];
       for (const ch of changes) {
+        const statuses = ch?.value?.statuses ?? [];
+        for (const status of statuses) {
+          const normalized = normalizeWebhookStatusUpdate(status);
+          if (!normalized.waMessageId || !normalized.status) continue;
+
+          const updated = await updateMessageTransportStateByWaMessageId(normalized.waMessageId, {
+            status: normalized.status,
+            statusReason: normalized.statusReason,
+            errorCode: normalized.errorCode,
+            errorTitle: normalized.errorTitle,
+            errorDetails: normalized.errorDetails,
+          });
+
+          if (updated) {
+            emit("message.created", {
+              conversation_id: updated.conversation_id,
+              message: updated,
+            });
+          }
+        }
+
         await webhookProcessor.processChange(ch);
       }
     }

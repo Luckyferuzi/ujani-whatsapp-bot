@@ -26,12 +26,21 @@ import {
 import { t, Lang } from "../i18n.js";
 import { z } from "zod";
 import { getCatalogEnabledEffective } from "../runtime/companySettings.js";
+import { getInboxTemplateRegistry } from "../runtime/companySettings.js";
 import {
   ORDER_STATUS_VALUES,
   canTransitionOrderStatus,
   type DbOrderStatus,
 } from "../orders.js";
 import { computeRemainingPayment, type PaymentStatus } from "../payments.js";
+import {
+  dismissFollowupItem,
+  listBroadcastAudiencePreview,
+  listFollowupQueues,
+  type BroadcastAudienceKey,
+  type FollowupQueueKey,
+} from "../services/followups.js";
+import { sendConfiguredTemplateForConversation } from "./send.js";
 
 
 export const inboxRoutes = Router();
@@ -191,12 +200,16 @@ async function notifyRestockSubscribers(
         .first();
 
       // 2) Send WhatsApp message
-      await sendText(waId, msg, {
+      const waResponse = await sendText(waId, msg, {
         phoneNumberId: (convo as any)?.phone_number_id ?? null,
       });
 
       if (convo) {
-        const inserted = await insertOutboundMessage(convo.id, "text", msg);
+        const inserted = await insertOutboundMessage(convo.id, "text", msg, {
+          waMessageId: typeof waResponse?.messages?.[0]?.id === "string" ? waResponse.messages[0].id : null,
+          status: "sent",
+          messageKind: "freeform",
+        });
         req.app.get("io")?.emit("message.created", {
           conversation_id: convo.id,
           message: inserted,
@@ -369,7 +382,23 @@ inboxRoutes.get("/conversations/:id/messages", async (req, res) => {
   const id = Number(req.params.id);
   const items = await db("messages")
     .where({ conversation_id: id })
-    .select("id", "conversation_id", "direction", "type", "body", "status", "created_at")
+    .select(
+      "id",
+      "conversation_id",
+      "wa_message_id",
+      "direction",
+      "type",
+      "body",
+      "status",
+      "message_kind",
+      "status_reason",
+      "error_code",
+      "error_title",
+      "error_details",
+      "template_name",
+      "template_language",
+      "created_at"
+    )
     .orderBy("created_at", "asc")
     .limit(500);
 
@@ -857,8 +886,9 @@ const message = t(lang, "payment.confirm_with_remaining", {
 
       const conversationId = convo?.id as number | undefined;
 
+      let waResponse: any = null;
       try {
-        await sendText(row.wa_id, message);
+        waResponse = await sendText(row.wa_id, message);
       } catch (e) {
         console.warn("Failed to send payment confirmation:", e);
       }
@@ -867,7 +897,10 @@ const message = t(lang, "payment.confirm_with_remaining", {
         const [msgRow] = await db("messages")
           .insert({
             conversation_id: conversationId,
+            wa_message_id:
+              typeof waResponse?.messages?.[0]?.id === "string" ? waResponse.messages[0].id : null,
             direction: "out",
+            message_kind: "freeform",
             type: "text",
             body: message,
             status: "sent",
@@ -1483,14 +1516,21 @@ if (newStatus === "preparing") {
               .first<{ id: number }>();
 
             // 1) send to WhatsApp (prefer the same business number)
-            await sendText(waId, msg, {
+            const waResponse = await sendText(waId, msg, {
               phoneNumberId: (convo as any)?.phone_number_id ?? null,
             });
 
             // 2) log to messages + emit to inbox UI
 
             if (convo) {
-              const inserted = await insertOutboundMessage(convo.id, "text", msg);
+              const inserted = await insertOutboundMessage(convo.id, "text", msg, {
+                waMessageId:
+                  typeof waResponse?.messages?.[0]?.id === "string"
+                    ? waResponse.messages[0].id
+                    : null,
+                status: "sent",
+                messageKind: "freeform",
+              });
 
               emit("message.created", {
                 conversation_id: convo.id,
@@ -2849,105 +2889,179 @@ inboxRoutes.delete("/incomes/:id", async (req: Request, res: Response) => {
   }
 });
 
+inboxRoutes.get("/followups", async (_req, res) => {
+  try {
+    const queues = await listFollowupQueues();
+    return res.json({
+      queues,
+      counts: {
+        unpaid_orders: queues.unpaid_orders.length,
+        order_action_needed: queues.order_action_needed.length,
+        restock_reengagement: queues.restock_reengagement.length,
+      },
+    });
+  } catch (err: any) {
+    console.error("GET /api/followups failed", err);
+    return res.status(500).json({ error: err?.message ?? "Failed to load follow-up queues" });
+  }
+});
+
+inboxRoutes.post("/followups/dismiss", async (req, res) => {
+  try {
+    const schema = z.object({
+      queue: z.enum(["unpaid_orders", "order_action_needed", "restock_reengagement"]),
+      item_key: z.string().min(1),
+    });
+
+    const parsed = schema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ error: "Invalid follow-up dismissal payload" });
+    }
+
+    await dismissFollowupItem(parsed.data.queue as FollowupQueueKey, parsed.data.item_key);
+    return res.json({ ok: true });
+  } catch (err: any) {
+    console.error("POST /api/followups/dismiss failed", err);
+    return res.status(500).json({ error: err?.message ?? "Failed to dismiss follow-up item" });
+  }
+});
+
+inboxRoutes.get("/broadcast/options", async (_req, res) => {
+  try {
+    const templates = (await getInboxTemplateRegistry())
+      .filter((item) => item.enabled)
+      .map((item) => ({
+        key: item.key,
+        template_name: item.template_name,
+        language_code: item.language_code,
+        category: item.category,
+        enabled: item.enabled,
+        parameter_meta: item.parameter_meta,
+      }));
+
+    return res.json({
+      audiences: [
+        {
+          key: "marketing_eligible",
+          label: "Marketing eligible / opted-in",
+          description: "Customers with recorded opt-in history.",
+          advanced: false,
+        },
+        {
+          key: "previous_buyers",
+          label: "Previous buyers",
+          description: "Customers with at least one order.",
+          advanced: false,
+        },
+        {
+          key: "recent_customers",
+          label: "Recent customers",
+          description: "Customers active in the last 30 days.",
+          advanced: false,
+        },
+        {
+          key: "all_previous_chatters",
+          label: "All previous chatters",
+          description: "All customers with prior WhatsApp conversation history.",
+          advanced: true,
+        },
+      ],
+      templates,
+    });
+  } catch (err: any) {
+    console.error("GET /api/broadcast/options failed", err);
+    return res.status(500).json({ error: err?.message ?? "Failed to load broadcast options" });
+  }
+});
+
+inboxRoutes.get("/broadcast/audience-preview", async (req, res) => {
+  try {
+    const audience = String(req.query.audience ?? "").trim() as BroadcastAudienceKey;
+    if (!["marketing_eligible", "previous_buyers", "recent_customers", "all_previous_chatters"].includes(audience)) {
+      return res.status(400).json({ error: "Invalid audience" });
+    }
+
+    const preview = await listBroadcastAudiencePreview(audience);
+    return res.json({
+      audience: preview.audience,
+      label: preview.label,
+      recipient_count: preview.recipient_count,
+      excluded_count: preview.excluded_count,
+      sample_recipients: preview.recipients.slice(0, 5),
+    });
+  } catch (err: any) {
+    console.error("GET /api/broadcast/audience-preview failed", err);
+    return res.status(500).json({ error: err?.message ?? "Failed to load broadcast audience preview" });
+  }
+});
+
 /**
  * POST /api/customers/broadcast
- * Body: { message: string, within_hours?: number }
- *
- * Sends a text message to customers who have ever chatted with us
- * (i.e., have a conversation with last_user_message_at set).
- *
- * Tip: Pass within_hours=24 to reduce failures due to WhatsApp 24h window rules.
+ * Template-based segmented broadcast.
  */
 inboxRoutes.post("/customers/broadcast", async (req: Request, res: Response) => {
   try {
     const schema = z.object({
-      message: z.string().min(1).transform((s) => String(s ?? "").trim()),
-      within_hours: z.coerce.number().int().positive().max(168).optional(),
+      audience: z.enum([
+        "marketing_eligible",
+        "previous_buyers",
+        "recent_customers",
+        "all_previous_chatters",
+      ]),
+      templateKey: z.string().min(1),
+      params: z.record(z.string(), z.union([z.string(), z.number()])).optional(),
+      mode: z.enum(["test", "send"]).optional(),
     });
 
     const parsed = schema.safeParse(req.body ?? {});
     if (!parsed.success) {
       return res.status(400).json({
-        error: "Invalid request body. Expected: { message: string, within_hours?: number }",
+        error: "Invalid request body. Expected: { audience, templateKey, params?, mode? }",
       });
     }
 
-    const raw = parsed.data.message;
-    const withinHours = parsed.data.within_hours;
-
-    // Subquery: latest conversation id per customer
-    const latestConvo = db("conversations")
-      .select("customer_id")
-      .max("id as conversation_id")
-      .groupBy("customer_id")
-      .as("lc");
-
-    // Recipients: customers with wa_id + who have ever chatted (last_user_message_at not null)
-    const recipients = await db("customers as u")
-      .join(latestConvo, "lc.customer_id", "u.id")
-      .join("conversations as c", "c.id", "lc.conversation_id")
-      .whereNotNull("u.wa_id")
-      .whereNotNull("c.last_user_message_at")
-      .modify((qb) => {
-        if (withinHours && Number.isFinite(withinHours)) {
-          // Only customers who messaged within the last N hours
-          qb.andWhere(
-            "c.last_user_message_at",
-            ">=",
-            db.raw("now() - (? * interval '1 hour')", [withinHours])
-          );
-        }
-      })
-      .select(
-        "u.id as customer_id",
-        "u.wa_id as wa_id",
-        "c.id as conversation_id"
-      );
+    const preview = await listBroadcastAudiencePreview(parsed.data.audience as BroadcastAudienceKey);
+    const recipients = parsed.data.mode === "test" ? preview.recipients.slice(0, 1) : preview.recipients;
 
     let sent = 0;
     let failed = 0;
+    const errors: Array<{ conversation_id: number | null; customer_name: string | null; error: string }> = [];
 
-    for (const row of recipients as any[]) {
-      const waId = row.wa_id as string | null;
+    for (const row of recipients) {
       const conversationId = Number(row.conversation_id);
-
-      if (!waId || !Number.isFinite(conversationId) || conversationId <= 0) {
+      if (!Number.isFinite(conversationId) || conversationId <= 0) {
         continue;
       }
 
-      try {
-        // 1) Send WhatsApp message
-        await sendText(waId, raw);
+      const result = await sendConfiguredTemplateForConversation({
+        conversationId,
+        templateKey: parsed.data.templateKey,
+        params: parsed.data.params ?? {},
+        app: req.app,
+      });
+
+      if (result.ok) {
         sent++;
-
-        // 2) Log into DB messages for admin inbox display
-        const [msgRow] = await db("messages")
-          .insert({
-            conversation_id: conversationId,
-            direction: "out",
-            type: "text",
-            body: raw,
-            status: "sent",
-          })
-          .returning("*");
-
-        // 3) Notify connected admin clients (if io is attached)
-        req.app.get("io")?.emit("message.created", {
-          conversation_id: conversationId,
-          message: msgRow,
-        });
-      } catch (err) {
+      } else {
         failed++;
-        console.warn("[broadcast] failed to send to", waId, err);
+        errors.push({
+          conversation_id: row.conversation_id,
+          customer_name: row.customer_name,
+          error: String((result.body as any)?.error ?? "Failed"),
+        });
+        console.warn("[broadcast] failed to send to", row.customer_phone, result.body);
       }
     }
 
     return res.json({
       ok: true,
       total: recipients.length,
+      audience: parsed.data.audience,
+      mode: parsed.data.mode ?? "send",
+      excluded_count: Math.max(0, preview.recipient_count - recipients.length),
       sent,
       failed,
-      within_hours: withinHours ?? null,
+      errors: errors.slice(0, 10),
     });
   } catch (err: any) {
     console.error("POST /customers/broadcast failed", err);

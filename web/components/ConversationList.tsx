@@ -82,6 +82,25 @@ function getConversationPriorityTone(convo: Convo) {
   return "conversation-priority";
 }
 
+function buildConversationBadges(convo: Convo) {
+  const badges: Array<{ label: string; className: string }> = [];
+  const unread = convo.unread_count ?? 0;
+
+  badges.push({
+    label: convo.agent_allowed ? "Human" : "Bot",
+    className: convo.agent_allowed ? "badge badge--handover" : "badge badge--bot",
+  });
+
+  if (unread > 0) {
+    badges.push({
+      label: unread > 1 ? `Unread ${unread}` : "Unread",
+      className: "badge badge--unread",
+    });
+  }
+
+  return badges;
+}
+
 export default function ConversationList({
   activeId,
   onPick,
@@ -316,6 +335,7 @@ export default function ConversationList({
             const restockCount = c.restock_subscribed_count ?? 0;
             const priority = getConversationPriority(c);
             const priorityTone = getConversationPriorityTone(c);
+            const compactBadges = buildConversationBadges(c);
 
             return (
               <li
@@ -339,24 +359,25 @@ export default function ConversationList({
                     </div>
                     <div className="conversation-top-right">
                       {timeText && <span className="conversation-time">{timeText}</span>}
-                      {unread > 0 && <span className="badge badge--unread">{unread}</span>}
                     </div>
                   </div>
 
                   <div className="conversation-meta-row">
                     <span className="conversation-phone">{formatPhonePretty(c.phone)}</span>
                     <div className="conversation-badges">
-                      {c.agent_allowed ? (
-                        <span className="badge badge--handover">Human</span>
-                      ) : (
-                        <span className="badge badge--bot">Bot</span>
-                      )}
+                      {compactBadges.map((badge) => (
+                        <span key={badge.label} className={badge.className}>
+                          {badge.label}
+                        </span>
+                      ))}
                     </div>
                   </div>
 
                   <div className="conversation-bottom-row">
-                    <div className="conversation-subtitle" title={rawSubtitle}>
-                      {subtitle}
+                    <div className="conversation-subtitle-wrap">
+                      <div className="conversation-subtitle" title={rawSubtitle}>
+                        {subtitle}
+                      </div>
                     </div>
 
                     <div className="conversation-badges">
