@@ -11,6 +11,7 @@ import {
   DEFAULT_INBOX_TEMPLATES,
   isInboxTemplateMapped,
 } from "../src/runtime/companySettings.ts";
+import { resolveInboxTemplateReadiness } from "../src/runtime/inboxTemplateReadiness.ts";
 
 test("validateTemplateParams reports missing required template fields", () => {
   const template = DEFAULT_INBOX_TEMPLATES.find((item) => item.key === "payment_reminder_sw");
@@ -80,4 +81,27 @@ test("classifyTemplateProviderError marks missing template names clearly", () =>
 
   assert.equal(classified.status, 409);
   assert.equal(classified.code, "template_not_available");
+});
+
+test("resolveInboxTemplateReadiness marks unmapped defaults as not configured", () => {
+  const template = DEFAULT_INBOX_TEMPLATES.find((item) => item.key === "payment_reminder_sw");
+  assert.ok(template);
+
+  const readiness = resolveInboxTemplateReadiness(template);
+
+  assert.equal(readiness.can_send, false);
+  assert.equal(readiness.status, "unmapped");
+  assert.equal(readiness.reason_code, "template_config_missing");
+});
+
+test("resolveInboxTemplateReadiness marks fully mapped template as ready", () => {
+  const readiness = resolveInboxTemplateReadiness({
+    ...DEFAULT_INBOX_TEMPLATES[0],
+    metaTemplateName: "payment_reminder_live",
+    languageCode: "sw",
+  });
+
+  assert.equal(readiness.can_send, true);
+  assert.equal(readiness.status, "ready");
+  assert.equal(readiness.meta_template_name, "payment_reminder_live");
 });

@@ -1,5 +1,10 @@
 import db from "../db/knex.js";
 import { getJsonSetting, setJsonSetting } from "../db/settings.js";
+import { getInboxTemplateRegistry } from "../runtime/companySettings.js";
+import {
+  indexInboxTemplateReadiness,
+  resolveInboxTemplateReadiness,
+} from "../runtime/inboxTemplateReadiness.js";
 
 export type FollowupQueueKey = "unpaid_orders" | "order_action_needed" | "restock_reengagement";
 
@@ -21,6 +26,12 @@ export type FollowupRow = {
   product_name?: string | null;
   stock_qty?: number | null;
   template_key: string;
+  can_send_template: boolean;
+  template_status: string;
+  template_status_label: string;
+  template_reason_code: string | null;
+  template_meta_template_name: string | null;
+  template_language_code: string | null;
 };
 
 type DismissalStore = Record<FollowupQueueKey, string[]>;
@@ -133,6 +144,19 @@ async function listLatestConversationContext(customerIds: number[]) {
 
 export async function listFollowupQueues() {
   const dismissals = await getDismissals();
+  const templateReadiness = indexInboxTemplateReadiness(
+    await getInboxTemplateRegistry()
+  );
+  const getTemplateReadiness = (key: string) =>
+    templateReadiness.get(key) ??
+    resolveInboxTemplateReadiness({
+      key,
+      metaTemplateName: null,
+      languageCode: null,
+      category: "payment_reminder",
+      enabled: false,
+      params: [],
+    });
 
   const unpaidRows = await db("orders as o")
     .join("customers as u", "u.id", "o.customer_id")
@@ -194,6 +218,7 @@ export async function listFollowupQueues() {
       const customerId = Number(row.customer_id);
       const convo = convoMap.get(customerId);
       const itemKey = `order:${row.order_id}`;
+      const readiness = getTemplateReadiness("payment_reminder_sw");
       return {
         queue: "unpaid_orders" as const,
         item_key: itemKey,
@@ -210,6 +235,12 @@ export async function listFollowupQueues() {
         reason: "Order still has an unpaid balance and needs customer payment follow-up.",
         last_interaction_at: mapLastInteraction(convo),
         template_key: "payment_reminder_sw",
+        can_send_template: readiness?.can_send ?? false,
+        template_status: readiness?.status ?? "invalid",
+        template_status_label: readiness?.status_label ?? "Template unavailable",
+        template_reason_code: readiness?.reason_code ?? "template_not_found",
+        template_meta_template_name: readiness?.meta_template_name ?? null,
+        template_language_code: readiness?.language_code ?? null,
       };
     })
     .filter((row) => !dismissals.unpaid_orders.includes(row.item_key));
@@ -220,6 +251,7 @@ export async function listFollowupQueues() {
       const convo = convoMap.get(customerId);
       const status = String(row.status ?? "");
       const reason = describeOrderActionReason(status);
+      const readiness = getTemplateReadiness("order_followup_sw");
       return {
         queue: "order_action_needed" as const,
         item_key: `order:${row.order_id}`,
@@ -233,6 +265,12 @@ export async function listFollowupQueues() {
         reason,
         last_interaction_at: mapLastInteraction(convo),
         template_key: "order_followup_sw",
+        can_send_template: readiness?.can_send ?? false,
+        template_status: readiness?.status ?? "invalid",
+        template_status_label: readiness?.status_label ?? "Template unavailable",
+        template_reason_code: readiness?.reason_code ?? "template_not_found",
+        template_meta_template_name: readiness?.meta_template_name ?? null,
+        template_language_code: readiness?.language_code ?? null,
       };
     })
     .filter((row) => !dismissals.order_action_needed.includes(row.item_key));
@@ -242,6 +280,7 @@ export async function listFollowupQueues() {
       const customerId = Number(row.customer_id);
       const convo = convoMap.get(customerId);
       const stockQty = Number(row.stock_qty ?? 0) || 0;
+      const readiness = getTemplateReadiness("restock_reengagement_sw");
       return {
         queue: "restock_reengagement" as const,
         item_key: `restock:${row.subscription_id}`,
@@ -254,6 +293,12 @@ export async function listFollowupQueues() {
         reason: describeRestockFollowupReason(stockQty),
         last_interaction_at: mapLastInteraction(convo),
         template_key: "restock_reengagement_sw",
+        can_send_template: readiness?.can_send ?? false,
+        template_status: readiness?.status ?? "invalid",
+        template_status_label: readiness?.status_label ?? "Template unavailable",
+        template_reason_code: readiness?.reason_code ?? "template_not_found",
+        template_meta_template_name: readiness?.meta_template_name ?? null,
+        template_language_code: readiness?.language_code ?? null,
       };
     })
     .filter((row) => !dismissals.restock_reengagement.includes(row.item_key));

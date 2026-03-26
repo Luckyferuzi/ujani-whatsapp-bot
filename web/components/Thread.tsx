@@ -22,6 +22,10 @@ import { EmptyState, ThreadSkeleton } from "@/components/ui";
 type ThreadProps = {
   convo: Convo;
   onOpenContext?: () => void;
+  onToggleContext?: () => void;
+  contextOpen?: boolean;
+  onToggleList?: () => void;
+  listOpen?: boolean;
 };
 
 function formatTime(iso: string) {
@@ -560,7 +564,14 @@ function renderBody(
   return <div className="thread-text">{body}</div>;
 }
 
-export default function Thread({ convo, onOpenContext }: ThreadProps) {
+export default function Thread({
+  convo,
+  onOpenContext,
+  onToggleContext,
+  contextOpen = false,
+  onToggleList,
+  listOpen = true,
+}: ThreadProps) {
   const router = useRouter();
   const [messages, setMessages] = useState<Msg[]>([]);
   const [loading, setLoading] = useState(false);
@@ -570,7 +581,6 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
   const [toggling, setToggling] = useState(false);
   const [sending, setSending] = useState(false);
   const [showBotModeHint, setShowBotModeHint] = useState(false);
-  const [sendError, setSendError] = useState<string | null>(null);
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
   const [productNames, setProductNames] = useState<Record<string, string>>({});
   const [activeMediaActionsId, setActiveMediaActionsId] = useState<string | number | null>(null);
@@ -598,9 +608,6 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
 
     if (composerBlockedByWindow && e.key !== "Tab") {
       e.preventDefault();
-      setSendError(
-        "Customer is outside WhatsApp's free reply window. A template message will be required before another manual text can be sent."
-      );
       return;
     }
 
@@ -678,9 +685,6 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
     }
 
     if (composerBlockedByWindow) {
-      setSendError(
-        "Customer is outside WhatsApp's free reply window. A template message will be required before another manual text can be sent."
-      );
       return;
     }
     fileInputRef.current?.click();
@@ -778,7 +782,6 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
     setText("");
     setActiveMediaActionsId(null);
     setShowBotModeHint(false);
-    setSendError(null);
     setTemplateModalOpen(false);
     initialScrolledRef.current = false;
     setIsAtBottom(true);
@@ -858,7 +861,6 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
     e.preventDefault();
     const value = text.trim();
     if (!value) return;
-    setSendError(null);
 
     if (!agentAllowed) {
       revealBotModeHint();
@@ -898,11 +900,9 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
       setText(value);
       const apiErr = err as ApiError;
       if (apiErr.code === "template_required") {
-        setSendError(
-          "Customer is outside WhatsApp's free reply window. A template message will be required before another manual text can be sent."
-        );
         await loadMessages({ preserveExisting: true });
       } else {
+        await loadMessages({ preserveExisting: true });
         toast.error("Unable to send the message right now.");
       }
     } finally {
@@ -919,11 +919,28 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
     () => [...messages].reverse().find((msg) => isOutboundMessage(msg)) ?? null,
     [messages]
   );
+  const composerBlockedByWindow = agentAllowed && !freeReplyState.allowed;
   const latestFailedOutbound =
     latestOutbound && String(latestOutbound.status ?? "").toLowerCase() === "failed"
       ? latestOutbound
       : null;
-  const composerBlockedByWindow = agentAllowed && !freeReplyState.allowed;
+  const shouldShowHeaderFailure =
+    !!latestFailedOutbound &&
+    String(latestFailedOutbound.status_reason ?? "").toLowerCase() !== "template_required";
+  const composerNotice = showBotModeHint && !agentAllowed
+    ? {
+        tone: "warning" as const,
+        message: "Bot mode is active. Switch to Agent Mode to send a manual reply.",
+        actionLabel: null as string | null,
+      }
+    : composerBlockedByWindow
+      ? {
+          tone: "warning" as const,
+          message:
+            "Manual free-text is paused because the conversation is outside WhatsApp's free reply window.",
+          actionLabel: "Use template",
+        }
+      : null;
 
   return (
     <div className="thread">
@@ -931,20 +948,32 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
         <div className="thread-lane thread-lane--header">
           <div className="thread-header-main">
             <div className="thread-title-row">
+              <button
+                type="button"
+                className="thread-identity"
+                onClick={() => {
+                  if (onToggleContext) {
+                    onToggleContext();
+                    return;
+                  }
+                  onOpenContext?.();
+                }}
+              >
               <div className="thread-title" title={title}>
                 {title}
               </div>
+              <div className="thread-title-badges">
               <span
                 className={
                   "thread-mode-chip" +
                   (agentAllowed ? " thread-mode-chip--agent" : " thread-mode-chip--bot")
                 }
               >
-                {agentAllowed ? "Human handover" : "Bot managed"}
+                {agentAllowed ? "Human" : "Bot"}
               </span>
               <span className={freeReplyState.className}>{freeReplyState.label}</span>
-            </div>
-            <div className="thread-subtitle">
+              </div>
+              <div className="thread-subtitle">
               {formatPhonePretty(convo.phone)}
               {convo.lang && (
                 <span className="thread-lang"> · {convo.lang.toUpperCase()}</span>
@@ -957,8 +986,19 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
                     : ""}
                 </span>
               )}
+              </div>
+              </button>
             </div>
             <div className="thread-header-actions">
+              {onToggleList ? (
+                <button
+                  type="button"
+                  className="thread-header-action"
+                  onClick={onToggleList}
+                >
+                  {listOpen ? "Hide list" : "Show list"}
+                </button>
+              ) : null}
               <button
                 type="button"
                 className="thread-header-action"
@@ -966,13 +1006,19 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
               >
                 Open orders
               </button>
-              {onOpenContext ? (
+              {onOpenContext || onToggleContext ? (
                 <button
                   type="button"
                   className="thread-header-action"
-                  onClick={onOpenContext}
+                  onClick={() => {
+                    if (onToggleContext) {
+                      onToggleContext();
+                      return;
+                    }
+                    onOpenContext?.();
+                  }}
                 >
-                  Summary
+                  {contextOpen ? "Hide summary" : "Summary"}
                 </button>
               ) : null}
               {composerBlockedByWindow ? (
@@ -1006,7 +1052,7 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
         </div>
       </div>
 
-      {latestFailedOutbound ? (
+      {shouldShowHeaderFailure ? (
         <div className="thread-failure-wrap">
           <div className="thread-lane">
             <div className="thread-failure-banner" role="status" aria-live="polite">
@@ -1147,39 +1193,22 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
 
       <div className="thread-footer">
         <div className="thread-lane thread-lane--composer">
-          {showBotModeHint && !agentAllowed ? (
+          {composerNotice ? (
             <div
               className="thread-composer-inline-hint"
               role="status"
               aria-live="polite"
             >
-              Bot mode is active. Switch to Agent Mode to send a manual reply.
-            </div>
-          ) : null}
-          {composerBlockedByWindow ? (
-            <div className="thread-composer-inline-hint" role="status" aria-live="polite">
-              Free-text sending is unavailable because the customer is outside WhatsApp&apos;s
-              free reply window. A template send will be needed next.
-            </div>
-          ) : null}
-          {composerBlockedByWindow ? (
-            <div className="thread-template-cta">
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => setTemplateModalOpen(true)}
-              >
-                Use template
-              </button>
-            </div>
-          ) : null}
-          {sendError ? (
-            <div
-              className="thread-composer-inline-hint thread-composer-inline-hint--danger"
-              role="status"
-              aria-live="polite"
-            >
-              {sendError}
+              <span>{composerNotice.message}</span>
+              {composerNotice.actionLabel ? (
+                <button
+                  type="button"
+                  className="thread-header-action thread-header-action--inline"
+                  onClick={() => setTemplateModalOpen(true)}
+                >
+                  {composerNotice.actionLabel}
+                </button>
+              ) : null}
             </div>
           ) : null}
           <div className="thread-input-row">
@@ -1209,30 +1238,14 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
                   revealBotModeHint();
                   return;
                 }
-                if (composerBlockedByWindow) {
-                  setSendError(
-                    "Customer is outside WhatsApp's free reply window. A template message will be required before another manual text can be sent."
-                  );
-                  return;
-                }
-                if (sendError) setSendError(null);
+                if (composerBlockedByWindow) return;
                 setText(e.target.value);
               }}
               onFocus={() => {
                 if (!agentAllowed) revealBotModeHint();
-                if (composerBlockedByWindow) {
-                  setSendError(
-                    "Customer is outside WhatsApp's free reply window. A template message will be required before another manual text can be sent."
-                  );
-                }
               }}
               onClick={() => {
                 if (!agentAllowed) revealBotModeHint();
-                if (composerBlockedByWindow) {
-                  setSendError(
-                    "Customer is outside WhatsApp's free reply window. A template message will be required before another manual text can be sent."
-                  );
-                }
               }}
               placeholder={
                 !agentAllowed
@@ -1243,9 +1256,6 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
               }
               onKeyDown={handleInputKeyDown}
               readOnly={!agentAllowed || composerBlockedByWindow}
-              aria-describedby={
-                showBotModeHint && !agentAllowed ? "thread-bot-mode-hint" : undefined
-              }
             />
 
             <button
@@ -1257,11 +1267,6 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
               {sending ? "Sending..." : "Send"}
             </button>
           </div>
-          {showBotModeHint && !agentAllowed ? (
-            <div id="thread-bot-mode-hint" className="thread-composer-inline-meta">
-              Use the mode toggle above to hand the conversation to an operator.
-            </div>
-          ) : null}
         </div>
       </div>
       <TemplateSendModal

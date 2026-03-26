@@ -25,8 +25,11 @@ import {
 } from "../db/queries.js";
 import { t, Lang } from "../i18n.js";
 import { z } from "zod";
-import { getCatalogEnabledEffective } from "../runtime/companySettings.js";
-import { getInboxTemplateRegistry } from "../runtime/companySettings.js";
+import {
+  getCatalogEnabledEffective,
+  getInboxTemplateRegistry,
+} from "../runtime/companySettings.js";
+import { listReadyInboxTemplates } from "../runtime/inboxTemplateReadiness.js";
 import {
   ORDER_STATUS_VALUES,
   canTransitionOrderStatus,
@@ -2929,16 +2932,20 @@ inboxRoutes.post("/followups/dismiss", async (req, res) => {
 
 inboxRoutes.get("/broadcast/options", async (_req, res) => {
   try {
-    const templates = (await getInboxTemplateRegistry())
-      .filter((item) => item.enabled && item.metaTemplateName && item.languageCode)
-      .map((item) => ({
-        key: item.key,
-        meta_template_name: item.metaTemplateName,
-        language_code: item.languageCode,
-        category: item.category,
-        enabled: item.enabled,
-        params: item.params,
-      }));
+    const templates = listReadyInboxTemplates(await getInboxTemplateRegistry()).map(
+      ({ template, readiness }) => ({
+        key: template.key,
+        meta_template_name: readiness.meta_template_name,
+        language_code: readiness.language_code,
+        category: template.category,
+        enabled: template.enabled,
+        params: template.params,
+        can_send: readiness.can_send,
+        template_status: readiness.status,
+        template_status_label: readiness.status_label,
+        template_reason_code: readiness.reason_code,
+      })
+    );
 
     return res.json({
       audiences: [

@@ -4,11 +4,13 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { formatPhonePretty } from "@/lib/phone";
-import { applyThemeMode, readStoredThemeMode, type ThemeMode } from "@/lib/theme";
 import { EmptyState, SidePanelSkeleton } from "@/components/ui";
 import OperatorTimelineNotes from "@/components/OperatorTimelineNotes";
 
-export interface RightPanelProps { conversationId: string | null }
+export interface RightPanelProps {
+  conversationId: string | null;
+  onClose?: () => void;
+}
 type CustomerSummary = { name: string | null; phone: string; lang?: string | null };
 type DeliverySummary = { mode: string; km?: number | null; fee_tzs?: number | null };
 type PaymentSummary = { id?: number; order_id?: number; method?: string | null; recipient?: string | null; status: "awaiting" | "verifying" | "paid" | "failed" | string; amount_tzs?: number | null; total_tzs?: number | null; remaining_tzs?: number | null };
@@ -21,7 +23,7 @@ function formatDateTime(value: string) { const d = new Date(value); if (Number.i
 function normalizePaymentStatus(status?: string | null) { const s = (status ?? "").toLowerCase().trim(); if (!s) return { label: "Unknown", tone: "neutral" as const }; if (s === "paid") return { label: "Paid", tone: "success" as const }; if (s === "verifying" || s === "awaiting") return { label: s === "verifying" ? "Verifying" : "Awaiting", tone: "warning" as const }; if (s === "failed") return { label: "Failed", tone: "danger" as const }; return { label: s, tone: "neutral" as const }; }
 function normalizeOrderStatus(status?: string | null) { switch ((status ?? "").toLowerCase().trim()) { case "pending": return { label: "Pending", tone: "warning" as const }; case "preparing": return { label: "Preparing", tone: "warning" as const }; case "out_for_delivery": return { label: "Out for delivery", tone: "success" as const }; case "delivered": return { label: "Delivered", tone: "success" as const }; case "cancelled": return { label: "Cancelled", tone: "danger" as const }; case "": return { label: "Unknown", tone: "neutral" as const }; default: return { label: status ?? "Unknown", tone: "neutral" as const }; } }
 
-export default function RightPanel({ conversationId }: RightPanelProps) {
+export default function RightPanel({ conversationId, onClose }: RightPanelProps) {
   const router = useRouter();
   const [summary, setSummary] = useState<ConversationSummary | null>(null);
   const [orders, setOrders] = useState<OrderRow[]>([]);
@@ -37,7 +39,6 @@ export default function RightPanel({ conversationId }: RightPanelProps) {
   const [riderPhoneInput, setRiderPhoneInput] = useState("");
   const [statusError, setStatusError] = useState<string | null>(null);
   const [showRiderForm, setShowRiderForm] = useState(false);
-  const [themeMode, setThemeMode] = useState<ThemeMode>("system");
 
   const customer = summary?.customer ?? null;
   const delivery = summary?.delivery ?? null;
@@ -61,7 +62,6 @@ export default function RightPanel({ conversationId }: RightPanelProps) {
     }
   }
 
-  useEffect(() => { const mode = readStoredThemeMode(); setThemeMode(mode); applyThemeMode(mode); }, []);
   useEffect(() => { void loadPanelData(true); setActiveView("summary"); setPaymentAmountInput(""); setPaymentError(null); setShowPaymentForm(false); setRiderPhoneInput(""); setStatusError(null); setShowRiderForm(false); }, [conversationId]);
 
   const handleOpenOrdersPage = () => { const phone = customer?.phone || latestOrder?.phone; router.push(phone ? `/orders?${new URLSearchParams({ phone }).toString()}` : "/orders"); };
@@ -100,6 +100,7 @@ export default function RightPanel({ conversationId }: RightPanelProps) {
         <button type="button" className={"panel-header-tab" + (activeView === "activity" ? " panel-header-tab--active" : "")} onClick={() => setActiveView("activity")}><span className="panel-header-tab-label">Activity</span></button>
         <button type="button" className={"panel-header-tab" + (activeView === "controls" ? " panel-header-tab--active" : "")} onClick={() => setActiveView("controls")}><span className="panel-header-tab-label">Controls</span></button>
         <button type="button" className="rp-icon-button" onClick={() => void loadPanelData(false)} disabled={loading || isRefreshing} title="Refresh context" aria-label="Refresh context">Refresh</button>
+        {onClose ? <button type="button" className="rp-icon-button" onClick={onClose} title="Close context" aria-label="Close context">Close</button> : null}
       </div>
       {activeView === "summary" ? (
         <div className="rp-stack">
@@ -239,15 +240,6 @@ export default function RightPanel({ conversationId }: RightPanelProps) {
 
           {(restock?.subscribed_count ?? 0) > 0 && restock?.items?.length ? <div className="panel-card"><div className="panel-card-title">Stock alerts</div><div className="rp-list">{restock.items.slice(0, 10).map((it) => <div key={it.product_id} className="rp-list-row"><div className="rp-list-main"><div className="rp-list-title">{it.name || "Product"}</div><div className="rp-list-sub">{it.sku}</div></div><div className="rp-list-right">{it.status}</div></div>)}{restock.items.length > 10 ? <div className="rp-muted">+{restock.items.length - 10} more</div> : null}</div></div> : null}
 
-          <div className="panel-card">
-            <div className="panel-card-title">Appearance</div>
-            <div className="rp-theme-row">
-              <button type="button" className={"rp-theme-btn" + (themeMode === "system" ? " rp-theme-btn--active" : "")} onClick={() => { setThemeMode("system"); applyThemeMode("system"); }}>System</button>
-              <button type="button" className={"rp-theme-btn" + (themeMode === "light" ? " rp-theme-btn--active" : "")} onClick={() => { setThemeMode("light"); applyThemeMode("light"); }}>Light</button>
-              <button type="button" className={"rp-theme-btn" + (themeMode === "dark" ? " rp-theme-btn--active" : "")} onClick={() => { setThemeMode("dark"); applyThemeMode("dark"); }}>Dark</button>
-            </div>
-            <div className="rp-muted">System follows device theme. Light and dark force a manual override.</div>
-          </div>
         </div>
       )}
     </div>

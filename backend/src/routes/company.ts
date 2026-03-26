@@ -13,6 +13,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { env } from "../config.js";
 import {
+  DEFAULT_INBOX_TEMPLATES,
   DEFAULT_COMPANY_SETTINGS,
   getBusinessContentSettings,
   getPhoneNumberIdEffective,
@@ -20,9 +21,13 @@ import {
   getCatalogEnabledEffective,
   getCompanyDisplayName,
   getCompanySettingsCached,
+  getInboxTemplateRegistry,
   loadCompanySettingsToCache,
+  saveInboxTemplateRegistry,
   saveCompanySettings,
+  type InboxTemplateConfig,
 } from "../runtime/companySettings.js";
+import { resolveInboxTemplateReadiness } from "../runtime/inboxTemplateReadiness.js";
 import {
   getBusinessProfile,
   getConnectedCatalogId,
@@ -94,6 +99,44 @@ const patchSchema = z
   })
   .strict();
 
+const templateConfigSchema = z
+  .object({
+    key: z.string().min(1),
+    metaTemplateName: z.string().trim().nullable().optional(),
+    languageCode: z.string().trim().nullable().optional(),
+    category: z.enum([
+      "payment_reminder",
+      "order_followup",
+      "restock_reengagement",
+    ]),
+    enabled: z.boolean().optional(),
+    params: z
+      .array(
+        z.object({
+          key: z.string().min(1),
+          label: z.string().min(1),
+          required: z.boolean().optional(),
+        })
+      )
+      .optional(),
+  })
+  .strict();
+
+function serializeInboxTemplates(templates: InboxTemplateConfig[]) {
+  return templates.map((template) => {
+    const readiness = resolveInboxTemplateReadiness(template);
+    return {
+      key: template.key,
+      category: template.category,
+      enabled: template.enabled,
+      metaTemplateName: template.metaTemplateName,
+      languageCode: template.languageCode,
+      params: template.params,
+      readiness,
+    };
+  });
+}
+
 function mergeSettings(
   current: typeof DEFAULT_COMPANY_SETTINGS,
   patch: z.infer<typeof patchSchema>
@@ -139,6 +182,59 @@ companyRoutes.get("/company/settings", async (_req, res) => {
   }
 
   return res.json({ ok: true, settings: getCompanySettingsCached() });
+});
+
+companyRoutes.get("/company/whatsapp-templates", async (_req, res) => {
+  const templates = await getInboxTemplateRegistry();
+  return res.json({
+    ok: true,
+    templates: serializeInboxTemplates(templates),
+  });
+});
+
+companyRoutes.put("/company/whatsapp-templates", async (req, res) => {
+  const parsed = z
+    .object({
+      templates: z.array(templateConfigSchema),
+    })
+    .strict()
+    .safeParse(req.body ?? {});
+
+  if (!parsed.success) {
+    return res.status(400).json({
+      error: "invalid_payload",
+      code: "invalid_payload",
+      details: parsed.error.flatten(),
+    });
+  }
+
+  const providedByKey = new Map(
+    parsed.data.templates.map((template) => [template.key, template] as const)
+  );
+
+  const nextTemplates = DEFAULT_INBOX_TEMPLATES.map((fallback) => {
+    const template = providedByKey.get(fallback.key) ?? fallback;
+    return {
+      key: fallback.key,
+      category: template.category ?? fallback.category,
+      enabled: template.enabled !== false,
+      metaTemplateName: String(template.metaTemplateName ?? "").trim() || null,
+      languageCode: String(template.languageCode ?? "").trim() || null,
+      params: Array.isArray(template.params)
+        ? template.params.map((item) => ({
+            key: item.key,
+            label: item.label,
+            required: item.required !== false,
+          }))
+        : fallback.params,
+    } satisfies InboxTemplateConfig;
+  });
+
+  const saved = await saveInboxTemplateRegistry(nextTemplates);
+  return res.json({
+    ok: true,
+    templates: serializeInboxTemplates(saved),
+  });
 });
 
 // Lightweight sidebar metadata endpoint used by the web app.

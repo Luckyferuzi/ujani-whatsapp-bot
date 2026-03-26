@@ -111,12 +111,119 @@ type ReconcileStats = {
   messages_moved: number;
 };
 
+type TemplateParam = {
+  key: string;
+  label: string;
+  required: boolean;
+};
+
+type TemplateReadiness = {
+  key: string;
+  can_send: boolean;
+  available: boolean;
+  status: "ready" | "unmapped" | "disabled" | "language_missing" | "invalid";
+  status_label: string;
+  reason_code: string | null;
+  meta_template_name: string | null;
+  language_code: string | null;
+  enabled: boolean;
+};
+
+type WhatsAppTemplateConfig = {
+  key: string;
+  category: "payment_reminder" | "order_followup" | "restock_reengagement";
+  enabled: boolean;
+  metaTemplateName: string | null;
+  languageCode: string | null;
+  params: TemplateParam[];
+  readiness: TemplateReadiness;
+};
+
 type SetupBootstrap = {
   settings: CompanySettings;
   runtime: RuntimeConfig;
   diagnostics: SetupDiagnostics;
   catalogDiagnostics: CatalogDiagnostics;
+  templates: WhatsAppTemplateConfig[];
 };
+
+function formatTemplateCategory(category: WhatsAppTemplateConfig["category"]) {
+  if (category === "payment_reminder") return "Payment reminder";
+  if (category === "order_followup") return "Order follow-up";
+  return "Restock / re-engagement";
+}
+
+function getTemplateTone(status: TemplateReadiness["status"]) {
+  if (status === "ready") return "success" as const;
+  if (status === "disabled") return "neutral" as const;
+  return "warning" as const;
+}
+
+function getDraftTemplateReadiness(template: {
+  key: string;
+  enabled: boolean;
+  metaTemplateName: string | null;
+  languageCode: string | null;
+  readiness: TemplateReadiness;
+}): TemplateReadiness {
+  if (!template.enabled) {
+    return {
+      ...template.readiness,
+      key: template.key,
+      can_send: false,
+      available: false,
+      status: "disabled",
+      status_label: "Template disabled",
+      reason_code: "template_disabled",
+      enabled: false,
+      meta_template_name: template.metaTemplateName,
+      language_code: template.languageCode,
+    };
+  }
+
+  if (!String(template.metaTemplateName ?? "").trim()) {
+    return {
+      ...template.readiness,
+      key: template.key,
+      can_send: false,
+      available: false,
+      status: "unmapped",
+      status_label: "Template not configured",
+      reason_code: "template_config_missing",
+      enabled: true,
+      meta_template_name: null,
+      language_code: template.languageCode,
+    };
+  }
+
+  if (!String(template.languageCode ?? "").trim()) {
+    return {
+      ...template.readiness,
+      key: template.key,
+      can_send: false,
+      available: false,
+      status: "language_missing",
+      status_label: "Template language missing",
+      reason_code: "template_language_unavailable",
+      enabled: true,
+      meta_template_name: template.metaTemplateName,
+      language_code: null,
+    };
+  }
+
+  return {
+    ...template.readiness,
+    key: template.key,
+    can_send: true,
+    available: true,
+    status: "ready",
+    status_label: "Ready to send",
+    reason_code: null,
+    enabled: true,
+    meta_template_name: template.metaTemplateName,
+    language_code: template.languageCode,
+  };
+}
 
 export default function SetupPage() {
   const { user } = useAuth();
@@ -131,6 +238,8 @@ export default function SetupPage() {
   const [diag, setDiag] = useState<SetupDiagnostics | null>(null);
   const [catalogDiag, setCatalogDiag] = useState<CatalogDiagnostics | null>(null);
   const [reconcileStats, setReconcileStats] = useState<ReconcileStats | null>(null);
+  const [templateConfigs, setTemplateConfigs] = useState<WhatsAppTemplateConfig[]>([]);
+  const [savingTemplates, setSavingTemplates] = useState(false);
   const [settings, setSettings] = useState<CompanySettings>({
     company_name: "",
     whatsapp_token: "",
@@ -167,14 +276,21 @@ export default function SetupPage() {
   } = useCachedQuery(
     user ? "setup:bootstrap" : null,
     async (): Promise<SetupBootstrap> => {
-      const [s, r, d, cd] = await Promise.all([
+      const [s, r, d, cd, t] = await Promise.all([
         api<{ ok: true; settings: CompanySettings }>("/api/company/settings"),
         api<{ ok: true; config: RuntimeConfig }>("/api/company/runtime-config"),
         api<{ ok: true; diagnostics: SetupDiagnostics }>("/api/setup/diagnostics"),
         api<{ ok: true; diagnostics: CatalogDiagnostics }>("/api/setup/catalog-diagnostics"),
+        api<{ ok: true; templates: WhatsAppTemplateConfig[] }>("/api/company/whatsapp-templates"),
       ]);
 
-      return { settings: s.settings, runtime: r.config, diagnostics: d.diagnostics, catalogDiagnostics: cd.diagnostics };
+      return {
+        settings: s.settings,
+        runtime: r.config,
+        diagnostics: d.diagnostics,
+        catalogDiagnostics: cd.diagnostics,
+        templates: t.templates,
+      };
     },
     { enabled: !!user, staleMs: 30_000 }
   );
@@ -189,6 +305,7 @@ export default function SetupPage() {
     setRuntime(bootstrap.runtime);
     setDiag(bootstrap.diagnostics);
     setCatalogDiag(bootstrap.catalogDiagnostics);
+    setTemplateConfigs(bootstrap.templates);
     setBootstrapped(true);
   }, [bootstrap, bootstrapped, user]);
 
@@ -196,6 +313,11 @@ export default function SetupPage() {
     if (!bootstrapError) return;
     setError(bootstrapError.message ?? "Failed to load setup data.");
   }, [bootstrapError]);
+
+  useEffect(() => {
+    if (!bootstrap?.templates) return;
+    setTemplateConfigs(bootstrap.templates);
+  }, [bootstrap?.templates]);
 
   async function saveSettings(e: FormEvent) {
     e.preventDefault();
@@ -319,11 +441,73 @@ export default function SetupPage() {
     }
   }
 
+  async function saveTemplateMappings() {
+    setSavingTemplates(true);
+    setError(null);
+    setOkMsg(null);
+    try {
+      const res = await api<{ ok: true; templates: WhatsAppTemplateConfig[] }>(
+        "/api/company/whatsapp-templates",
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            templates: templateConfigs.map((template) => ({
+              key: template.key,
+              category: template.category,
+              enabled: template.enabled,
+              metaTemplateName: template.metaTemplateName || null,
+              languageCode: template.languageCode || null,
+              params: template.params,
+            })),
+          }),
+        }
+      );
+      setTemplateConfigs(res.templates);
+      if (bootstrap) {
+        mutateBootstrap((current) => ({
+          ...(current ?? bootstrap),
+          templates: res.templates,
+        }));
+      }
+      setOkMsg("Template mappings saved.");
+    } catch (e: any) {
+      setError(e?.message ?? "Failed to save template mappings.");
+    } finally {
+      setSavingTemplates(false);
+    }
+  }
+
+  function updateTemplateConfig(
+    key: string,
+    patch: Partial<Pick<WhatsAppTemplateConfig, "enabled" | "metaTemplateName" | "languageCode">>
+  ) {
+    setTemplateConfigs((current) =>
+      current.map((template) =>
+        template.key === key
+          ? (() => {
+              const nextTemplate = {
+                ...template,
+                ...patch,
+              };
+              return {
+                ...nextTemplate,
+                readiness: getDraftTemplateReadiness(nextTemplate),
+              };
+            })()
+          : template
+      )
+    );
+  }
+
   const blockingIssueCount = diag?.issues.filter((issue) => issue.level === "error").length ?? 0;
   const missingRequiredCount = diag?.setup.missing_required.length ?? 0;
   const paymentMethodCount = settings.business_content?.payment_methods?.filter(
     (item) => item.id.trim() && item.label.trim() && item.value.trim()
   ).length ?? 0;
+  const readyTemplateCount = templateConfigs.filter(
+    (item) => getDraftTemplateReadiness(item).status === "ready"
+  ).length;
   const setupReadinessScore = Math.max(0, 4 - Math.min(4, missingRequiredCount + blockingIssueCount));
   const setupProgressPercent = `${(setupReadinessScore / 4) * 100}%`;
 
@@ -425,12 +609,16 @@ export default function SetupPage() {
               <div><div className="config-nav__label">1. Connection and business content</div><div className="config-nav__meta">Company identity, WhatsApp credentials, support rails, and operator copy.</div></div>
               <Badge tone="accent">Configure</Badge>
             </a>
+            <a className="config-nav__item" href="#template-mappings">
+              <div><div className="config-nav__label">2. Template mappings</div><div className="config-nav__meta">Map internal inbox templates to approved WhatsApp template names and exact language codes.</div></div>
+              <Badge tone="neutral">Review</Badge>
+            </a>
             <a className="config-nav__item" href="#runtime">
-              <div><div className="config-nav__label">2. Runtime references</div><div className="config-nav__meta">Read-only delivery and payment values currently driven by runtime config.</div></div>
+              <div><div className="config-nav__label">3. Runtime references</div><div className="config-nav__meta">Read-only delivery and payment values currently driven by runtime config.</div></div>
               <Badge tone="neutral">Review</Badge>
             </a>
             <a className="config-nav__item" href="#verification">
-              <div><div className="config-nav__label">3. Diagnostics and final checks</div><div className="config-nav__meta">Test send, inbox checks, contact reconciliation, and catalog health.</div></div>
+              <div><div className="config-nav__label">4. Diagnostics and final checks</div><div className="config-nav__meta">Test send, inbox checks, contact reconciliation, and catalog health.</div></div>
               <Badge tone={issueTone}>{blockingIssueCount > 0 ? "Action needed" : "On track"}</Badge>
             </a>
           </div>
@@ -506,9 +694,106 @@ export default function SetupPage() {
         </Card>
       </form>
 
+      <Card padding="lg" className="config-section-card" id="template-mappings">
+        <div className="config-section-head">
+          <div>
+            <div className="config-section-eyebrow">Step 2</div>
+            <h3 className="config-section-title">WhatsApp template mappings</h3>
+            <p className="config-section-description">
+              Operators only see template send actions when these internal keys are mapped to real approved WhatsApp template names and exact language codes.
+            </p>
+          </div>
+          <div className="config-actions">
+            <Badge tone={readyTemplateCount === templateConfigs.length && templateConfigs.length > 0 ? "success" : "warning"}>
+              {readyTemplateCount}/{templateConfigs.length} ready
+            </Badge>
+            <Button type="button" loading={savingTemplates} onClick={() => void saveTemplateMappings()}>
+              Save template mappings
+            </Button>
+          </div>
+        </div>
+
+        <div className="config-card-stack">
+          {templateConfigs.map((template) => {
+            const draftReadiness = getDraftTemplateReadiness(template);
+            return (
+            <Card key={template.key} tone="muted" padding="lg" className="config-section-card">
+              <div className="config-section-head">
+                <div>
+                  <div className="config-list-label">{formatTemplateCategory(template.category)}</div>
+                  <div className="config-list-copy">{template.key}</div>
+                </div>
+                <Badge tone={getTemplateTone(draftReadiness.status)}>
+                  {draftReadiness.status_label}
+                </Badge>
+              </div>
+
+              <div className="config-form-grid">
+                <div className="config-field">
+                  <label className="config-field-label">Internal key</label>
+                  <Input value={template.key} disabled />
+                </div>
+                <div className="config-field">
+                  <label className="config-field-label">Category</label>
+                  <Input value={formatTemplateCategory(template.category)} disabled />
+                </div>
+                <div className="config-field">
+                  <label className="config-field-label">Meta template name</label>
+                  <Input
+                    value={template.metaTemplateName ?? ""}
+                    placeholder="approved Meta template name"
+                    onChange={(e) =>
+                      updateTemplateConfig(template.key, {
+                        metaTemplateName: e.target.value,
+                      })
+                    }
+                  />
+                </div>
+                <div className="config-field">
+                  <label className="config-field-label">Language code</label>
+                  <Input
+                    value={template.languageCode ?? ""}
+                    placeholder="sw"
+                    onChange={(e) =>
+                      updateTemplateConfig(template.key, {
+                        languageCode: e.target.value,
+                      })
+                    }
+                  />
+                </div>
+              </div>
+
+              <div className="config-list">
+                <div className="config-list-item">
+                  <div className="config-list-item__copy">
+                    <div className="config-list-title">Required variables</div>
+                    <div className="config-list-copy">
+                      {template.params.map((item) => `${item.label} (${item.key})${item.required ? "" : " optional"}`).join(" | ")}
+                    </div>
+                  </div>
+                  <label className="config-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={template.enabled}
+                      onChange={(e) =>
+                        updateTemplateConfig(template.key, {
+                          enabled: e.target.checked,
+                        })
+                      }
+                    />
+                    <span>Enabled</span>
+                  </label>
+                </div>
+              </div>
+            </Card>
+            );
+          })}
+        </div>
+      </Card>
+
       <div className="config-detail-grid" id="runtime">
         <Card padding="lg" className="config-section-card">
-          <div><div className="config-section-eyebrow">Step 2</div><h3 className="config-section-title">Runtime references</h3><p className="config-section-description">These values are currently runtime-driven so operators can verify delivery and payment assumptions from one place.</p></div>
+          <div><div className="config-section-eyebrow">Step 3</div><h3 className="config-section-title">Runtime references</h3><p className="config-section-description">These values are currently runtime-driven so operators can verify delivery and payment assumptions from one place.</p></div>
           {runtime ? (
             <div className="config-runtime-grid">
               <div className="config-runtime-item"><span className="config-list-label">Delivery base</span><div className="config-runtime-item__value">{runtime.delivery.base_lat}, {runtime.delivery.base_lng}</div></div>
@@ -536,7 +821,7 @@ export default function SetupPage() {
       <div className="config-detail-grid" id="verification">
         <Card padding="lg" className="config-section-card">
           <div className="config-section-head">
-            <div><div className="config-section-eyebrow">Step 3</div><h3 className="config-section-title">Diagnostics and verification</h3><p className="config-section-description">Confirm inbox, graph connection, and contact hygiene before you finalize setup.</p></div>
+            <div><div className="config-section-eyebrow">Step 4</div><h3 className="config-section-title">Diagnostics and verification</h3><p className="config-section-description">Confirm inbox, graph connection, and contact hygiene before you finalize setup.</p></div>
             <div className="config-actions">
               <Button type="button" variant="secondary" loading={reconciling} onClick={() => void runReconcile()}>Reconcile contacts</Button>
               <Button type="button" variant="secondary" loading={checking} onClick={() => void runDiagnostics()}>Refresh checks</Button>

@@ -26,6 +26,12 @@ type FollowupRow = {
   product_name?: string | null;
   stock_qty?: number | null;
   template_key: string;
+  can_send_template: boolean;
+  template_status: string;
+  template_status_label: string;
+  template_reason_code: string | null;
+  template_meta_template_name: string | null;
+  template_language_code: string | null;
 };
 
 type FollowupsResponse = {
@@ -61,6 +67,12 @@ function getTemplateLabel(templateKey: string) {
   if (templateKey === "order_followup_sw") return "Order follow-up";
   if (templateKey === "restock_reengagement_sw") return "Restock / re-engagement";
   return templateKey;
+}
+
+function getTemplateStateTone(status: string) {
+  if (status === "ready") return "success" as const;
+  if (status === "disabled") return "neutral" as const;
+  return "warning" as const;
 }
 
 export default function FollowupsPage() {
@@ -101,6 +113,11 @@ export default function FollowupsPage() {
   );
 
   async function handleSend(row: FollowupRow) {
+    if (!row.can_send_template) {
+      toast.error(row.template_status_label);
+      return;
+    }
+
     if (!row.conversation_id) {
       toast.error("No inbox conversation is available for this customer yet.");
       return;
@@ -247,6 +264,9 @@ export default function FollowupsPage() {
                       <div className="followups-row__chips">
                         <Badge tone="accent">{getQueueLabel(row.queue)}</Badge>
                         <Badge tone="neutral">{getTemplateLabel(row.template_key)}</Badge>
+                        <Badge tone={getTemplateStateTone(row.template_status)}>
+                          {row.template_status_label}
+                        </Badge>
                       </div>
                       <div className="followups-row__title">
                         {row.customer_name || row.customer_phone || "Customer"}
@@ -275,13 +295,19 @@ export default function FollowupsPage() {
                     </div>
 
                     <div className="followups-row__actions">
-                      <Button
-                        size="sm"
-                        loading={sendingKey === row.item_key}
-                        onClick={() => void handleSend(row)}
-                      >
-                        Send suggested template
-                      </Button>
+                      {row.can_send_template && row.conversation_id != null ? (
+                        <Button
+                          size="sm"
+                          loading={sendingKey === row.item_key}
+                          onClick={() => void handleSend(row)}
+                        >
+                          Send suggested template
+                        </Button>
+                      ) : (
+                        <div className="followups-row__state">
+                          {row.can_send_template ? "Inbox thread required" : row.template_status_label}
+                        </div>
+                      )}
                       {row.conversation_id != null && row.customer_phone ? (
                         <Link
                           href={`/inbox?phone=${encodeURIComponent(row.customer_phone)}`}

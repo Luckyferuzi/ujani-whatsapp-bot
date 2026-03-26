@@ -416,13 +416,20 @@ function normalizeInboxTemplateConfig(
   };
 }
 
-export async function getInboxTemplateRegistry(): Promise<InboxTemplateConfig[]> {
-  const stored = await getJsonSetting<InboxTemplateConfig[] | null>("whatsapp_templates", null);
-  const source = Array.isArray(stored) && stored.length > 0 ? stored : DEFAULT_INBOX_TEMPLATES;
+export function normalizeInboxTemplateRegistry(
+  value: unknown
+): InboxTemplateConfig[] {
+  const source =
+    Array.isArray(value) && value.length > 0 ? value : DEFAULT_INBOX_TEMPLATES;
 
   return source.map((item, index) =>
-    normalizeInboxTemplateConfig(item, DEFAULT_INBOX_TEMPLATES[index] ?? item)
+    normalizeInboxTemplateConfig(item, DEFAULT_INBOX_TEMPLATES[index] ?? DEFAULT_INBOX_TEMPLATES[0] ?? item)
   );
+}
+
+export async function getInboxTemplateRegistry(): Promise<InboxTemplateConfig[]> {
+  const stored = await getJsonSetting<InboxTemplateConfig[] | null>("whatsapp_templates", null);
+  return normalizeInboxTemplateRegistry(stored);
 }
 
 export async function getInboxTemplateByKey(templateKey: string): Promise<InboxTemplateConfig | null> {
@@ -430,6 +437,14 @@ export async function getInboxTemplateByKey(templateKey: string): Promise<InboxT
   if (!key) return null;
   const registry = await getInboxTemplateRegistry();
   return registry.find((item) => item.key === key) ?? null;
+}
+
+export async function saveInboxTemplateRegistry(
+  next: InboxTemplateConfig[]
+): Promise<InboxTemplateConfig[]> {
+  const normalized = normalizeInboxTemplateRegistry(next);
+  await setJsonSetting("whatsapp_templates", normalized);
+  return normalized;
 }
 
 export function isInboxTemplateMapped(template: InboxTemplateConfig): boolean {
