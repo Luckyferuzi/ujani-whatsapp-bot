@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { usePathname } from "next/navigation";
 import Sidebar from "@/components/Sidebar";
 import Topbar from "@/components/Tobpar";
@@ -157,11 +157,40 @@ function getPageMeta(pathname: string | null) {
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [desktopSidebarCollapsed, setDesktopSidebarCollapsed] = useState(false);
   const pageMeta = useMemo(() => getPageMeta(pathname), [pathname]);
 
+  useEffect(() => {
+    try {
+      setDesktopSidebarCollapsed(window.localStorage.getItem("ujani-shell-sidebar-collapsed") === "1");
+    } catch {
+      // ignore storage failures
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        "ujani-shell-sidebar-collapsed",
+        desktopSidebarCollapsed ? "1" : "0"
+      );
+    } catch {
+      // ignore storage failures
+    }
+  }, [desktopSidebarCollapsed]);
+
   return (
-    <div className="console-shell">
-      <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+    <div
+      className={
+        "console-shell" + (desktopSidebarCollapsed ? " console-shell--sidebar-collapsed" : "")
+      }
+    >
+      <Sidebar
+        open={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
+        collapsed={desktopSidebarCollapsed}
+        onToggleCollapsed={() => setDesktopSidebarCollapsed((value) => !value)}
+      />
 
       <div className="console-shell__main">
         <Topbar

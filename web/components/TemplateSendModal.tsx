@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { api, type ApiError } from "@/lib/api";
 
 type TemplateField = {
@@ -12,10 +13,14 @@ type TemplateField = {
 type TemplateOption = {
   key: string;
   meta_template_name: string | null;
-  language_code: string;
+  language_code: string | null;
   category: string;
   label: string;
   enabled: boolean;
+  can_send: boolean;
+  template_status: string;
+  template_status_label: string;
+  template_reason_code: string;
   params: TemplateField[];
   default_params: Record<string, string>;
   preview: string;
@@ -51,7 +56,21 @@ function formatCategory(category: string) {
   return "Restock";
 }
 
+function describeTemplateReadiness(item: TemplateOption) {
+  if (item.template_reason_code === "template_config_missing") {
+    return "This template needs a real approved WhatsApp template name before it can be sent.";
+  }
+  if (item.template_reason_code === "template_language_unavailable") {
+    return "This template needs the exact approved WhatsApp language code before it can be sent.";
+  }
+  if (item.template_reason_code === "template_disabled") {
+    return "This template is disabled in setup and cannot be sent right now.";
+  }
+  return "This template is not ready to send yet.";
+}
+
 export default function TemplateSendModal({ conversationId, open, onClose, onSent }: Props) {
+  const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -71,7 +90,12 @@ export default function TemplateSendModal({ conversationId, open, onClose, onSen
         if (cancelled) return;
         const options = data?.items ?? [];
         setItems(options);
-        const preferred = options.find((item) => item.suggested) ?? options[0] ?? null;
+        const preferred =
+          options.find((item) => item.suggested && item.can_send) ??
+          options.find((item) => item.can_send) ??
+          options.find((item) => item.suggested) ??
+          options[0] ??
+          null;
         setSelectedKey(preferred?.key ?? null);
         setParams(preferred?.default_params ?? {});
       })
@@ -107,7 +131,7 @@ export default function TemplateSendModal({ conversationId, open, onClose, onSen
   if (!open) return null;
 
   async function handleSubmit() {
-    if (!selected) return;
+    if (!selected || !selected.can_send) return;
     setSending(true);
     setError(null);
 
@@ -155,7 +179,19 @@ export default function TemplateSendModal({ conversationId, open, onClose, onSen
         {loading ? (
           <div className="template-modal-state">Loading templates...</div>
         ) : !selected ? (
-          <div className="template-modal-state">No enabled templates are available.</div>
+          <div className="template-modal-state template-modal-state--empty">
+            <div>No WhatsApp templates are configured for this workspace yet.</div>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => {
+                onClose();
+                router.push("/setup");
+              }}
+            >
+              Open setup
+            </button>
+          </div>
         ) : (
           <div className="template-modal-body">
             <div className="template-options">
@@ -166,7 +202,8 @@ export default function TemplateSendModal({ conversationId, open, onClose, onSen
                   className={
                     "template-option" +
                     (item.key === selected.key ? " template-option--active" : "") +
-                    (item.suggested ? " template-option--suggested" : "")
+                    (item.suggested ? " template-option--suggested" : "") +
+                    (!item.can_send ? " template-option--disabled" : "")
                   }
                   onClick={() => {
                     setSelectedKey(item.key);
@@ -177,13 +214,33 @@ export default function TemplateSendModal({ conversationId, open, onClose, onSen
                   <div className="template-option-meta">
                     {formatCategory(item.category)}
                     {item.suggested ? " · Suggested" : ""}
+                    {!item.can_send ? ` · ${item.template_status_label}` : ""}
                   </div>
                 </button>
               ))}
             </div>
 
             <div className="template-form">
-                <div className="template-form-preview">
+              {!selected.can_send ? (
+                <div className="template-modal-warning">
+                  <div className="template-form-label">{selected.template_status_label}</div>
+                  <div className="template-form-preview-copy">
+                    {describeTemplateReadiness(selected)}
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => {
+                      onClose();
+                      router.push("/setup");
+                    }}
+                  >
+                    Open setup
+                  </button>
+                </div>
+              ) : null}
+
+              <div className="template-form-preview">
                 <div className="template-form-label">Preview</div>
                 <div className="template-form-preview-copy">{selected.preview}</div>
               </div>
@@ -212,10 +269,20 @@ export default function TemplateSendModal({ conversationId, open, onClose, onSen
               {error ? <div className="template-modal-error">{error}</div> : null}
 
               <div className="template-modal-actions">
-                <button type="button" className="btn btn-secondary" onClick={onClose} disabled={sending}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={onClose}
+                  disabled={sending}
+                >
                   Cancel
                 </button>
-                <button type="button" className="btn btn-success" onClick={handleSubmit} disabled={sending}>
+                <button
+                  type="button"
+                  className="btn btn-success"
+                  onClick={handleSubmit}
+                  disabled={sending || !selected.can_send}
+                >
                   {sending ? "Sending..." : "Send template"}
                 </button>
               </div>

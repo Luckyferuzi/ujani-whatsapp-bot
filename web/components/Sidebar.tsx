@@ -164,9 +164,13 @@ function isActive(pathname: string | null, href: string) {
 export default function Sidebar({
   open,
   onClose,
+  collapsed,
+  onToggleCollapsed,
 }: {
   open: boolean;
   onClose: () => void;
+  collapsed?: boolean;
+  onToggleCollapsed?: () => void;
 }) {
   const pathname = usePathname();
   const { user } = useAuth();
@@ -226,6 +230,15 @@ export default function Sidebar({
 
       <aside className={"console-sidebar" + (open ? " console-sidebar--open" : "")}>
         <div className="console-sidebar__top">
+          <button
+            type="button"
+            className="console-sidebar__collapse"
+            onClick={onToggleCollapsed}
+            aria-label={collapsed ? "Expand navigation" : "Collapse navigation"}
+            title={collapsed ? "Expand navigation" : "Collapse navigation"}
+          >
+            {collapsed ? ">" : "<"}
+          </button>
           <Link href="/" className="console-sidebar__brand" onClick={onClose}>
             <div className="console-sidebar__brand-mark">UJ</div>
             <div className="console-sidebar__brand-copy">
@@ -250,6 +263,7 @@ export default function Sidebar({
                         "console-sidebar__link" + (active ? " console-sidebar__link--active" : "")
                       }
                       onClick={onClose}
+                      title={collapsed ? item.label : undefined}
                     >
                       <span className="console-sidebar__link-mark" aria-hidden="true">
                         {item.shortLabel}

@@ -977,6 +977,10 @@ body {
   background: var(--ds-color-bg-canvas);
 }
 
+.console-shell--sidebar-collapsed {
+  grid-template-columns: 4.5rem minmax(0, 1fr);
+}
+
 .auth-shell {
   width: min(100%, 78rem);
   margin: 0 auto;
@@ -1616,6 +1620,32 @@ body {
   background: color-mix(in srgb, var(--ds-color-surface-raised) 97%, transparent);
 }
 
+.console-sidebar__collapse {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  justify-self: end;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 0.6875rem;
+  border: 1px solid var(--ds-color-border-soft);
+  background: color-mix(in srgb, var(--ds-color-surface-raised) 96%, transparent);
+  color: var(--ds-color-text-muted);
+  font: inherit;
+  font-size: 0.8125rem;
+  font-weight: var(--ds-font-weight-semibold);
+  cursor: pointer;
+  transition: border-color var(--ds-duration-fast) var(--ds-ease-standard),
+    background-color var(--ds-duration-fast) var(--ds-ease-standard),
+    color var(--ds-duration-fast) var(--ds-ease-standard);
+}
+
+.console-sidebar__collapse:hover {
+  border-color: var(--ds-color-border-contrast);
+  background: color-mix(in srgb, var(--ds-color-surface-muted) 88%, transparent);
+  color: var(--ds-color-text-strong);
+}
+
 .console-sidebar__top {
   display: grid;
   gap: var(--ds-space-2);
@@ -1689,6 +1719,46 @@ body {
 .console-sidebar__section {
   display: grid;
   gap: 0.375rem;
+}
+
+.console-shell--sidebar-collapsed .console-sidebar {
+  padding-inline: 0.5rem;
+}
+
+.console-shell--sidebar-collapsed .console-sidebar__top {
+  justify-items: center;
+}
+
+.console-shell--sidebar-collapsed .console-sidebar__brand {
+  justify-content: center;
+  padding-inline: 0;
+}
+
+.console-shell--sidebar-collapsed .console-sidebar__brand-copy,
+.console-shell--sidebar-collapsed .console-sidebar__section-title,
+.console-shell--sidebar-collapsed .console-sidebar__link-label,
+.console-shell--sidebar-collapsed .console-sidebar__link-description {
+  display: none;
+}
+
+.console-shell--sidebar-collapsed .console-sidebar__nav {
+  justify-items: center;
+}
+
+.console-shell--sidebar-collapsed .console-sidebar__link {
+  width: 3rem;
+  min-height: 3rem;
+  justify-content: center;
+  padding: 0;
+}
+
+.console-shell--sidebar-collapsed .console-sidebar__link-copy {
+  display: none;
+}
+
+.console-shell--sidebar-collapsed .console-sidebar__link-mark {
+  width: 1.875rem;
+  height: 1.875rem;
 }
 
 .console-sidebar__nav {
@@ -1809,8 +1879,7 @@ body {
   position: relative;
 }
 
-.console-topbar__toggle,
-.console-topbar__theme {
+.console-topbar__toggle {
   min-height: 2.125rem;
   border-radius: 0.6875rem;
   border: 1px solid var(--ds-color-border-soft);
@@ -1839,45 +1908,14 @@ body {
   background: currentColor;
 }
 
-.console-topbar__context {
-  min-width: 0;
-  display: grid;
-  gap: 0;
-}
-
-.console-topbar__eyebrow {
-  font-size: 0.6875rem;
-  line-height: 1.2;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  font-weight: var(--ds-font-weight-semibold);
-  color: var(--ds-color-text-faint);
-}
-
-.console-topbar__title-row {
-  display: flex;
-  align-items: center;
-  gap: var(--ds-space-2);
-  min-width: 0;
-}
-
-.console-topbar__title {
-  min-width: 0;
-  font-size: 0.9375rem;
-  line-height: 1.2;
-  font-weight: var(--ds-font-weight-semibold);
-  color: var(--ds-color-text-strong);
-}
-
 .console-topbar__user,
-.console-topbar__login,
-.console-topbar__theme {
+.console-topbar__login {
   display: inline-flex;
   align-items: center;
   gap: var(--ds-space-2);
-  min-height: 2.125rem;
-  padding: 0 0.75rem;
-  border-radius: 0.6875rem;
+  min-height: 2.375rem;
+  padding: 0 0.625rem;
+  border-radius: 999px;
   border: 1px solid var(--ds-color-border-soft);
   background: color-mix(in srgb, var(--ds-color-surface-raised) 96%, transparent);
   color: var(--ds-color-text-muted);
@@ -1890,15 +1928,13 @@ body {
 }
 
 .console-topbar__user:hover,
-.console-topbar__login:hover,
-.console-topbar__theme:hover {
+.console-topbar__login:hover {
   border-color: var(--ds-color-border-contrast);
   background: color-mix(in srgb, var(--ds-color-surface-muted) 88%, transparent);
   color: var(--ds-color-text-strong);
 }
 
-.console-topbar__user--open,
-.console-topbar__theme[aria-pressed="true"] {
+.console-topbar__user--open {
   border-color: var(--ds-color-accent-border);
   background: color-mix(in srgb, var(--ds-color-accent-soft) 42%, var(--ds-color-surface-raised));
   color: var(--ds-color-text-strong);
@@ -1915,25 +1951,6 @@ body {
   color: var(--ds-color-accent-solid);
   font-size: 0.6875rem;
   font-weight: var(--ds-font-weight-bold);
-}
-
-.console-topbar__user-meta {
-  display: grid;
-  gap: 0.0625rem;
-  text-align: left;
-}
-
-.console-topbar__user-email {
-  font-size: 0.75rem;
-  line-height: 1.2;
-  font-weight: var(--ds-font-weight-medium);
-  color: var(--ds-color-text-strong);
-}
-
-.console-topbar__user-role {
-  font-size: 0.6875rem;
-  line-height: 1.2;
-  color: var(--ds-color-text-faint);
 }
 
 .console-topbar__menu {
@@ -1982,6 +1999,10 @@ body {
   .console-shell {
     grid-template-columns: 14rem minmax(0, 1fr);
   }
+
+  .console-shell--sidebar-collapsed {
+    grid-template-columns: 4.5rem minmax(0, 1fr);
+  }
 }
 
 @media (max-width: 900px) {
@@ -2009,6 +2030,10 @@ body {
 
   .console-topbar__toggle {
     display: inline-flex;
+  }
+
+  .console-sidebar__collapse {
+    display: none;
   }
 
   .console-page {
@@ -2059,10 +2084,6 @@ body {
 @media (max-width: 720px) {
   .page-header__title {
     font-size: 1.1875rem;
-  }
-
-  .console-topbar__user-email {
-    display: none;
   }
 
   .console-page {

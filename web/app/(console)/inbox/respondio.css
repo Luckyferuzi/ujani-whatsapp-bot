@@ -33,8 +33,6 @@
   align-items: stretch;
 }
 
-.inbox-main--list-collapsed { grid-template-columns: minmax(0, 1fr); }
-
 .inbox-rail,
 .inbox-focus-region,
 .conversation-list,
@@ -214,8 +212,6 @@
   line-height: 1.65;
   color: var(--inbox-text-muted);
 }
-
-.inbox-empty-action { margin-top: 16px; }
 
 .conversation-list-header,
 .thread-header,
@@ -593,6 +589,10 @@
 .thread-header-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .thread-header-action--mobile { display: none; }
 .thread-header-action--inline { padding: 6px 10px; border-radius: 10px; }
+.thread-state-badge--button {
+  appearance: none;
+  cursor: pointer;
+}
 
 .thread-agent-toggle {
   min-width: 128px;
@@ -631,11 +631,17 @@
 .thread-failure-wrap { flex: 0 0 auto; padding: 8px 18px 0; }
 
 .thread-failure-banner {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
   padding: 10px 12px;
   border-radius: 12px;
   border: 1px solid color-mix(in srgb, var(--ds-color-danger-border) 78%, var(--inbox-border) 22%);
   background: color-mix(in srgb, var(--ds-color-danger-soft) 46%, var(--inbox-panel-raised) 54%);
 }
+
+.thread-failure-banner-main { min-width: 0; }
 
 .thread-failure-banner-title { font-size: 12px; font-weight: 800; color: var(--ds-color-danger-solid); }
 
@@ -645,6 +651,18 @@
   font-size: 12px;
   line-height: 1.55;
   color: color-mix(in srgb, var(--ds-color-danger-solid) 88%, var(--inbox-text) 12%);
+}
+
+.thread-banner-close,
+.thread-inline-dismiss {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--inbox-text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
 }
 
 .thread-body {
@@ -711,8 +729,8 @@
 .thread-role-label { letter-spacing: 0.08em; text-transform: uppercase; }
 
 .thread-bubble {
-  width: 100%;
-  max-width: 42rem;
+  width: fit-content;
+  max-width: min(100%, 38rem);
   padding: 10px 12px;
   border: 1px solid color-mix(in srgb, var(--inbox-border) 74%, transparent);
   border-radius: 10px;
@@ -720,9 +738,12 @@
   box-shadow: none;
 }
 
-.thread-message--inbound .thread-bubble { margin-right: 4.5rem; }
-.thread-message--outbound .thread-bubble {
-  margin-left: 4.5rem;
+.thread-bubble--inbound {
+  margin-right: auto;
+}
+
+.thread-bubble--outbound {
+  margin-left: auto;
   background: color-mix(in srgb, var(--inbox-accent-soft) 13%, var(--inbox-panel-raised) 87%);
   border-color: color-mix(in srgb, var(--inbox-accent-border) 46%, var(--inbox-border) 54%);
 }
@@ -828,6 +849,13 @@
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+}
+
+.thread-composer-inline-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .thread-composer-inline-hint--danger {
@@ -1123,6 +1151,10 @@
 }
 
 .template-modal-state { padding: 18px 20px 20px; }
+.template-modal-state--empty {
+  display: grid;
+  gap: 12px;
+}
 
 .template-modal-body {
   display: grid;
@@ -1150,8 +1182,18 @@
 }
 
 .template-option--suggested { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ds-color-info-border) 42%, transparent); }
+.template-option--disabled { opacity: 0.82; }
 .template-option-title, .template-form-label, .template-field-label { font-size: 12px; font-weight: 700; color: var(--inbox-text-strong); }
 .template-form { display: flex; flex-direction: column; gap: 14px; }
+
+.template-modal-warning {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--ds-color-warning-border) 72%, var(--inbox-border) 28%);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--ds-color-warning-soft) 34%, var(--inbox-panel-raised) 66%);
+}
 
 .template-form-preview {
   padding: 14px;
@@ -1225,8 +1267,6 @@
     padding-right: 16px;
   }
 
-  .thread-message--inbound .thread-bubble { margin-right: 2.5rem; }
-  .thread-message--outbound .thread-bubble { margin-left: 2.5rem; }
   .template-modal-body { grid-template-columns: 1fr; }
 }
 
@@ -1267,8 +1307,7 @@
   .thread-title-row { gap: 10px; }
   .thread-identity { width: 100%; }
   .thread-title-badges { width: 100%; }
-  .thread-message--inbound .thread-bubble,
-  .thread-message--outbound .thread-bubble { margin-left: 0; margin-right: 0; max-width: 100%; }
+  .thread-bubble { max-width: 100%; }
 
   .thread-input-row { grid-template-columns: 1fr auto; }
   .thread-attach-button { grid-column: 1 / 2; justify-self: start; }

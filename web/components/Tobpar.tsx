@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/components/AuthProvider";
-import { applyThemeMode, readStoredThemeMode, type ThemeMode } from "@/lib/theme";
 
 type TopbarProps = {
   pageTitle?: string;
@@ -14,32 +13,15 @@ type TopbarProps = {
   isInbox?: boolean;
 };
 
-function cycleTheme(current: ThemeMode): ThemeMode {
-  if (current === "system") return "light";
-  if (current === "light") return "dark";
-  return "system";
-}
-
 export default function Topbar({
-  pageTitle,
-  pageSection,
-  pageDescription,
   showSidebarToggle,
   onToggleSidebar,
-  isInbox,
 }: TopbarProps) {
   const pathname = usePathname();
   const router = useRouter();
   const { user, logout } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
-  const [themeMode, setThemeMode] = useState<ThemeMode>("system");
   const menuRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    const mode = readStoredThemeMode();
-    setThemeMode(mode);
-    applyThemeMode(mode);
-  }, []);
 
   useEffect(() => {
     setMenuOpen(false);
@@ -69,12 +51,6 @@ export default function Topbar({
     return (user?.email?.trim()?.[0] || "U").toUpperCase();
   }, [user?.email]);
 
-  const themeLabel = useMemo(() => {
-    if (themeMode === "system") return "System";
-    if (themeMode === "dark") return "Dark";
-    return "Light";
-  }, [themeMode]);
-
   return (
     <header className="console-topbar">
       <div className="console-topbar__main">
@@ -91,13 +67,6 @@ export default function Topbar({
               <span />
             </button>
           ) : null}
-
-          <div className="console-topbar__context">
-            <div className="console-topbar__eyebrow">{pageSection || "Workspace"}</div>
-            <div className="console-topbar__title-row">
-              <div className="console-topbar__title">{pageTitle || "Ujani Console"}</div>
-            </div>
-          </div>
         </div>
 
         <div className="console-topbar__actions" ref={menuRef}>
@@ -109,32 +78,12 @@ export default function Topbar({
             <>
               <button
                 type="button"
-                className="console-topbar__theme"
-                onClick={() => {
-                  const next = cycleTheme(themeMode);
-                  setThemeMode(next);
-                  applyThemeMode(next);
-                }}
-                aria-label={`Theme: ${themeLabel}`}
-                title={`Theme: ${themeLabel}`}
-              >
-                {themeLabel}
-              </button>
-
-              <button
-                type="button"
                 className={"console-topbar__user" + (menuOpen ? " console-topbar__user--open" : "")}
                 onClick={() => setMenuOpen((value) => !value)}
                 aria-haspopup="menu"
                 aria-expanded={menuOpen}
               >
                 <span className="console-topbar__avatar">{initial}</span>
-                <span className="console-topbar__user-meta">
-                  <span className="console-topbar__user-email">{user.email}</span>
-                  <span className="console-topbar__user-role">
-                    {user.role === "admin" ? "Administrator" : "Operator"}
-                  </span>
-                </span>
               </button>
 
               {menuOpen ? (

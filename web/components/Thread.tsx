@@ -24,8 +24,6 @@ type ThreadProps = {
   onOpenContext?: () => void;
   onToggleContext?: () => void;
   contextOpen?: boolean;
-  onToggleList?: () => void;
-  listOpen?: boolean;
 };
 
 function formatTime(iso: string) {
@@ -364,6 +362,14 @@ function describeFailure(msg: Msg) {
     return "Customer is outside WhatsApp's free reply window. A template message is required before another manual text can be sent.";
   }
 
+  if ((msg.status_reason ?? "").toLowerCase() === "template_config_missing") {
+    return "This template is not configured yet. Map the approved WhatsApp template name in Setup before sending.";
+  }
+
+  if ((msg.status_reason ?? "").toLowerCase() === "template_language_unavailable") {
+    return "This template is missing the exact approved WhatsApp language code. Update it in Setup before sending.";
+  }
+
   if (msg.error_details) return msg.error_details;
   if (msg.error_title) return msg.error_title;
   return "WhatsApp could not deliver this message.";
@@ -569,8 +575,6 @@ export default function Thread({
   onOpenContext,
   onToggleContext,
   contextOpen = false,
-  onToggleList,
-  listOpen = true,
 }: ThreadProps) {
   const router = useRouter();
   const [messages, setMessages] = useState<Msg[]>([]);
@@ -582,6 +586,8 @@ export default function Thread({
   const [sending, setSending] = useState(false);
   const [showBotModeHint, setShowBotModeHint] = useState(false);
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
+  const [dismissedHeaderFailureId, setDismissedHeaderFailureId] = useState<string | number | null>(null);
+  const [dismissedComposerNoticeKey, setDismissedComposerNoticeKey] = useState<string | null>(null);
   const [productNames, setProductNames] = useState<Record<string, string>>({});
   const [activeMediaActionsId, setActiveMediaActionsId] = useState<string | number | null>(null);
 
@@ -783,6 +789,8 @@ export default function Thread({
     setActiveMediaActionsId(null);
     setShowBotModeHint(false);
     setTemplateModalOpen(false);
+    setDismissedHeaderFailureId(null);
+    setDismissedComposerNoticeKey(null);
     initialScrolledRef.current = false;
     setIsAtBottom(true);
     void loadMessages({ preserveExisting: false });
@@ -926,20 +934,25 @@ export default function Thread({
       : null;
   const shouldShowHeaderFailure =
     !!latestFailedOutbound &&
-    String(latestFailedOutbound.status_reason ?? "").toLowerCase() !== "template_required";
-  const composerNotice = showBotModeHint && !agentAllowed
+    String(latestFailedOutbound.status_reason ?? "").toLowerCase() !== "template_required" &&
+    String(dismissedHeaderFailureId ?? "") !== String(latestFailedOutbound.id);
+  const rawComposerNotice = showBotModeHint && !agentAllowed
     ? {
-        tone: "warning" as const,
+        key: "bot_mode",
         message: "Bot mode is active. Switch to Agent Mode to send a manual reply.",
         actionLabel: null as string | null,
       }
     : composerBlockedByWindow
       ? {
-          tone: "warning" as const,
+          key: "template_required",
           message:
             "Manual free-text is paused because the conversation is outside WhatsApp's free reply window.",
           actionLabel: "Use template",
         }
+      : null;
+  const composerNotice =
+    rawComposerNotice && dismissedComposerNoticeKey !== rawComposerNotice.key
+      ? rawComposerNotice
       : null;
 
   return (
@@ -948,15 +961,26 @@ export default function Thread({
         <div className="thread-lane thread-lane--header">
           <div className="thread-header-main">
             <div className="thread-title-row">
-              <button
-                type="button"
+              <div
                 className="thread-identity"
+                role="button"
+                tabIndex={0}
                 onClick={() => {
                   if (onToggleContext) {
                     onToggleContext();
                     return;
                   }
                   onOpenContext?.();
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    if (onToggleContext) {
+                      onToggleContext();
+                      return;
+                    }
+                    onOpenContext?.();
+                  }
                 }}
               >
               <div className="thread-title" title={title}>
@@ -971,7 +995,28 @@ export default function Thread({
               >
                 {agentAllowed ? "Human" : "Bot"}
               </span>
-              <span className={freeReplyState.className}>{freeReplyState.label}</span>
+              {freeReplyState.allowed ? (
+                <span className={freeReplyState.className}>{freeReplyState.label}</span>
+              ) : (
+                <span
+                  className={freeReplyState.className + " thread-state-badge--button"}
+                  role="button"
+                  tabIndex={0}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setTemplateModalOpen(true);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      setTemplateModalOpen(true);
+                    }
+                  }}
+                >
+                  {freeReplyState.label}
+                </span>
+              )}
               </div>
               <div className="thread-subtitle">
               {formatPhonePretty(convo.phone)}
@@ -987,18 +1032,9 @@ export default function Thread({
                 </span>
               )}
               </div>
-              </button>
+              </div>
             </div>
             <div className="thread-header-actions">
-              {onToggleList ? (
-                <button
-                  type="button"
-                  className="thread-header-action"
-                  onClick={onToggleList}
-                >
-                  {listOpen ? "Hide list" : "Show list"}
-                </button>
-              ) : null}
               <button
                 type="button"
                 className="thread-header-action"
@@ -1056,10 +1092,19 @@ export default function Thread({
         <div className="thread-failure-wrap">
           <div className="thread-lane">
             <div className="thread-failure-banner" role="status" aria-live="polite">
-              <div className="thread-failure-banner-title">Latest outbound message failed</div>
-              <div className="thread-failure-banner-copy">
-                {describeFailure(latestFailedOutbound)}
+              <div className="thread-failure-banner-main">
+                <div className="thread-failure-banner-title">Latest outbound message failed</div>
+                <div className="thread-failure-banner-copy">
+                  {describeFailure(latestFailedOutbound)}
+                </div>
               </div>
+              <button
+                type="button"
+                className="thread-banner-close"
+                onClick={() => setDismissedHeaderFailureId(latestFailedOutbound.id)}
+              >
+                Close
+              </button>
             </div>
           </div>
         </div>
@@ -1123,6 +1168,7 @@ export default function Thread({
                 const bubbleClass =
                   "thread-bubble" +
                   (role === "bot" ? " thread-bubble--bot" : "") +
+                  (outbound ? " thread-bubble--outbound" : " thread-bubble--inbound") +
                   (groupedWithPrev ? " thread-bubble--stacked-prev" : "") +
                   (groupedWithNext ? " thread-bubble--stacked-next" : "") +
                   (isSending ? " thread-bubble--pending" : "") +
@@ -1200,15 +1246,24 @@ export default function Thread({
               aria-live="polite"
             >
               <span>{composerNotice.message}</span>
-              {composerNotice.actionLabel ? (
+              <div className="thread-composer-inline-actions">
+                {composerNotice.actionLabel ? (
+                  <button
+                    type="button"
+                    className="thread-header-action thread-header-action--inline"
+                    onClick={() => setTemplateModalOpen(true)}
+                  >
+                    {composerNotice.actionLabel}
+                  </button>
+                ) : null}
                 <button
                   type="button"
-                  className="thread-header-action thread-header-action--inline"
-                  onClick={() => setTemplateModalOpen(true)}
+                  className="thread-inline-dismiss"
+                  onClick={() => setDismissedComposerNoticeKey(composerNotice.key)}
                 >
-                  {composerNotice.actionLabel}
+                  Close
                 </button>
-              ) : null}
+              </div>
             </div>
           ) : null}
           <div className="thread-input-row">

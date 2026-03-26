@@ -13,7 +13,6 @@ type MobileView = "list" | "chat";
 const MOBILE_BREAKPOINT = 768;
 const STORAGE_KEY = "ujani-inbox-active";
 const STORAGE_MAX_AGE_MS = 10 * 60 * 1000;
-const DESKTOP_LIST_STORAGE_KEY = "ujani-inbox-desktop-list-open";
 
 function readSavedConversationId(): string | null {
   try {
@@ -58,7 +57,6 @@ export default function InboxPage() {
   const [isMobile, setIsMobile] = useState(false);
   const [mobileView, setMobileView] = useState<MobileView>("list");
   const [showMobileMenu, setShowMobileMenu] = useState(false);
-  const [desktopListOpen, setDesktopListOpen] = useState(true);
   const [desktopContextOpen, setDesktopContextOpen] = useState(false);
 
   const searchParams = useSearchParams();
@@ -85,29 +83,6 @@ export default function InboxPage() {
   useEffect(() => {
     setSavedId(readSavedConversationId());
   }, []);
-
-  useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(DESKTOP_LIST_STORAGE_KEY);
-      if (raw === "0") {
-        setDesktopListOpen(false);
-      }
-    } catch {
-      // ignore
-    }
-  }, []);
-
-  useEffect(() => {
-    if (isMobile) return;
-    try {
-      window.localStorage.setItem(
-        DESKTOP_LIST_STORAGE_KEY,
-        desktopListOpen ? "1" : "0"
-      );
-    } catch {
-      // ignore
-    }
-  }, [desktopListOpen, isMobile]);
 
   const handlePick = async (convo: Convo) => {
     setActive(convo);
@@ -191,12 +166,7 @@ export default function InboxPage() {
 
   return (
     <div className="inbox-root">
-      <div
-        className={
-          "inbox-main" +
-          (!desktopListOpen && !isMobile ? " inbox-main--list-collapsed" : "")
-        }
-      >
+      <div className="inbox-main">
         {isMobile ? (
           <>
             {mobileView === "list" || !active ? (
@@ -267,16 +237,14 @@ export default function InboxPage() {
           </>
         ) : (
           <>
-            {desktopListOpen ? (
-              <div className="inbox-rail inbox-rail--list">
-                <ConversationList
-                  activeId={active ? active.id : null}
-                  onPick={handlePick}
-                  phoneFilter={phoneFromUrl}
-                  onLoaded={handleLoaded}
-                />
-              </div>
-            ) : null}
+            <div className="inbox-rail inbox-rail--list">
+              <ConversationList
+                activeId={active ? active.id : null}
+                onPick={handlePick}
+                phoneFilter={phoneFromUrl}
+                onLoaded={handleLoaded}
+              />
+            </div>
 
             <div className="inbox-focus-region">
               {active ? (
@@ -285,8 +253,6 @@ export default function InboxPage() {
                   onOpenContext={() => setDesktopContextOpen(true)}
                   onToggleContext={() => setDesktopContextOpen((prev) => !prev)}
                   contextOpen={desktopContextOpen}
-                  onToggleList={() => setDesktopListOpen((prev) => !prev)}
-                  listOpen={desktopListOpen}
                 />
               ) : (
                 <div className="inbox-empty-state">
@@ -298,15 +264,6 @@ export default function InboxPage() {
                     Review customer history, payment status, delivery progress, and
                     internal notes from one focused working view.
                   </div>
-                  {!desktopListOpen ? (
-                    <button
-                      type="button"
-                      className="thread-header-action inbox-empty-action"
-                      onClick={() => setDesktopListOpen(true)}
-                    >
-                      Show conversations
-                    </button>
-                  ) : null}
                 </div>
               )}
 

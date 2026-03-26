@@ -557,18 +557,16 @@ sendRoutes.get("/conversations/:id/template-options", async (req, res) => {
     }
 
     const registry = await getInboxTemplateRegistry();
-    const enabledTemplates = registry
-      .map((template) => ({
-        template,
-        readiness: resolveInboxTemplateReadiness(template),
-      }))
-      .filter((item) => item.readiness.can_send);
+    const templateEntries = registry.map((template) => ({
+      template,
+      readiness: resolveInboxTemplateReadiness(template),
+    }));
     const suggestedCategory = buildTemplateSuggestionCategory({
       latestOrder: context.latestOrder,
       restockItems: context.restockItems,
     });
 
-    const items = enabledTemplates.map(({ template, readiness }) => {
+    const items = templateEntries.map(({ template, readiness }) => {
       const { defaults, preview } = buildTemplateDefaults(template, context);
       return {
         key: template.key,
