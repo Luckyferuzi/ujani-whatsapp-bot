@@ -33,11 +33,11 @@ export type TemplateParameterMeta = {
 
 export type InboxTemplateConfig = {
   key: string;
-  template_name: string;
-  language_code: string;
+  metaTemplateName: string | null;
+  languageCode: string | null;
   category: "payment_reminder" | "order_followup" | "restock_reengagement";
   enabled: boolean;
-  parameter_meta: TemplateParameterMeta[];
+  params: TemplateParameterMeta[];
 };
 
 export type BusinessTextOverrideKey =
@@ -135,11 +135,11 @@ export const DEFAULT_COMPANY_SETTINGS: CompanySettings = {
 export const DEFAULT_INBOX_TEMPLATES: InboxTemplateConfig[] = [
   {
     key: "payment_reminder_sw",
-    template_name: "payment_reminder_sw",
-    language_code: "sw",
+    metaTemplateName: null,
+    languageCode: "sw",
     category: "payment_reminder",
     enabled: true,
-    parameter_meta: [
+    params: [
       { key: "customer_name", label: "Customer name", required: true },
       { key: "order_code", label: "Order code", required: true },
       { key: "amount_due", label: "Amount due", required: true },
@@ -147,22 +147,22 @@ export const DEFAULT_INBOX_TEMPLATES: InboxTemplateConfig[] = [
   },
   {
     key: "order_followup_sw",
-    template_name: "order_followup_sw",
-    language_code: "sw",
+    metaTemplateName: null,
+    languageCode: "sw",
     category: "order_followup",
     enabled: true,
-    parameter_meta: [
+    params: [
       { key: "customer_name", label: "Customer name", required: true },
       { key: "order_code", label: "Order code", required: true },
     ],
   },
   {
     key: "restock_reengagement_sw",
-    template_name: "restock_reengagement_sw",
-    language_code: "sw",
+    metaTemplateName: null,
+    languageCode: "sw",
     category: "restock_reengagement",
     enabled: true,
-    parameter_meta: [
+    params: [
       { key: "customer_name", label: "Customer name", required: true },
       { key: "product_name", label: "Product name", required: false },
     ],
@@ -383,18 +383,36 @@ function normalizeTemplateParameterMeta(
 }
 
 function normalizeInboxTemplateConfig(
-  value: InboxTemplateConfig,
+  value: any,
   fallback: InboxTemplateConfig
 ): InboxTemplateConfig {
+  const key = String(value?.key ?? fallback.key).trim() || fallback.key;
+  const explicitMetaTemplateName =
+    value?.metaTemplateName ?? value?.meta_template_name ?? null;
+  const legacyTemplateName = value?.template_name ?? null;
+  const resolvedMetaTemplateNameRaw =
+    explicitMetaTemplateName != null ? explicitMetaTemplateName : legacyTemplateName;
+  const resolvedMetaTemplateName = String(resolvedMetaTemplateNameRaw ?? "").trim() || null;
+  const normalizedMetaTemplateName =
+    explicitMetaTemplateName == null && resolvedMetaTemplateName === key
+      ? null
+      : resolvedMetaTemplateName;
+
   return {
-    key: String(value?.key ?? fallback.key).trim() || fallback.key,
-    template_name:
-      String(value?.template_name ?? fallback.template_name).trim() || fallback.template_name,
-    language_code:
-      String(value?.language_code ?? fallback.language_code).trim() || fallback.language_code,
+    key,
+    metaTemplateName: normalizedMetaTemplateName,
+    languageCode:
+      String(
+        value?.languageCode ??
+          value?.language_code ??
+          fallback.languageCode ??
+          ""
+      ).trim() || null,
     category: (value?.category ?? fallback.category) as InboxTemplateConfig["category"],
     enabled: value?.enabled !== false,
-    parameter_meta: normalizeTemplateParameterMeta(value?.parameter_meta ?? fallback.parameter_meta),
+    params: normalizeTemplateParameterMeta(
+      value?.params ?? value?.parameter_meta ?? fallback.params
+    ),
   };
 }
 
@@ -412,6 +430,13 @@ export async function getInboxTemplateByKey(templateKey: string): Promise<InboxT
   if (!key) return null;
   const registry = await getInboxTemplateRegistry();
   return registry.find((item) => item.key === key) ?? null;
+}
+
+export function isInboxTemplateMapped(template: InboxTemplateConfig): boolean {
+  return (
+    String(template.metaTemplateName ?? "").trim().length > 0 &&
+    String(template.languageCode ?? "").trim().length > 0
+  );
 }
 
 export function getEmbeddedConfigIdEffective(): string | null {

@@ -807,6 +807,7 @@ export async function insertInboundMessage(
       "error_code",
       "error_title",
       "error_details",
+      "template_key",
       "template_name",
       "template_language",
       "wa_message_id",
@@ -833,6 +834,7 @@ export async function findMessageByWaMessageId(waMessageId: string) {
       "error_code",
       "error_title",
       "error_details",
+      "template_key",
       "template_name",
       "template_language",
       "created_at"
@@ -853,6 +855,7 @@ export async function insertOutboundMessage(
     errorCode?: string | null;
     errorTitle?: string | null;
     errorDetails?: string | null;
+    templateKey?: string | null;
     templateName?: string | null;
     templateLanguage?: string | null;
   }
@@ -870,6 +873,7 @@ export async function insertOutboundMessage(
       error_code: options?.errorCode ?? null,
       error_title: options?.errorTitle ?? null,
       error_details: options?.errorDetails ?? null,
+      template_key: options?.templateKey ?? null,
       template_name: options?.templateName ?? null,
       template_language: options?.templateLanguage ?? null,
     })
@@ -886,6 +890,7 @@ export async function insertOutboundMessage(
       "error_code",
       "error_title",
       "error_details",
+      "template_key",
       "template_name",
       "template_language",
       "created_at",
@@ -913,6 +918,7 @@ export async function updateMessageTransportState(
     errorCode?: string | null;
     errorTitle?: string | null;
     errorDetails?: string | null;
+    templateKey?: string | null;
     templateName?: string | null;
     templateLanguage?: string | null;
   }
@@ -926,6 +932,7 @@ export async function updateMessageTransportState(
   if (input.errorCode !== undefined) patch.error_code = input.errorCode;
   if (input.errorTitle !== undefined) patch.error_title = input.errorTitle;
   if (input.errorDetails !== undefined) patch.error_details = input.errorDetails;
+  if (input.templateKey !== undefined) patch.template_key = input.templateKey;
   if (input.templateName !== undefined) patch.template_name = input.templateName;
   if (input.templateLanguage !== undefined) patch.template_language = input.templateLanguage;
 
@@ -945,6 +952,7 @@ export async function updateMessageTransportState(
       "error_code",
       "error_title",
       "error_details",
+      "template_key",
       "template_name",
       "template_language",
       "created_at",
@@ -988,6 +996,7 @@ export async function updateMessageTransportStateByWaMessageId(
       "error_code",
       "error_title",
       "error_details",
+      "template_key",
       "template_name",
       "template_language",
       "created_at",
@@ -1072,6 +1081,7 @@ export async function listMessages(conversationId: number, limit = 500) {
       "error_code",
       "error_title",
       "error_details",
+      "template_key",
       "template_name",
       "template_language",
       "created_at"

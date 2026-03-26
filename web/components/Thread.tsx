@@ -66,6 +66,7 @@ type Msg = {
   error_code?: string | null;
   error_title?: string | null;
   error_details?: string | null;
+  template_key?: string | null;
   template_name?: string | null;
   template_language?: string | null;
   created_at: string;
@@ -372,6 +373,10 @@ function formatTemplateDisplayName(value?: string | null) {
     .filter(Boolean)
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
+}
+
+function getTemplateHistoryLabel(msg: Msg) {
+  return msg.template_name || msg.template_key || null;
 }
 
 function getRole(msg: Msg): Role {
@@ -923,86 +928,94 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
   return (
     <div className="thread">
       <div className="thread-header">
-        <div className="thread-header-main">
-          <div className="thread-title-row">
-            <div className="thread-title" title={title}>
-              {title}
-            </div>
-            <span
-              className={
-                "thread-mode-chip" +
-                (agentAllowed ? " thread-mode-chip--agent" : " thread-mode-chip--bot")
-              }
-            >
-              {agentAllowed ? "Human handover" : "Bot managed"}
-            </span>
-            <span className={freeReplyState.className}>{freeReplyState.label}</span>
-          </div>
-          <div className="thread-subtitle">
-            {formatPhonePretty(convo.phone)}
-            {convo.lang && (
-              <span className="thread-lang"> · {convo.lang.toUpperCase()}</span>
-            )}
-            {(convo.restock_subscribed_count ?? 0) > 0 && (
-              <span className="badge badge--restock thread-restock-badge">
-                Stock Alert
-                {(convo.restock_subscribed_count ?? 0) > 1
-                  ? ` ${convo.restock_subscribed_count}`
-                  : ""}
+        <div className="thread-lane thread-lane--header">
+          <div className="thread-header-main">
+            <div className="thread-title-row">
+              <div className="thread-title" title={title}>
+                {title}
+              </div>
+              <span
+                className={
+                  "thread-mode-chip" +
+                  (agentAllowed ? " thread-mode-chip--agent" : " thread-mode-chip--bot")
+                }
+              >
+                {agentAllowed ? "Human handover" : "Bot managed"}
               </span>
-            )}
-          </div>
-          <div className="thread-header-actions">
-            <button
-              type="button"
-              className="thread-header-action"
-              onClick={() => router.push(`/orders?phone=${encodeURIComponent(convo.phone)}`)}
-            >
-              Open orders
-            </button>
-            {onOpenContext ? (
+              <span className={freeReplyState.className}>{freeReplyState.label}</span>
+            </div>
+            <div className="thread-subtitle">
+              {formatPhonePretty(convo.phone)}
+              {convo.lang && (
+                <span className="thread-lang"> · {convo.lang.toUpperCase()}</span>
+              )}
+              {(convo.restock_subscribed_count ?? 0) > 0 && (
+                <span className="badge badge--restock thread-restock-badge">
+                  Stock Alert
+                  {(convo.restock_subscribed_count ?? 0) > 1
+                    ? ` ${convo.restock_subscribed_count}`
+                    : ""}
+                </span>
+              )}
+            </div>
+            <div className="thread-header-actions">
               <button
                 type="button"
                 className="thread-header-action"
-                onClick={onOpenContext}
+                onClick={() => router.push(`/orders?phone=${encodeURIComponent(convo.phone)}`)}
               >
-                Summary
+                Open orders
               </button>
-            ) : null}
-            {composerBlockedByWindow ? (
-              <button
-                type="button"
-                className="thread-header-action"
-                onClick={() => setTemplateModalOpen(true)}
-              >
-                Use template
-              </button>
-            ) : null}
+              {onOpenContext ? (
+                <button
+                  type="button"
+                  className="thread-header-action"
+                  onClick={onOpenContext}
+                >
+                  Summary
+                </button>
+              ) : null}
+              {composerBlockedByWindow ? (
+                <button
+                  type="button"
+                  className="thread-header-action"
+                  onClick={() => setTemplateModalOpen(true)}
+                >
+                  Use template
+                </button>
+              ) : null}
+            </div>
           </div>
+          <button
+            type="button"
+            className={"thread-agent-toggle" + (agentAllowed ? " thread-agent-toggle--on" : "")}
+            onClick={toggleAgentMode}
+            disabled={toggling}
+            title={agentAllowed ? "Agent mode is active" : "Bot mode is active"}
+            aria-label={agentAllowed ? "Switch to Bot Mode" : "Switch to Agent Mode"}
+          >
+            <span className="thread-agent-toggle-left">
+              <span className="thread-agent-toggle-icon" aria-hidden="true">
+                {agentAllowed ? "A" : "B"}
+              </span>
+              <span className="thread-agent-toggle-text">
+                {agentAllowed ? "Agent Mode" : "Bot Mode"}
+              </span>
+            </span>
+          </button>
         </div>
-        <button
-          type="button"
-          className={"thread-agent-toggle" + (agentAllowed ? " thread-agent-toggle--on" : "")}
-          onClick={toggleAgentMode}
-          disabled={toggling}
-          title={agentAllowed ? "Agent mode is active" : "Bot mode is active"}
-          aria-label={agentAllowed ? "Switch to Bot Mode" : "Switch to Agent Mode"}
-        >
-          <span className="thread-agent-toggle-left">
-            <span className="thread-agent-toggle-icon" aria-hidden="true">
-              {agentAllowed ? "A" : "B"}
-            </span>
-            <span className="thread-agent-toggle-text">
-              {agentAllowed ? "Agent Mode" : "Bot Mode"}
-            </span>
-          </span>
-        </button>
       </div>
 
       {latestFailedOutbound ? (
-        <div className="thread-failure-banner" role="status" aria-live="polite">
-          <div className="thread-failure-banner-title">Latest outbound message failed</div>
-          <div className="thread-failure-banner-copy">{describeFailure(latestFailedOutbound)}</div>
+        <div className="thread-failure-wrap">
+          <div className="thread-lane">
+            <div className="thread-failure-banner" role="status" aria-live="polite">
+              <div className="thread-failure-banner-title">Latest outbound message failed</div>
+              <div className="thread-failure-banner-copy">
+                {describeFailure(latestFailedOutbound)}
+              </div>
+            </div>
+          </div>
         </div>
       ) : null}
 
@@ -1021,104 +1034,111 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
           </div>
         ) : (
           <div className="thread-messages" ref={messagesRef} onScroll={handleScroll}>
-            {messages.map((m, idx) => {
-              const prevByDate = idx > 0 ? messages[idx - 1] : null;
-              const currentDay = m.created_at?.slice(0, 10);
-              const previousDay = prevByDate?.created_at?.slice(0, 10);
-              const showDayDivider = idx === 0 || currentDay !== previousDay;
+            <div className="thread-lane thread-lane--messages">
+              {messages.map((m, idx) => {
+                const prevByDate = idx > 0 ? messages[idx - 1] : null;
+                const currentDay = m.created_at?.slice(0, 10);
+                const previousDay = prevByDate?.created_at?.slice(0, 10);
+                const showDayDivider = idx === 0 || currentDay !== previousDay;
 
-              const role = getRole(m);
-              const inbound = role === "customer";
-              const outbound = !inbound;
+                const role = getRole(m);
+                const inbound = role === "customer";
+                const outbound = !inbound;
 
-              const prev = idx > 0 ? messages[idx - 1] : null;
-              const next = idx < messages.length - 1 ? messages[idx + 1] : null;
+                const prev = idx > 0 ? messages[idx - 1] : null;
+                const next = idx < messages.length - 1 ? messages[idx + 1] : null;
 
-              const prevRole = prev ? getRole(prev) : null;
-              const nextRole = next ? getRole(next) : null;
+                const prevRole = prev ? getRole(prev) : null;
+                const nextRole = next ? getRole(next) : null;
 
-              const gapPrev =
-                prev && prev.created_at && m.created_at
-                  ? minutesBetween(prev.created_at, m.created_at)
-                  : Number.POSITIVE_INFINITY;
+                const gapPrev =
+                  prev && prev.created_at && m.created_at
+                    ? minutesBetween(prev.created_at, m.created_at)
+                    : Number.POSITIVE_INFINITY;
 
-              const gapNext =
-                next && next.created_at && m.created_at
-                  ? minutesBetween(m.created_at, next.created_at)
-                  : Number.POSITIVE_INFINITY;
+                const gapNext =
+                  next && next.created_at && m.created_at
+                    ? minutesBetween(m.created_at, next.created_at)
+                    : Number.POSITIVE_INFINITY;
 
-              const groupedWithPrev =
-                !!prev && prevRole === role && gapPrev <= GROUP_GAP_MINUTES;
+                const groupedWithPrev =
+                  !!prev && prevRole === role && gapPrev <= GROUP_GAP_MINUTES;
 
-              const groupedWithNext =
-                !!next && nextRole === role && gapNext <= GROUP_GAP_MINUTES;
+                const groupedWithNext =
+                  !!next && nextRole === role && gapNext <= GROUP_GAP_MINUTES;
 
-              const showMeta = !groupedWithNext;
-              const showBotLabel = role === "bot" && !groupedWithPrev;
-              const isFirstUnread = idx === oldestUnreadIndex;
-              const transport = outbound ? describeMessageTransport(m) : null;
-              const isSending = outbound && (m.status === "sending" || m.status === "pending");
-              const isFailed = outbound && String(m.status ?? "").toLowerCase() === "failed";
+                const showMeta = !groupedWithNext;
+                const showBotLabel = role === "bot" && !groupedWithPrev;
+                const isFirstUnread = idx === oldestUnreadIndex;
+                const transport = outbound ? describeMessageTransport(m) : null;
+                const isSending = outbound && (m.status === "sending" || m.status === "pending");
+                const isFailed = outbound && String(m.status ?? "").toLowerCase() === "failed";
 
-              const bubbleClass =
-                "thread-bubble" +
-                (role === "bot" ? " thread-bubble--bot" : "") +
-                (groupedWithPrev ? " thread-bubble--stacked-prev" : "") +
-                (groupedWithNext ? " thread-bubble--stacked-next" : "") +
-                (isSending ? " thread-bubble--pending" : "") +
-                (isFailed ? " thread-bubble--failed" : "");
+                const bubbleClass =
+                  "thread-bubble" +
+                  (role === "bot" ? " thread-bubble--bot" : "") +
+                  (groupedWithPrev ? " thread-bubble--stacked-prev" : "") +
+                  (groupedWithNext ? " thread-bubble--stacked-next" : "") +
+                  (isSending ? " thread-bubble--pending" : "") +
+                  (isFailed ? " thread-bubble--failed" : "");
 
-              const msgClass =
-                "thread-message " +
-                (outbound ? "thread-message--outbound" : "thread-message--inbound") +
-                (groupedWithPrev ? " thread-message--grouped" : "") +
-                (role === "bot" ? " thread-message--bot" : "");
+                const msgClass =
+                  "thread-message " +
+                  (outbound ? "thread-message--outbound" : "thread-message--inbound") +
+                  (groupedWithPrev ? " thread-message--grouped" : "") +
+                  (role === "bot" ? " thread-message--bot" : "");
 
-              return (
-                <Fragment key={m.id}>
-                  {showDayDivider ? (
-                    <div className="thread-day-divider">
-                      <span>{formatDayLabel(m.created_at)}</span>
-                    </div>
-                  ) : null}
-
-                  <div ref={isFirstUnread ? firstUnreadRef : null} className={msgClass}>
-                    {showBotLabel && <div className="thread-role-label">Bot</div>}
-                    {m.message_kind === "template" && !groupedWithPrev ? (
-                      <div className="thread-role-label">
-                        Template
-                        {m.template_name ? ` · ${formatTemplateDisplayName(m.template_name)}` : ""}
+                return (
+                  <Fragment key={m.id}>
+                    {showDayDivider ? (
+                      <div className="thread-day-divider">
+                        <span>{formatDayLabel(m.created_at)}</span>
                       </div>
                     ) : null}
 
-                    <div className={bubbleClass}>
-                      {renderBody(
-                        m,
-                        productNames,
-                        handleResendMedia,
-                        handleDeleteMedia,
-                        activeMediaActionsId,
-                        handleToggleMediaActions
-                      )}
-
-                      {showMeta && (
-                        <div className="thread-meta">
-                          <span className="thread-time">{formatTime(m.created_at)}</span>
-                          {outbound && transport && (
-                            <span className={transport.className} aria-label={transport.label.toLowerCase()}>
-                              {transport.label}
-                            </span>
-                          )}
+                    <div ref={isFirstUnread ? firstUnreadRef : null} className={msgClass}>
+                      {showBotLabel && <div className="thread-role-label">Bot</div>}
+                      {m.message_kind === "template" && !groupedWithPrev ? (
+                        <div className="thread-role-label">
+                          Template
+                          {getTemplateHistoryLabel(m)
+                            ? ` · ${formatTemplateDisplayName(getTemplateHistoryLabel(m))}`
+                            : ""}
                         </div>
-                      )}
-                      {isFailed ? (
-                        <div className="thread-failure-copy">{describeFailure(m)}</div>
                       ) : null}
+
+                      <div className={bubbleClass}>
+                        {renderBody(
+                          m,
+                          productNames,
+                          handleResendMedia,
+                          handleDeleteMedia,
+                          activeMediaActionsId,
+                          handleToggleMediaActions
+                        )}
+
+                        {showMeta && (
+                          <div className="thread-meta">
+                            <span className="thread-time">{formatTime(m.created_at)}</span>
+                            {outbound && transport && (
+                              <span
+                                className={transport.className}
+                                aria-label={transport.label.toLowerCase()}
+                              >
+                                {transport.label}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                        {isFailed ? (
+                          <div className="thread-failure-copy">{describeFailure(m)}</div>
+                        ) : null}
+                      </div>
                     </div>
-                  </div>
-                </Fragment>
-              );
-            })}
+                  </Fragment>
+                );
+              })}
+            </div>
 
             <div ref={bottomRef} />
           </div>
@@ -1126,119 +1146,123 @@ export default function Thread({ convo, onOpenContext }: ThreadProps) {
       </div>
 
       <div className="thread-footer">
-        {showBotModeHint && !agentAllowed ? (
-          <div
-            className="thread-composer-inline-hint"
-            role="status"
-            aria-live="polite"
-          >
-            Bot mode is active. Switch to Agent Mode to send a manual reply.
-          </div>
-        ) : null}
-        {composerBlockedByWindow ? (
-          <div className="thread-composer-inline-hint" role="status" aria-live="polite">
-            Free-text sending is unavailable because the customer is outside WhatsApp&apos;s free
-            reply window. A template send will be needed next.
-          </div>
-        ) : null}
-        {composerBlockedByWindow ? (
-          <div className="thread-template-cta">
+        <div className="thread-lane thread-lane--composer">
+          {showBotModeHint && !agentAllowed ? (
+            <div
+              className="thread-composer-inline-hint"
+              role="status"
+              aria-live="polite"
+            >
+              Bot mode is active. Switch to Agent Mode to send a manual reply.
+            </div>
+          ) : null}
+          {composerBlockedByWindow ? (
+            <div className="thread-composer-inline-hint" role="status" aria-live="polite">
+              Free-text sending is unavailable because the customer is outside WhatsApp&apos;s
+              free reply window. A template send will be needed next.
+            </div>
+          ) : null}
+          {composerBlockedByWindow ? (
+            <div className="thread-template-cta">
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setTemplateModalOpen(true)}
+              >
+                Use template
+              </button>
+            </div>
+          ) : null}
+          {sendError ? (
+            <div
+              className="thread-composer-inline-hint thread-composer-inline-hint--danger"
+              role="status"
+              aria-live="polite"
+            >
+              {sendError}
+            </div>
+          ) : null}
+          <div className="thread-input-row">
             <button
               type="button"
-              className="btn btn-secondary"
-              onClick={() => setTemplateModalOpen(true)}
+              className="thread-attach-button"
+              onClick={handleAttachClick}
+              title="Add attachment"
+              aria-label="Add attachment"
             >
-              Use template
+              Add
+            </button>
+
+            <input
+              type="file"
+              ref={fileInputRef}
+              style={{ display: "none" }}
+              accept="image/*,video/*,audio/*,application/pdf,.doc,.docx,.xls,.xlsx"
+              onChange={handleFileChange}
+            />
+
+            <input
+              className="thread-input"
+              value={text}
+              onChange={(e) => {
+                if (!agentAllowed) {
+                  revealBotModeHint();
+                  return;
+                }
+                if (composerBlockedByWindow) {
+                  setSendError(
+                    "Customer is outside WhatsApp's free reply window. A template message will be required before another manual text can be sent."
+                  );
+                  return;
+                }
+                if (sendError) setSendError(null);
+                setText(e.target.value);
+              }}
+              onFocus={() => {
+                if (!agentAllowed) revealBotModeHint();
+                if (composerBlockedByWindow) {
+                  setSendError(
+                    "Customer is outside WhatsApp's free reply window. A template message will be required before another manual text can be sent."
+                  );
+                }
+              }}
+              onClick={() => {
+                if (!agentAllowed) revealBotModeHint();
+                if (composerBlockedByWindow) {
+                  setSendError(
+                    "Customer is outside WhatsApp's free reply window. A template message will be required before another manual text can be sent."
+                  );
+                }
+              }}
+              placeholder={
+                !agentAllowed
+                  ? "Switch to Agent Mode to reply"
+                  : composerBlockedByWindow
+                    ? "Template required before the next manual reply"
+                    : "Write a reply..."
+              }
+              onKeyDown={handleInputKeyDown}
+              readOnly={!agentAllowed || composerBlockedByWindow}
+              aria-describedby={
+                showBotModeHint && !agentAllowed ? "thread-bot-mode-hint" : undefined
+              }
+            />
+
+            <button
+              type="button"
+              className="thread-send-button"
+              onClick={handleSend}
+              disabled={sending || !agentAllowed || composerBlockedByWindow}
+            >
+              {sending ? "Sending..." : "Send"}
             </button>
           </div>
-        ) : null}
-        {sendError ? (
-          <div
-            className="thread-composer-inline-hint thread-composer-inline-hint--danger"
-            role="status"
-            aria-live="polite"
-          >
-            {sendError}
-          </div>
-        ) : null}
-        <div className="thread-input-row">
-          <button
-            type="button"
-            className="thread-attach-button"
-            onClick={handleAttachClick}
-            title="Add attachment"
-            aria-label="Add attachment"
-          >
-            Add
-          </button>
-
-          <input
-            type="file"
-            ref={fileInputRef}
-            style={{ display: "none" }}
-            accept="image/*,video/*,audio/*,application/pdf,.doc,.docx,.xls,.xlsx"
-            onChange={handleFileChange}
-          />
-
-          <input
-            className="thread-input"
-            value={text}
-            onChange={(e) => {
-              if (!agentAllowed) {
-                revealBotModeHint();
-                return;
-              }
-              if (composerBlockedByWindow) {
-                setSendError(
-                  "Customer is outside WhatsApp's free reply window. A template message will be required before another manual text can be sent."
-                );
-                return;
-              }
-              if (sendError) setSendError(null);
-              setText(e.target.value);
-            }}
-            onFocus={() => {
-              if (!agentAllowed) revealBotModeHint();
-              if (composerBlockedByWindow) {
-                setSendError(
-                  "Customer is outside WhatsApp's free reply window. A template message will be required before another manual text can be sent."
-                );
-              }
-            }}
-            onClick={() => {
-              if (!agentAllowed) revealBotModeHint();
-              if (composerBlockedByWindow) {
-                setSendError(
-                  "Customer is outside WhatsApp's free reply window. A template message will be required before another manual text can be sent."
-                );
-              }
-            }}
-            placeholder={
-              !agentAllowed
-                ? "Switch to Agent Mode to reply"
-                : composerBlockedByWindow
-                  ? "Template required before the next manual reply"
-                  : "Write a reply..."
-            }
-            onKeyDown={handleInputKeyDown}
-            readOnly={!agentAllowed || composerBlockedByWindow}
-            aria-describedby={showBotModeHint && !agentAllowed ? "thread-bot-mode-hint" : undefined}
-          />
-
-          <button
-            type="button"
-            className="thread-send-button"
-            onClick={handleSend}
-            disabled={sending || !agentAllowed || composerBlockedByWindow}
-          >
-            {sending ? "Sending..." : "Send"}
-          </button>
+          {showBotModeHint && !agentAllowed ? (
+            <div id="thread-bot-mode-hint" className="thread-composer-inline-meta">
+              Use the mode toggle above to hand the conversation to an operator.
+            </div>
+          ) : null}
         </div>
-        {showBotModeHint && !agentAllowed ? (
-          <div id="thread-bot-mode-hint" className="thread-composer-inline-meta">
-            Use the mode toggle above to hand the conversation to an operator.
-          </div>
-        ) : null}
       </div>
       <TemplateSendModal
         conversationId={convo.id}

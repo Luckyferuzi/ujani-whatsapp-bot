@@ -50,6 +50,19 @@ function formatCurrency(value?: number | null) {
   return `${Math.floor(Number(value)).toLocaleString("sw-TZ")} TZS`;
 }
 
+function getQueueLabel(queue: QueueKey) {
+  if (queue === "unpaid_orders") return "Unpaid order";
+  if (queue === "order_action_needed") return "Order action";
+  return "Restock / re-engage";
+}
+
+function getTemplateLabel(templateKey: string) {
+  if (templateKey === "payment_reminder_sw") return "Payment reminder";
+  if (templateKey === "order_followup_sw") return "Order follow-up";
+  if (templateKey === "restock_reengagement_sw") return "Restock / re-engagement";
+  return templateKey;
+}
+
 export default function FollowupsPage() {
   const [activeTab, setActiveTab] = useState<QueueKey>("unpaid_orders");
   const [loading, setLoading] = useState(true);
@@ -125,7 +138,7 @@ export default function FollowupsPage() {
         ...current,
         [row.queue]: current[row.queue].filter((item) => item.item_key !== row.item_key),
       }));
-      toast.success("Template sent");
+      toast.success("Suggested template sent");
     } catch (err: any) {
       console.error("Failed to send follow-up template", err);
       toast.error(err?.message ?? "Unable to send follow-up right now.");
@@ -151,7 +164,7 @@ export default function FollowupsPage() {
       }));
     } catch (err: any) {
       console.error("Failed to dismiss follow-up", err);
-      toast.error(err?.message ?? "Unable to dismiss this row right now.");
+      toast.error(err?.message ?? "Unable to mark this row handled right now.");
     } finally {
       setDismissingKey(null);
     }
@@ -204,15 +217,23 @@ export default function FollowupsPage() {
               onValueChange={(next) => setActiveTab(next as QueueKey)}
               items={[
                 { value: "unpaid_orders", label: "Unpaid orders", meta: counts.unpaid_orders },
-                { value: "order_action_needed", label: "Order action needed", meta: counts.order_action_needed },
-                { value: "restock_reengagement", label: "Restock / re-engagement", meta: counts.restock_reengagement },
+                {
+                  value: "order_action_needed",
+                  label: "Order action needed",
+                  meta: counts.order_action_needed,
+                },
+                {
+                  value: "restock_reengagement",
+                  label: "Restock / re-engagement",
+                  meta: counts.restock_reengagement,
+                },
               ]}
               ariaLabel="Follow-up queues"
             />
 
             <div className="followups-list">
               {loading ? (
-                <div className="followups-side-copy">Loading queue…</div>
+                <div className="followups-side-copy">Loading queue...</div>
               ) : activeRows.length === 0 ? (
                 <EmptyState
                   eyebrow="Queue"
@@ -223,6 +244,10 @@ export default function FollowupsPage() {
                 activeRows.map((row) => (
                   <div key={row.item_key} className="followups-row">
                     <div>
+                      <div className="followups-row__chips">
+                        <Badge tone="accent">{getQueueLabel(row.queue)}</Badge>
+                        <Badge tone="neutral">{getTemplateLabel(row.template_key)}</Badge>
+                      </div>
                       <div className="followups-row__title">
                         {row.customer_name || row.customer_phone || "Customer"}
                       </div>
@@ -235,7 +260,9 @@ export default function FollowupsPage() {
                       {row.amount_due_tzs != null ? (
                         <div className="followups-row__meta">
                           Amount due {formatCurrency(row.amount_due_tzs)}
-                          {row.amount_paid_tzs != null ? ` · Paid ${formatCurrency(row.amount_paid_tzs)}` : ""}
+                          {row.amount_paid_tzs != null
+                            ? ` · Paid ${formatCurrency(row.amount_paid_tzs)}`
+                            : ""}
                         </div>
                       ) : null}
                       {row.product_name ? (
@@ -246,17 +273,20 @@ export default function FollowupsPage() {
                       ) : null}
                       <div className="followups-row__reason">{row.reason}</div>
                     </div>
+
                     <div className="followups-row__actions">
-                      <Badge tone="accent">{row.template_key}</Badge>
                       <Button
                         size="sm"
                         loading={sendingKey === row.item_key}
                         onClick={() => void handleSend(row)}
                       >
-                        Send template
+                        Send suggested template
                       </Button>
-                      {row.customer_phone ? (
-                        <Link href={`/inbox?phone=${encodeURIComponent(row.customer_phone)}`} className="ui-button ui-button--secondary ui-button--sm">
+                      {row.conversation_id != null && row.customer_phone ? (
+                        <Link
+                          href={`/inbox?phone=${encodeURIComponent(row.customer_phone)}`}
+                          className="ui-button ui-button--secondary ui-button--sm"
+                        >
                           Open inbox
                         </Link>
                       ) : null}
@@ -266,7 +296,7 @@ export default function FollowupsPage() {
                         loading={dismissingKey === row.item_key}
                         onClick={() => void handleDismiss(row)}
                       >
-                        Dismiss
+                        Mark handled
                       </Button>
                     </div>
                   </div>
@@ -279,13 +309,14 @@ export default function FollowupsPage() {
         <div className="followups-side">
           <Card className="followups-panel" padding="lg">
             <div className="followups-side-copy">
-              Primary queue actions send the matching approved template:
-              payment reminder, order follow-up, or restock / re-engagement.
+              Each queue uses the corrected template engine and keeps outreach tied to the same
+              conversation history operators already use in the inbox.
             </div>
           </Card>
           <Card className="followups-panel" padding="lg">
             <div className="followups-side-copy">
-              Successful sends are removed from the queue immediately by dismissing that follow-up item.
+              Successful sends remove the row immediately, while "Mark handled" clears work that
+              no longer needs action.
             </div>
           </Card>
         </div>

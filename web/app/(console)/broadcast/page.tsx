@@ -20,11 +20,11 @@ type TemplateField = {
 
 type TemplateOption = {
   key: string;
-  template_name: string;
+  meta_template_name: string | null;
   language_code: string;
   category: string;
   enabled: boolean;
-  parameter_meta: TemplateField[];
+  params: TemplateField[];
 };
 
 type AudienceOption = {
@@ -93,6 +93,7 @@ export default function BroadcastPage() {
   const [params, setParams] = useState<Record<string, string>>({});
   const [preview, setPreview] = useState<BroadcastPreview | null>(null);
   const [result, setResult] = useState<BroadcastResult | null>(null);
+  const [advancedConfirmed, setAdvancedConfirmed] = useState(false);
 
   const selectedTemplate = useMemo(
     () => options?.templates.find((item) => item.key === templateKey) ?? null,
@@ -146,14 +147,26 @@ export default function BroadcastPage() {
     if (!selectedTemplate) return;
     setParams((current) => {
       const next: Record<string, string> = {};
-      for (const field of selectedTemplate.parameter_meta) {
+      for (const field of selectedTemplate.params) {
         next[field.key] = current[field.key] ?? "";
       }
       return next;
     });
   }, [selectedTemplate?.key]);
 
-  const canSend = Boolean(selectedTemplate && preview && preview.recipient_count > 0);
+  useEffect(() => {
+    if (audience !== "all_previous_chatters") {
+      setAdvancedConfirmed(false);
+    }
+  }, [audience]);
+
+  const requiresAdvancedConfirmation = audience === "all_previous_chatters";
+  const canSend = Boolean(
+    selectedTemplate &&
+      preview &&
+      preview.recipient_count > 0 &&
+      (!requiresAdvancedConfirmation || advancedConfirmed)
+  );
 
   async function handleBroadcast(mode: "test" | "send") {
     if (!selectedTemplate) {
@@ -251,15 +264,29 @@ export default function BroadcastPage() {
                 >
                   {options.templates.map((item) => (
                     <option key={item.key} value={item.key}>
-                      {item.template_name} · {item.language_code}
+                      {(item.meta_template_name || item.key) + " · " + item.language_code}
                     </option>
                   ))}
                 </Select>
               </div>
 
-              {selectedTemplate?.parameter_meta.length ? (
+              {selectedTemplate ? (
+                <div className="broadcast-check">
+                  <div className="broadcast-check__body">
+                    <div className="broadcast-check__title">Selected template</div>
+                    <div>
+                      {(selectedTemplate.meta_template_name || selectedTemplate.key) +
+                        " · " +
+                        selectedTemplate.language_code}
+                    </div>
+                  </div>
+                  <Badge tone="accent">{formatCategory(selectedTemplate.category)}</Badge>
+                </div>
+              ) : null}
+
+              {selectedTemplate?.params.length ? (
                 <div className="broadcast-form">
-                  {selectedTemplate.parameter_meta.map((field) => (
+                  {selectedTemplate.params.map((field) => (
                     <div key={field.key} className="broadcast-field">
                       <label className="broadcast-label">{field.label}</label>
                       <input
@@ -288,9 +315,27 @@ export default function BroadcastPage() {
                 }
               />
 
+              {requiresAdvancedConfirmation ? (
+                <label className="broadcast-check">
+                  <input
+                    type="checkbox"
+                    checked={advancedConfirmed}
+                    onChange={(e) => setAdvancedConfirmed(e.target.checked)}
+                    disabled={sending}
+                  />
+                  <div className="broadcast-check__body">
+                    <div className="broadcast-check__title">Confirm advanced audience</div>
+                    <div>
+                      "All previous chatters" is the broadest audience. Confirm before sending to
+                      this segment.
+                    </div>
+                  </div>
+                </label>
+              ) : null}
+
               <div className="broadcast-form__footer">
                 <div className="broadcast-form__hint">
-                  Audience must be explicit before any template is sent.
+                  Audience and approved template must be explicit before any template is sent.
                 </div>
                 <div className="broadcast-hero__actions">
                   <Button variant="secondary" disabled={!canSend} loading={sending} onClick={() => void handleBroadcast("test")}>

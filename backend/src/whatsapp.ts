@@ -174,11 +174,14 @@ async function apiFetch(path: string, body: unknown) {
 
     console.error("[whatsapp] API error", res.status, payload);
 
-    throw new Error(
+    const err: any = new Error(
       `WhatsApp API error ${res.status}: ${
         typeof payload === "string" ? payload : JSON.stringify(payload)
       }`
     );
+    err.status = res.status;
+    err.payload = payload;
+    throw err;
   }
 
   const text = await res.text().catch(() => "");
@@ -752,7 +755,7 @@ export async function sendMediaById(
 
 export async function sendTemplateMessage(args: {
   to: string;
-  templateName: string;
+  metaTemplateName: string;
   languageCode: string;
   bodyParameters?: string[];
   phoneNumberId?: string | null;
@@ -774,7 +777,7 @@ export async function sendTemplateMessage(args: {
     to: args.to,
     type: "template",
     template: {
-      name: args.templateName,
+      name: args.metaTemplateName,
       language: {
         code: args.languageCode,
       },

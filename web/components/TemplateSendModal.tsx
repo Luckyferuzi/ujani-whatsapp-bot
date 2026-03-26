@@ -11,12 +11,12 @@ type TemplateField = {
 
 type TemplateOption = {
   key: string;
-  template_name: string;
+  meta_template_name: string | null;
   language_code: string;
   category: string;
   label: string;
   enabled: boolean;
-  parameter_meta: TemplateField[];
+  params: TemplateField[];
   default_params: Record<string, string>;
   preview: string;
   suggested: boolean;
@@ -183,13 +183,13 @@ export default function TemplateSendModal({ conversationId, open, onClose, onSen
             </div>
 
             <div className="template-form">
-              <div className="template-form-preview">
+                <div className="template-form-preview">
                 <div className="template-form-label">Preview</div>
                 <div className="template-form-preview-copy">{selected.preview}</div>
               </div>
 
               <div className="template-fields">
-                {selected.parameter_meta.map((field) => (
+                {selected.params.map((field) => (
                   <label key={field.key} className="template-field">
                     <span className="template-field-label">
                       {field.label}

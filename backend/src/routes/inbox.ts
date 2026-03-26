@@ -395,6 +395,7 @@ inboxRoutes.get("/conversations/:id/messages", async (req, res) => {
       "error_code",
       "error_title",
       "error_details",
+      "template_key",
       "template_name",
       "template_language",
       "created_at"
@@ -2929,14 +2930,14 @@ inboxRoutes.post("/followups/dismiss", async (req, res) => {
 inboxRoutes.get("/broadcast/options", async (_req, res) => {
   try {
     const templates = (await getInboxTemplateRegistry())
-      .filter((item) => item.enabled)
+      .filter((item) => item.enabled && item.metaTemplateName && item.languageCode)
       .map((item) => ({
         key: item.key,
-        template_name: item.template_name,
-        language_code: item.language_code,
+        meta_template_name: item.metaTemplateName,
+        language_code: item.languageCode,
         category: item.category,
         enabled: item.enabled,
-        parameter_meta: item.parameter_meta,
+        params: item.params,
       }));
 
     return res.json({

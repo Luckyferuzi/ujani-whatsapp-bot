@@ -5,6 +5,7 @@ import multer from "multer";
 import {
   getInboxTemplateByKey,
   getInboxTemplateRegistry,
+  isInboxTemplateMapped,
   type InboxTemplateConfig,
   type TemplateParameterMeta,
 } from "../runtime/companySettings.js";
@@ -84,6 +85,62 @@ export function parseWhatsAppApiError(err: any) {
   };
 }
 
+function includesAny(haystack: string, needles: string[]) {
+  return needles.some((needle) => haystack.includes(needle));
+}
+
+export function classifyTemplateProviderError(parsed: {
+  code: string | null;
+  title: string | null;
+  details: string | null;
+}) {
+  const haystack = `${parsed.title ?? ""} ${parsed.details ?? ""}`.toLowerCase();
+
+  if (
+    includesAny(haystack, [
+      "translation",
+      "language",
+      "locale",
+      "does not exist in",
+      "no translation",
+    ])
+  ) {
+    return {
+      status: 409,
+      code: "template_language_unavailable",
+      statusReason: "template_language_unavailable",
+      message:
+        "The configured WhatsApp template language is not available for this approved template.",
+    };
+  }
+
+  if (
+    includesAny(haystack, [
+      "template name",
+      "template does not exist",
+      "no template named",
+      "could not be found",
+      "does not exist",
+      "not found",
+    ])
+  ) {
+    return {
+      status: 409,
+      code: "template_not_available",
+      statusReason: "template_not_available",
+      message:
+        "The configured WhatsApp template name is not available in this business account.",
+    };
+  }
+
+  return {
+    status: 502,
+    code: "template_send_failed",
+    statusReason: "transport_failed",
+    message: parsed.details ?? "Failed to send template message",
+  };
+}
+
 export function validateTemplateParams(
   parameterMeta: TemplateParameterMeta[],
   params: Record<string, unknown>
@@ -146,6 +203,7 @@ async function finalizeOutboundMessage(args: {
   errorCode?: string | null;
   errorTitle?: string | null;
   errorDetails?: string | null;
+  templateKey?: string | null;
   templateName?: string | null;
   templateLanguage?: string | null;
 }) {
@@ -158,6 +216,7 @@ async function finalizeOutboundMessage(args: {
     errorCode: args.errorCode ?? null,
     errorTitle: args.errorTitle ?? null,
     errorDetails: args.errorDetails ?? null,
+    templateKey: args.templateKey ?? null,
     templateName: args.templateName ?? null,
     templateLanguage: args.templateLanguage ?? null,
   });
@@ -197,16 +256,25 @@ export async function sendConfiguredTemplateForConversation(args: {
     return { ok: false as const, status: 400, body: { error: "Customer wa_id missing; cannot send", code: "missing_customer_wa_id" } };
   }
 
-  const template = await getInboxTemplateByKey(String(args.templateKey ?? "").trim());
+  const templateKey = String(args.templateKey ?? "").trim();
+  const template = await getInboxTemplateByKey(templateKey);
   if (!template) {
-    return { ok: false as const, status: 404, body: { error: "Template is not configured", code: "template_missing" } };
+    return {
+      ok: false as const,
+      status: 404,
+      body: { error: "Template is not available for this conversation", code: "template_not_available" },
+    };
   }
 
   if (!template.enabled) {
-    return { ok: false as const, status: 409, body: { error: "Template is disabled", code: "template_disabled" } };
+    return {
+      ok: false as const,
+      status: 409,
+      body: { error: "Template is disabled", code: "template_not_available" },
+    };
   }
 
-  const validation = validateTemplateParams(template.parameter_meta, args.params ?? {});
+  const validation = validateTemplateParams(template.params, args.params ?? {});
   if (!validation.ok) {
     return {
       ok: false as const,
@@ -219,19 +287,81 @@ export async function sendConfiguredTemplateForConversation(args: {
     };
   }
 
-  const parameterValues = template.parameter_meta
-    .map((item) => validation.normalized[item.key] ?? "")
-    .filter((value, index) => {
-      const field = template.parameter_meta[index];
-      return field.required || value.length > 0;
+  const preview = buildTemplatePreview(template, validation.normalized);
+
+  if (!String(template.metaTemplateName ?? "").trim()) {
+    const failedMessage = await insertOutboundMessage(id, "text", preview, {
+      status: "failed",
+      messageKind: "template",
+      statusReason: "template_config_missing",
+      errorTitle: "Template mapping missing",
+      errorDetails:
+        "This internal template key is not mapped to an approved WhatsApp template name yet.",
+      templateKey: template.key,
+      templateLanguage: template.languageCode,
     });
 
-  const preview = buildTemplatePreview(template, validation.normalized);
+    args.app?.get?.("io")?.emit("message.created", {
+      conversation_id: id,
+      message: failedMessage,
+    });
+
+    return {
+      ok: false as const,
+      status: 409,
+      body: {
+        error: "Template mapping is missing",
+        code: "template_config_missing",
+        message: "This internal template key is not mapped to an approved WhatsApp template name yet.",
+        transport: failedMessage,
+      },
+    };
+  }
+
+  if (!String(template.languageCode ?? "").trim()) {
+    const failedMessage = await insertOutboundMessage(id, "text", preview, {
+      status: "failed",
+      messageKind: "template",
+      statusReason: "template_language_unavailable",
+      errorTitle: "Template language missing",
+      errorDetails:
+        "This template is missing the exact WhatsApp language code needed for sending.",
+      templateKey: template.key,
+      templateName: template.metaTemplateName,
+    });
+
+    args.app?.get?.("io")?.emit("message.created", {
+      conversation_id: id,
+      message: failedMessage,
+    });
+
+    return {
+      ok: false as const,
+      status: 409,
+      body: {
+        error: "Template language is missing",
+        code: "template_language_unavailable",
+        message: "This template is missing the exact WhatsApp language code needed for sending.",
+        transport: failedMessage,
+      },
+    };
+  }
+
+  const parameterValues = template.params
+    .map((item) => validation.normalized[item.key] ?? "")
+    .filter((value, index) => {
+      const field = template.params[index];
+      return field.required || value.length > 0;
+    });
+  const metaTemplateName = String(template.metaTemplateName ?? "").trim();
+  const languageCode = String(template.languageCode ?? "").trim();
+
   const pendingMessage = await insertOutboundMessage(id, "text", preview, {
     status: "pending",
     messageKind: "template",
-    templateName: template.template_name,
-    templateLanguage: template.language_code,
+    templateKey: template.key,
+    templateName: metaTemplateName,
+    templateLanguage: languageCode,
   });
 
   args.app?.get?.("io")?.emit("message.created", {
@@ -242,8 +372,8 @@ export async function sendConfiguredTemplateForConversation(args: {
   try {
     const waResponse = await sendTemplateMessage({
       to: String(convo.wa_id),
-      templateName: template.template_name,
-      languageCode: template.language_code,
+      metaTemplateName,
+      languageCode,
       bodyParameters: parameterValues,
       phoneNumberId: (convo as any).phone_number_id ?? null,
     });
@@ -253,8 +383,9 @@ export async function sendConfiguredTemplateForConversation(args: {
       waResponse,
       status: "sent",
       messageKind: "template",
-      templateName: template.template_name,
-      templateLanguage: template.language_code,
+      templateKey: template.key,
+      templateName: metaTemplateName,
+      templateLanguage: languageCode,
     });
 
     args.app?.get?.("io")?.emit("message.created", {
@@ -270,24 +401,26 @@ export async function sendConfiguredTemplateForConversation(args: {
         message: message ?? pendingMessage,
         template: {
           key: template.key,
-          template_name: template.template_name,
-          language_code: template.language_code,
+          metaTemplateName,
+          languageCode,
         },
         transport: waResponse,
       },
     };
   } catch (err: any) {
     const parsed = parseWhatsAppApiError(err);
+    const classified = classifyTemplateProviderError(parsed);
     const message = await finalizeOutboundMessage({
       messageId: Number(pendingMessage.id),
       status: "failed",
       messageKind: "template",
-      statusReason: "transport_failed",
+      statusReason: classified.statusReason,
       errorCode: parsed.code,
       errorTitle: parsed.title,
-      errorDetails: parsed.details,
-      templateName: template.template_name,
-      templateLanguage: template.language_code,
+      errorDetails: parsed.details ?? classified.message,
+      templateKey: template.key,
+      templateName: metaTemplateName,
+      templateLanguage: languageCode,
     });
 
     args.app?.get?.("io")?.emit("message.created", {
@@ -297,10 +430,10 @@ export async function sendConfiguredTemplateForConversation(args: {
 
     return {
       ok: false as const,
-      status: 502,
+      status: classified.status,
       body: {
-        error: parsed.details ?? "Failed to send template message",
-        code: "template_send_failed",
+        error: classified.message,
+        code: classified.code,
         transport: message ?? pendingMessage,
       },
     };
@@ -435,7 +568,9 @@ sendRoutes.get("/conversations/:id/template-options", async (req, res) => {
     }
 
     const registry = await getInboxTemplateRegistry();
-    const enabledTemplates = registry.filter((item) => item.enabled);
+    const enabledTemplates = registry.filter(
+      (item) => item.enabled && isInboxTemplateMapped(item)
+    );
     const suggestedCategory = buildTemplateSuggestionCategory({
       latestOrder: context.latestOrder,
       restockItems: context.restockItems,
@@ -445,12 +580,12 @@ sendRoutes.get("/conversations/:id/template-options", async (req, res) => {
       const { defaults, preview } = buildTemplateDefaults(template, context);
       return {
         key: template.key,
-        template_name: template.template_name,
-        language_code: template.language_code,
+        meta_template_name: template.metaTemplateName,
+        language_code: template.languageCode,
         category: template.category,
         label: buildTemplateUiLabel(template),
         enabled: template.enabled,
-        parameter_meta: template.parameter_meta,
+        params: template.params,
         default_params: defaults,
         preview,
         suggested: suggestedCategory != null && template.category === suggestedCategory,
