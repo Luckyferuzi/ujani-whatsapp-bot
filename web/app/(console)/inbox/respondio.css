@@ -497,6 +497,7 @@
 
 .thread-primary-action,
 .thread-header-action,
+.thread-mode-action,
 .thread-menu-button,
 .thread-attach-button,
 .thread-send-button,
@@ -536,13 +537,26 @@
   color: var(--inbox-accent);
 }
 
+.thread-mode-action--agent {
+  border-color: var(--ds-color-success-border);
+  background: var(--ds-color-success-soft);
+  color: var(--ds-color-success-solid);
+}
+
+.thread-mode-action--bot {
+  border-color: var(--ds-color-info-border);
+  background: var(--ds-color-info-soft);
+  color: var(--ds-color-info-solid);
+}
+
 .thread-header-action--placeholder {
   opacity: 0.6;
   cursor: not-allowed;
 }
 
 .thread-action-cluster .thread-primary-action,
-.thread-action-cluster .thread-header-action {
+.thread-action-cluster .thread-header-action,
+.thread-action-cluster .thread-mode-action {
   min-height: 36px;
 }
 
@@ -710,6 +724,8 @@
 }
 
 .thread-loading-lane {
+  min-height: 100%;
+  justify-content: space-between;
   gap: 18px;
 }
 
@@ -892,6 +908,17 @@
   letter-spacing: 0.08em;
 }
 
+.thread-bubble-wrap {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 8px;
+  max-width: 100%;
+}
+
+.thread-bubble-wrap--outbound {
+  flex-direction: row-reverse;
+}
+
 .thread-bubble {
   position: relative;
   width: fit-content;
@@ -910,18 +937,17 @@
 }
 
 .thread-bubble-actions {
-  position: absolute;
-  top: -13px;
-  right: 10px;
+  flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   padding: 3px;
   border: 1px solid var(--inbox-border);
-  border-radius: 999px;
+  border-radius: 10px;
   background: color-mix(in srgb, var(--ds-color-surface-raised) 98%, white 2%);
   box-shadow: var(--ds-shadow-sm);
   backdrop-filter: blur(8px);
+  margin-top: 8px;
 }
 
 .thread-bubble-action {
@@ -931,8 +957,10 @@
   color: var(--inbox-text-muted);
   font-size: 10px;
   font-weight: 700;
-  padding: 4px 7px;
-  border-radius: 999px;
+  min-width: 24px;
+  min-height: 24px;
+  padding: 0;
+  border-radius: 8px;
   cursor: pointer;
   transition: background 180ms ease, color 180ms ease;
 }
@@ -1520,9 +1548,16 @@
     max-width: min(100%, 100%);
   }
 
-  .thread-bubble-actions {
-    top: -11px;
-    right: 8px;
+  .thread-bubble-wrap,
+  .thread-bubble-wrap--outbound {
+    display: grid;
+    justify-items: stretch;
+  }
+
+  .thread-bubble-actions,
+  .thread-bubble-actions--outbound {
+    margin-top: 6px;
+    width: fit-content;
   }
 
   .thread-image,

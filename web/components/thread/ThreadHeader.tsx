@@ -125,6 +125,14 @@ export default function ThreadHeader({
 
             <button
               type="button"
+              className={"thread-mode-action" + (agentAllowed ? " thread-mode-action--agent" : " thread-mode-action--bot")}
+              onClick={() => void onToggleAgentMode()}
+            >
+              {agentAllowed ? "Human mode" : "Bot mode"}
+            </button>
+
+            <button
+              type="button"
               className={"thread-header-action" + (contextOpen ? " thread-header-action--active" : "")}
               onClick={handleToggleContext}
             >

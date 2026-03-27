@@ -180,7 +180,7 @@ export default function Thread({ convo, onOpenContext, onToggleContext, contextO
     composerNotice && dismissedComposerNoticeKey !== composerNotice.key ? composerNotice : null;
   const title = convo.name || formatPhonePretty(convo.phone);
   const customerInitial = (title.trim()[0] || "?").toUpperCase();
-  const primaryActionLabel = !agentAllowed ? "Take over" : composerBlockedByWindow ? "Use template" : "Reply";
+  const primaryActionLabel = agentAllowed ? "Return to bot" : "Take over";
 
   const scrollToBottom = (behavior: ScrollBehavior = "auto") => {
     const el = messagesRef.current;
@@ -410,15 +410,7 @@ export default function Thread({ convo, onOpenContext, onToggleContext, contextO
         onOpenContext={onOpenContext}
         onToggleContext={onToggleContext}
         onPrimaryAction={() => {
-          if (!agentAllowed) {
-            void toggleAgentMode();
-            return;
-          }
-          if (composerBlockedByWindow) {
-            setTemplateModalOpen(true);
-            return;
-          }
-          inputRef.current?.focus();
+          void toggleAgentMode();
         }}
         onClearChat={clearConversationHistory}
         onToggleAgentMode={toggleAgentMode}

@@ -181,56 +181,63 @@ export default function ThreadMessageViewport({
                           </div>
                         ) : null}
 
-                        <div
-                          className={
-                            "thread-bubble" +
-                            (outbound ? " thread-bubble--outbound" : " thread-bubble--inbound") +
-                            (role === "bot" ? " thread-bubble--bot" : "") +
-                            (isFailed ? " thread-bubble--failed" : "")
-                          }
-                        >
+                        <div className={"thread-bubble-wrap" + (outbound ? " thread-bubble-wrap--outbound" : "")}>
+                          <div
+                            className={
+                              "thread-bubble" +
+                              (outbound ? " thread-bubble--outbound" : " thread-bubble--inbound") +
+                              (role === "bot" ? " thread-bubble--bot" : "") +
+                              (isFailed ? " thread-bubble--failed" : "")
+                            }
+                          >
+                            {renderBody(
+                              msg,
+                              onResendMedia,
+                              onDeleteMedia,
+                              activeMediaActionsId,
+                              onToggleMediaActions
+                            )}
+                            {showMeta ? (
+                              <div className="thread-meta">
+                                <span className="thread-time">{formatTime(msg.created_at)}</span>
+                                {transport ? (
+                                  <span
+                                    className={transport.className}
+                                    aria-label={transport.label}
+                                    title={transport.label}
+                                  >
+                                    {transport.icon}
+                                  </span>
+                                ) : null}
+                              </div>
+                            ) : null}
+                            {isFailed ? <div className="thread-failure-copy">{describeFailure(msg)}</div> : null}
+                          </div>
+
                           {String(hoveredMessageId ?? "") === String(msg.id) ? (
-                            <div className="thread-bubble-actions">
+                            <div className={"thread-bubble-actions" + (outbound ? " thread-bubble-actions--outbound" : "")}>
                               {msg.body ? (
                                 <button
                                   type="button"
                                   className="thread-bubble-action"
                                   onClick={() => void onCopyMessage(msg.body)}
+                                  aria-label="Copy message"
+                                  title="Copy"
                                 >
-                                  Copy
+                                  C
                                 </button>
                               ) : null}
                               <button
                                 type="button"
                                 className="thread-bubble-action thread-bubble-action--danger"
                                 onClick={() => void onDeleteMessage(msg.id)}
+                                aria-label="Delete message"
+                                title="Delete"
                               >
-                                Delete
+                                D
                               </button>
                             </div>
                           ) : null}
-                          {renderBody(
-                            msg,
-                            onResendMedia,
-                            onDeleteMedia,
-                            activeMediaActionsId,
-                            onToggleMediaActions
-                          )}
-                          {showMeta ? (
-                            <div className="thread-meta">
-                              <span className="thread-time">{formatTime(msg.created_at)}</span>
-                              {transport ? (
-                                <span
-                                  className={transport.className}
-                                  aria-label={transport.label}
-                                  title={transport.label}
-                                >
-                                  {transport.icon}
-                                </span>
-                              ) : null}
-                            </div>
-                          ) : null}
-                          {isFailed ? <div className="thread-failure-copy">{describeFailure(msg)}</div> : null}
                         </div>
                       </div>
                     </div>
