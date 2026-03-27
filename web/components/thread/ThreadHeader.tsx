@@ -11,7 +11,6 @@ type ThreadHeaderProps = {
   contextOpen: boolean;
   agentAllowed: boolean;
   toggling: boolean;
-  freeReplyAllowed: boolean;
   onToggleContext?: () => void;
   onOpenContext?: () => void;
   onClearChat: () => void | Promise<void>;
@@ -24,7 +23,6 @@ export default function ThreadHeader({
   contextOpen,
   agentAllowed,
   toggling,
-  freeReplyAllowed,
   onToggleContext,
   onOpenContext,
   onClearChat,
@@ -183,18 +181,6 @@ export default function ThreadHeader({
               </div>
             ) : null}
           </div>
-        </div>
-      </div>
-
-      <div className="thread-lane">
-        <div className="thread-status-strip">
-          <span className={"thread-status-chip" + (agentAllowed ? " thread-status-chip--success" : " thread-status-chip--info")}>
-            {agentAllowed ? "Human mode" : "Bot mode"}
-          </span>
-          <span className={"thread-status-chip" + (freeReplyAllowed ? " thread-status-chip--success" : " thread-status-chip--warning")}>
-            {freeReplyAllowed ? "Free reply open" : "Template required"}
-          </span>
-          {convo.lang ? <span className="thread-status-chip">{convo.lang.toUpperCase()} conversation</span> : null}
         </div>
       </div>
     </div>

@@ -404,7 +404,6 @@ export default function Thread({ convo, onOpenContext, onToggleContext, contextO
         contextOpen={contextOpen}
         agentAllowed={agentAllowed}
         toggling={toggling}
-        freeReplyAllowed={freeReplyState.allowed}
         onOpenContext={onOpenContext}
         onToggleContext={onToggleContext}
         onClearChat={clearConversationHistory}

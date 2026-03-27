@@ -115,6 +115,10 @@
   border-bottom: 1px solid var(--inbox-border);
 }
 
+.thread-header {
+  padding-bottom: 10px;
+}
+
 .conversation-list-header {
   display: flex;
   align-items: flex-start;
@@ -394,19 +398,19 @@
   display: block;
   width: 100%;
   min-width: 0;
-  padding: 10px 12px;
-  border: 1px solid var(--inbox-border);
-  border-radius: 12px;
+  padding: 6px 0;
+  border: 0;
+  border-radius: 0;
   cursor: pointer;
   transition: background 180ms ease, border-color 180ms ease, transform 180ms ease, box-shadow 180ms ease;
-  background: linear-gradient(180deg, color-mix(in srgb, var(--ds-color-surface-raised) 98%, white 2%), var(--inbox-bg));
+  background: transparent;
 }
 
 .thread-identity:hover {
-  background: color-mix(in srgb, var(--ds-color-accent-soft) 22%, white 78%);
-  border-color: var(--ds-color-accent-border);
-  transform: translateY(-1px);
-  box-shadow: var(--ds-shadow-sm);
+  background: transparent;
+  border-color: transparent;
+  transform: none;
+  box-shadow: none;
 }
 
 .thread-identity-main,
@@ -589,45 +593,6 @@
   position: relative;
 }
 
-.thread-status-strip {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-  padding: 8px 0 0;
-}
-
-.thread-status-chip {
-  display: inline-flex;
-  align-items: center;
-  min-height: 20px;
-  padding: 0 8px;
-  border-radius: 999px;
-  border: 1px solid var(--inbox-border);
-  background: var(--ds-color-surface);
-  color: var(--inbox-text-muted);
-  font-size: 10px;
-  font-weight: 700;
-}
-
-.thread-status-chip--success {
-  border-color: var(--ds-color-success-border);
-  background: var(--ds-color-success-soft);
-  color: var(--ds-color-success-solid);
-}
-
-.thread-status-chip--warning {
-  border-color: var(--ds-color-warning-border);
-  background: var(--ds-color-warning-soft);
-  color: var(--ds-color-warning-solid);
-}
-
-.thread-status-chip--info {
-  border-color: var(--ds-color-info-border);
-  background: var(--ds-color-info-soft);
-  color: var(--ds-color-info-solid);
-}
-
 .thread-action-menu,
 .rp-header-menu {
   position: absolute;
@@ -808,7 +773,7 @@
 .thread-messages {
   height: 100%;
   overflow: auto;
-  padding: 18px 0 24px;
+  padding: 18px 0 132px;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
   scroll-padding-bottom: 132px;
@@ -1049,13 +1014,12 @@
 
 .thread-footer {
   position: sticky;
-  bottom: 0;
+  bottom: 8px;
   z-index: 2;
-  padding: 10px 14px max(14px, env(safe-area-inset-bottom));
-  border-top: 1px solid var(--inbox-border);
+  padding: 10px 14px max(8px, env(safe-area-inset-bottom));
   background:
-    linear-gradient(180deg, color-mix(in srgb, var(--inbox-bg) 74%, transparent), color-mix(in srgb, var(--inbox-bg) 97%, white 3%));
-  backdrop-filter: blur(14px);
+    linear-gradient(180deg, color-mix(in srgb, var(--inbox-bg) 58%, transparent), color-mix(in srgb, var(--inbox-bg) 93%, white 7%));
+  backdrop-filter: blur(10px);
 }
 
 .thread-dock {
@@ -1517,7 +1481,8 @@
   }
 
   .thread-footer {
-    padding: 8px 12px max(12px, env(safe-area-inset-bottom));
+    bottom: 6px;
+    padding: 8px 12px max(8px, env(safe-area-inset-bottom));
   }
 
   .thread-input-row {
