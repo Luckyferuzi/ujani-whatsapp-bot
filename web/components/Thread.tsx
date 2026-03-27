@@ -126,6 +126,7 @@ export default function Thread({ convo, onOpenContext, onToggleContext, contextO
   const [dismissedComposerNoticeKey, setDismissedComposerNoticeKey] = useState<string | null>(null);
   const [activeMediaActionsId, setActiveMediaActionsId] = useState<string | number | null>(null);
   const [actionMenuOpen, setActionMenuOpen] = useState(false);
+  const [hoveredMessageId, setHoveredMessageId] = useState<string | number | null>(null);
   const messagesRef = useRef<HTMLDivElement | null>(null);
   const firstUnreadRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -241,6 +242,27 @@ export default function Thread({ convo, onOpenContext, onToggleContext, contextO
       setMessages((prev) => prev.filter((msg) => String(msg.id) !== String(messageId)));
     } catch (error: any) {
       toast.error(error?.message ?? "Unable to delete media right now.");
+    }
+  }
+
+  async function handleDeleteMessage(messageId: string | number) {
+    if (!window.confirm("Delete this message?")) return;
+    try {
+      await api(`/api/messages/${messageId}`, { method: "DELETE" });
+      setMessages((prev) => prev.filter((msg) => String(msg.id) !== String(messageId)));
+      toast.success("Message deleted.");
+    } catch (error: any) {
+      toast.error(error?.message ?? "Unable to delete this message right now.");
+    }
+  }
+
+  async function handleCopyMessage(body: string | null) {
+    if (!body) return;
+    try {
+      await navigator.clipboard.writeText(body);
+      toast.success("Message copied.");
+    } catch {
+      toast.error("Unable to copy this message.");
     }
   }
 
@@ -430,7 +452,12 @@ export default function Thread({ convo, onOpenContext, onToggleContext, contextO
                   <Fragment key={msg.id}>
                     {showDayDivider ? <div className="thread-day-divider"><span>{formatDayLabel(msg.created_at)}</span></div> : null}
 
-                    <div ref={index === oldestUnreadIndex ? firstUnreadRef : null} className={"thread-message" + (outbound ? " thread-message--outbound" : " thread-message--inbound") + (groupedWithPrev ? " thread-message--grouped" : "")}>
+                    <div
+                      ref={index === oldestUnreadIndex ? firstUnreadRef : null}
+                      className={"thread-message" + (outbound ? " thread-message--outbound" : " thread-message--inbound") + (groupedWithPrev ? " thread-message--grouped" : "")}
+                      onMouseEnter={() => setHoveredMessageId(msg.id)}
+                      onMouseLeave={() => setHoveredMessageId((current) => (String(current) === String(msg.id) ? null : current))}
+                    >
                       <div className={"thread-message-row" + (outbound ? " thread-message-row--outbound" : "")}>
                         {!groupedWithPrev ? (
                           <div className={"thread-avatar" + (outbound ? " thread-avatar--outbound" : "") + (role === "bot" ? " thread-avatar--bot" : "")}>
@@ -445,6 +472,18 @@ export default function Thread({ convo, onOpenContext, onToggleContext, contextO
                           {msg.message_kind === "template" && !groupedWithPrev ? <div className="thread-role-label">Template{msg.template_name || msg.template_key ? ` · ${String(msg.template_name || msg.template_key).replaceAll("_", " ")}` : ""}</div> : null}
 
                           <div className={"thread-bubble" + (outbound ? " thread-bubble--outbound" : " thread-bubble--inbound") + (role === "bot" ? " thread-bubble--bot" : "") + (isFailed ? " thread-bubble--failed" : "")}>
+                            {String(hoveredMessageId ?? "") === String(msg.id) ? (
+                              <div className="thread-bubble-actions">
+                                {msg.body ? (
+                                  <button type="button" className="thread-bubble-action" onClick={() => void handleCopyMessage(msg.body)}>
+                                    Copy
+                                  </button>
+                                ) : null}
+                                <button type="button" className="thread-bubble-action thread-bubble-action--danger" onClick={() => void handleDeleteMessage(msg.id)}>
+                                  Delete
+                                </button>
+                              </div>
+                            ) : null}
                             {renderBody(msg, handleResendMedia, handleDeleteMedia, activeMediaActionsId, (messageId) => setActiveMediaActionsId((current) => current != null && String(current) === String(messageId) ? null : messageId))}
                             {showMeta ? (
                               <div className="thread-meta">

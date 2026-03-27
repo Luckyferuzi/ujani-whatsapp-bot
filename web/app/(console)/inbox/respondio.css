@@ -20,6 +20,7 @@
   grid-template-columns: 320px minmax(0, 1fr);
   height: 100%;
   min-height: 0;
+  overflow: hidden;
 }
 
 .inbox-rail,
@@ -42,6 +43,9 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
 }
 
 .inbox-focus-region:has(.inbox-summary-region) {
@@ -177,6 +181,8 @@
   margin: 0;
   padding: 6px 0;
   overflow: auto;
+  min-height: 0;
+  overscroll-behavior: contain;
 }
 
 .conversation-item {
@@ -292,10 +298,11 @@
 }
 
 .thread {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   min-width: 0;
   height: 100%;
+  overflow: hidden;
 }
 
 .thread-lane {
@@ -321,7 +328,7 @@
   gap: 4px;
   width: 100%;
   min-width: 0;
-  padding: 10px 12px;
+  padding: 8px 10px;
   border: 1px solid var(--inbox-border);
   border-radius: 10px;
   cursor: pointer;
@@ -490,8 +497,8 @@
 }
 
 .thread-body {
-  flex: 1;
   min-height: 0;
+  height: 100%;
   padding: 0 16px;
   overflow: hidden;
 }
@@ -507,6 +514,8 @@
   height: 100%;
   overflow: auto;
   padding: 12px 0 16px;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .thread-lane--messages {
@@ -537,6 +546,7 @@
   display: grid;
   grid-template-columns: 28px minmax(0, 1fr);
   gap: 10px;
+  align-items: end;
 }
 
 .thread-message-row--outbound {
@@ -573,6 +583,7 @@
 .thread-role-label { margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.08em; }
 
 .thread-bubble {
+  position: relative;
   width: fit-content;
   max-width: min(100%, 38rem);
   padding: 10px 12px;
@@ -585,6 +596,43 @@
 .thread-bubble:hover {
   transform: translateY(-1px);
   box-shadow: var(--ds-shadow-sm);
+}
+
+.thread-bubble-actions {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px;
+  border: 1px solid var(--inbox-border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ds-color-surface-raised) 94%, white 6%);
+  box-shadow: var(--ds-shadow-sm);
+}
+
+.thread-bubble-action {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--inbox-text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 6px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 180ms ease, color 180ms ease;
+}
+
+.thread-bubble-action:hover {
+  background: var(--inbox-muted);
+  color: var(--inbox-text-strong);
+}
+
+.thread-bubble-action--danger:hover {
+  background: var(--ds-color-danger-soft);
+  color: var(--ds-color-danger-solid);
 }
 
 .thread-bubble--outbound {
@@ -644,10 +692,13 @@
 .thread-location-link { color: var(--inbox-accent); text-decoration: none; }
 
 .thread-footer {
-  flex: 0 0 auto;
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
   padding: 12px 16px 16px;
   border-top: 1px solid var(--inbox-border);
-  background: var(--inbox-bg);
+  background: color-mix(in srgb, var(--inbox-bg) 94%, white 6%);
+  backdrop-filter: blur(10px);
 }
 
 .thread-input-row {
@@ -676,6 +727,19 @@
   flex-direction: column;
   min-width: 0;
   height: 100%;
+  overflow: hidden;
+}
+
+.rp-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.rp-header-copy {
+  display: grid;
+  gap: 4px;
 }
 
 .rp-tabs {
@@ -684,6 +748,7 @@
   gap: 8px;
   padding: 12px 16px;
   border-bottom: 1px solid var(--inbox-border);
+  background: color-mix(in srgb, var(--inbox-bg) 92%, white 8%);
 }
 
 .rp-tab--active {
@@ -697,17 +762,22 @@
   flex: 1;
   overflow: auto;
   padding: 16px;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .rp-section {
   display: grid;
   gap: 12px;
-  padding-bottom: 20px;
+  padding: 18px;
+  border: 1px solid var(--inbox-border);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--ds-color-surface) 96%, white 4%);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.5);
 }
 
 .rp-section + .rp-section {
-  border-top: 1px solid var(--inbox-border);
-  padding-top: 20px;
+  margin-top: 12px;
 }
 
 .rp-section-heading {
@@ -779,6 +849,11 @@
 
 .rp-empty-copy,
 .rp-section-copy { font-size: 13px; color: var(--inbox-text-muted); }
+
+.rp-customer-grid,
+.rp-detail-grid {
+  align-items: start;
+}
 
 .template-modal-overlay {
   position: fixed;
@@ -856,6 +931,7 @@
   .inbox-main {
     display: block;
     height: 100%;
+    overflow: hidden;
   }
 
   .thread-lane {
