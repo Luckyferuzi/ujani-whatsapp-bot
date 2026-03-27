@@ -2,290 +2,363 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { formatPhonePretty } from "@/lib/phone";
 import { EmptyState, SidePanelSkeleton } from "@/components/ui";
 import OperatorTimelineNotes from "@/components/OperatorTimelineNotes";
-import { toast } from "sonner";
+import type { Convo } from "./ConversationList";
 
 export interface RightPanelProps {
   conversationId: string | null;
+  conversation?: Convo | null;
   onClose?: () => void;
 }
+
 type CustomerSummary = { name: string | null; phone: string; lang?: string | null };
 type DeliverySummary = { mode: string; km?: number | null; fee_tzs?: number | null };
-type PaymentSummary = { id?: number; order_id?: number; method?: string | null; recipient?: string | null; status: "awaiting" | "verifying" | "paid" | "failed" | string; amount_tzs?: number | null; total_tzs?: number | null; remaining_tzs?: number | null };
-type ConversationSummary = { customer?: CustomerSummary | null; delivery?: DeliverySummary | null; payment?: PaymentSummary | null; restock?: { subscribed_count: number; items: { product_id: number; sku: string; name: string; status: string }[] } | null };
-type OrderRow = { id: number; status: string | null; delivery_mode: string | null; km?: number | null; fee_tzs?: number | null; total_tzs: number; phone?: string | null; created_at: string; delivery_agent_phone?: string | null; order_code?: string | null; paid_amount?: number | null };
+type PaymentSummary = {
+  id?: number;
+  method?: string | null;
+  recipient?: string | null;
+  status: string;
+  amount_tzs?: number | null;
+  total_tzs?: number | null;
+  remaining_tzs?: number | null;
+};
+type ConversationSummary = {
+  customer?: CustomerSummary | null;
+  delivery?: DeliverySummary | null;
+  payment?: PaymentSummary | null;
+  restock?: { subscribed_count: number; items: { product_id: number; sku: string; name: string; status: string }[] } | null;
+};
+type OrderRow = {
+  id: number;
+  status: string | null;
+  delivery_mode: string | null;
+  km?: number | null;
+  fee_tzs?: number | null;
+  total_tzs: number;
+  phone?: string | null;
+  created_at: string;
+  delivery_agent_phone?: string | null;
+  order_code?: string | null;
+  paid_amount?: number | null;
+};
 
-function formatTzs(value?: number | null) { if (value == null || !Number.isFinite(value)) return "-"; return `${Math.floor(value).toLocaleString("sw-TZ")} TZS`; }
-function formatKm(value?: number | null) { if (value == null || !Number.isFinite(value)) return "-"; return `${value.toFixed(1)} km`; }
-function formatDateTime(value: string) { const d = new Date(value); if (Number.isNaN(d.getTime())) return value; return d.toLocaleString("sw-TZ", { year: "numeric", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit" }); }
-function normalizePaymentStatus(status?: string | null) { const s = (status ?? "").toLowerCase().trim(); if (!s) return { label: "Unknown", tone: "neutral" as const }; if (s === "paid") return { label: "Paid", tone: "success" as const }; if (s === "verifying" || s === "awaiting") return { label: s === "verifying" ? "Verifying" : "Awaiting", tone: "warning" as const }; if (s === "failed") return { label: "Failed", tone: "danger" as const }; return { label: s, tone: "neutral" as const }; }
-function normalizeOrderStatus(status?: string | null) { switch ((status ?? "").toLowerCase().trim()) { case "pending": return { label: "Pending", tone: "warning" as const }; case "preparing": return { label: "Preparing", tone: "warning" as const }; case "out_for_delivery": return { label: "Out for delivery", tone: "success" as const }; case "delivered": return { label: "Delivered", tone: "success" as const }; case "cancelled": return { label: "Cancelled", tone: "danger" as const }; case "": return { label: "Unknown", tone: "neutral" as const }; default: return { label: status ?? "Unknown", tone: "neutral" as const }; } }
+function formatTzs(value?: number | null) {
+  if (value == null || !Number.isFinite(value)) return "-";
+  return `${Math.floor(value).toLocaleString("sw-TZ")} TZS`;
+}
 
-export default function RightPanel({ conversationId, onClose }: RightPanelProps) {
+function formatDateTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString("sw-TZ", {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function relativeLastActivity(value?: string | null) {
+  if (!value) return "No recent activity";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "No recent activity";
+  const minutes = Math.max(1, Math.round((Date.now() - date.getTime()) / 60000));
+  if (minutes < 60) return `Last message ${minutes} min ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `Last message ${hours} hr ago`;
+  const days = Math.round(hours / 24);
+  return `Last message ${days} day${days === 1 ? "" : "s"} ago`;
+}
+
+function orderStatusLabel(status?: string | null) {
+  const raw = (status ?? "").toLowerCase().trim();
+  if (raw === "pending") return "Payment pending";
+  if (raw === "preparing") return "Preparing";
+  if (raw === "out_for_delivery") return "Out for delivery";
+  if (raw === "delivered") return "Completed";
+  if (raw === "cancelled") return "Cancelled";
+  return "Order placed";
+}
+
+function paymentStatusLabel(status?: string | null) {
+  const raw = (status ?? "").toLowerCase().trim();
+  if (raw === "paid") return "Paid";
+  if (raw === "verifying") return "Verifying";
+  if (raw === "awaiting") return "Awaiting";
+  if (raw === "failed") return "Failed";
+  return "Unknown";
+}
+
+function buildTimeline(order: OrderRow | null, payment: PaymentSummary | null) {
+  const orderStatus = (order?.status ?? "").toLowerCase().trim();
+  const paymentStatus = (payment?.status ?? "").toLowerCase().trim();
+  return [
+    { key: "placed", label: "Order placed", state: order ? "completed" : "current" },
+    {
+      key: "payment",
+      label: paymentStatus === "paid" ? "Payment received" : "Payment pending",
+      state: paymentStatus === "paid" ? "completed" : order ? "current" : "upcoming",
+    },
+    {
+      key: "preparing",
+      label: "Preparing",
+      state: orderStatus === "preparing" || orderStatus === "out_for_delivery" || orderStatus === "delivered" ? "completed" : "upcoming",
+    },
+    {
+      key: "delivery",
+      label: "Out for delivery",
+      state: orderStatus === "delivered" ? "completed" : orderStatus === "out_for_delivery" ? "current" : "upcoming",
+    },
+    { key: "complete", label: "Completed", state: orderStatus === "delivered" ? "current" : "upcoming" },
+  ];
+}
+
+export default function RightPanel({ conversationId, conversation, onClose }: RightPanelProps) {
   const router = useRouter();
   const [summary, setSummary] = useState<ConversationSummary | null>(null);
   const [orders, setOrders] = useState<OrderRow[]>([]);
   const [loading, setLoading] = useState(false);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [activeView, setActiveView] = useState<"summary" | "activity" | "controls">("summary");
+  const [activeTab, setActiveTab] = useState<"summary" | "activity" | "controls">("summary");
   const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null);
-  const [updatingPayment, setUpdatingPayment] = useState(false);
-  const [paymentAmountInput, setPaymentAmountInput] = useState("");
-  const [paymentError, setPaymentError] = useState<string | null>(null);
-  const [showPaymentForm, setShowPaymentForm] = useState(false);
-  const [updatingStatus, setUpdatingStatus] = useState(false);
-  const [riderPhoneInput, setRiderPhoneInput] = useState("");
-  const [statusError, setStatusError] = useState<string | null>(null);
-  const [showRiderForm, setShowRiderForm] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [clearingConversation, setClearingConversation] = useState(false);
   const [clearingMediaOnly, setClearingMediaOnly] = useState(false);
 
-  const customer = summary?.customer ?? null;
-  const delivery = summary?.delivery ?? null;
-  const payment = summary?.payment ?? null;
-  const restock = summary?.restock ?? null;
-  const latestOrder = orders[0] ?? null;
-  const currentOrder = useMemo(() => !orders.length ? null : selectedOrderId == null ? orders[0] ?? null : orders.find((o) => o.id === selectedOrderId) ?? orders[0] ?? null, [orders, selectedOrderId]);
-  const displayName = useMemo(() => { const name = customer?.name?.trim(); if (name) return name; if (customer?.phone) return formatPhonePretty(customer.phone); if (latestOrder?.phone) return formatPhonePretty(latestOrder.phone); return "Customer"; }, [customer, latestOrder]);
-
-  async function loadPanelData(showLoading: boolean) {
-    if (!conversationId) { setSummary(null); setOrders([]); setSelectedOrderId(null); return; }
-    showLoading ? setLoading(true) : setIsRefreshing(true);
-    try {
-      const [summaryData, ordersData] = await Promise.all([api<ConversationSummary>(`/api/conversations/${conversationId}/summary`), api<{ items: OrderRow[] }>(`/api/conversations/${conversationId}/orders`)]);
-      const nextOrders = ordersData?.items ?? [];
-      setSummary(summaryData ?? null);
-      setOrders(nextOrders);
-      setSelectedOrderId((current) => nextOrders.length === 0 ? null : current != null && nextOrders.some((o) => o.id === current) ? current : nextOrders[0].id);
-    } finally {
-      showLoading ? setLoading(false) : setIsRefreshing(false);
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      if (!conversationId) return;
+      setLoading(true);
+      try {
+        const [summaryData, ordersData] = await Promise.all([
+          api<ConversationSummary>(`/api/conversations/${conversationId}/summary`),
+          api<{ items: OrderRow[] }>(`/api/conversations/${conversationId}/orders`),
+        ]);
+        if (cancelled) return;
+        const nextOrders = ordersData?.items ?? [];
+        setSummary(summaryData ?? null);
+        setOrders(nextOrders);
+        setSelectedOrderId(nextOrders[0]?.id ?? null);
+        setActiveTab("summary");
+        setMenuOpen(false);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
     }
-  }
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [conversationId]);
 
-  useEffect(() => { void loadPanelData(true); setActiveView("summary"); setPaymentAmountInput(""); setPaymentError(null); setShowPaymentForm(false); setRiderPhoneInput(""); setStatusError(null); setShowRiderForm(false); }, [conversationId]);
+  const customer = summary?.customer ?? null;
+  const payment = summary?.payment ?? null;
+  const delivery = summary?.delivery ?? null;
+  const restock = summary?.restock ?? null;
+  const currentOrder = useMemo(
+    () => (selectedOrderId == null ? orders[0] ?? null : orders.find((order) => order.id === selectedOrderId) ?? orders[0] ?? null),
+    [orders, selectedOrderId]
+  );
+  const displayName = useMemo(() => {
+    const name = customer?.name?.trim() || conversation?.name?.trim();
+    if (name) return name;
+    return formatPhonePretty(customer?.phone || conversation?.phone || currentOrder?.phone || "");
+  }, [conversation?.name, conversation?.phone, currentOrder?.phone, customer?.name, customer?.phone]);
 
-  const handleOpenOrdersPage = () => { const phone = customer?.phone || latestOrder?.phone; router.push(phone ? `/orders?${new URLSearchParams({ phone }).toString()}` : "/orders"); };
-  const handleUpdatePaymentStatus = async (status: "verifying" | "paid") => {
-    if (!payment?.id) return;
-    const payload: Record<string, unknown> = { status };
-    if (status === "paid") { const numeric = Number(paymentAmountInput.trim().replace(/[^\d]/g, "")); if (!Number.isFinite(numeric) || numeric <= 0) { setPaymentError("Enter a valid amount in TZS."); return; } payload.amount_tzs = numeric; }
-    setUpdatingPayment(true); setPaymentError(null);
-    try { await api(`/api/payments/${payment.id}/status`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }); if (status === "paid") { setPaymentAmountInput(""); setShowPaymentForm(false); } await loadPanelData(false); }
-    catch (err) { console.error("Failed to update payment status", err); setPaymentError("Failed to update payment. Please try again."); }
-    finally { setUpdatingPayment(false); }
-  };
-  const handleUpdateOrderStatus = async (status: "preparing" | "out_for_delivery" | "delivered") => {
-    if (!currentOrder) return;
-    const payload: Record<string, unknown> = { status };
-    if (status === "out_for_delivery") { const raw = riderPhoneInput.trim(); if (!raw) { setStatusError("Enter rider phone number."); return; } payload.delivery_agent_phone = raw; }
-    setUpdatingStatus(true); setStatusError(null);
-    try { await api(`/api/orders/${currentOrder.id}/status`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }); if (status === "out_for_delivery") { setShowRiderForm(false); setRiderPhoneInput(""); } await loadPanelData(false); }
-    catch (err) { console.error("Failed to update order status", err); setStatusError("Failed to update order status. Please try again."); }
-    finally { setUpdatingStatus(false); }
-  };
-  const handleClearConversation = async (mediaOnly = false) => {
+  async function handleClearConversation(mediaOnly = false) {
     const confirmed = window.confirm(
       mediaOnly
         ? "Delete media messages from this conversation? Orders, payments, and the contact will remain."
         : "Clear this conversation history? Orders, payments, and the contact will remain."
     );
-    if (!confirmed) return;
+    if (!confirmed || !conversationId) return;
 
     mediaOnly ? setClearingMediaOnly(true) : setClearingConversation(true);
     try {
       const suffix = mediaOnly ? "?mediaOnly=1" : "";
-      await api(`/api/conversations/${conversationId}/messages${suffix}`, {
-        method: "DELETE",
-      });
+      await api(`/api/conversations/${conversationId}/messages${suffix}`, { method: "DELETE" });
       toast.success(mediaOnly ? "Media messages deleted." : "Conversation history cleared.");
-    } catch (err) {
-      console.error("Failed to clear conversation history", err);
+    } catch (error) {
+      console.error("Failed to clear conversation", error);
       toast.error("Failed to update conversation history. Please try again.");
     } finally {
       mediaOnly ? setClearingMediaOnly(false) : setClearingConversation(false);
     }
-  };
+  }
 
-  if (!conversationId) return <div className="right-panel right-panel--empty"><div className="right-panel-state"><EmptyState eyebrow="Context" title="No conversation selected." description="Choose a conversation to view customer context, orders, payment state, and internal notes." /></div></div>;
-  if (loading && !summary && orders.length === 0) return <div className="right-panel"><div className="right-panel-state"><SidePanelSkeleton /></div></div>;
+  if (!conversationId) {
+    return (
+      <div className="right-panel right-panel--empty">
+        <div className="right-panel-state">
+          <EmptyState eyebrow="Summary" title="No conversation selected." description="Choose a conversation to view customer context, orders, payment state, and notes." />
+        </div>
+      </div>
+    );
+  }
 
-  const paymentUi = normalizePaymentStatus(payment?.status);
-  const orderUi = normalizeOrderStatus(currentOrder?.status);
-  const orderTotal = payment?.total_tzs ?? currentOrder?.total_tzs ?? null;
-  const paidSoFar = payment?.amount_tzs ?? currentOrder?.paid_amount ?? null;
-  const remaining = payment?.remaining_tzs ?? (orderTotal != null && paidSoFar != null ? Math.max(0, orderTotal - paidSoFar) : null);
+  if (loading && !summary && orders.length === 0) {
+    return (
+      <div className="right-panel">
+        <div className="right-panel-state">
+          <SidePanelSkeleton />
+        </div>
+      </div>
+    );
+  }
+
+  const timeline = buildTimeline(currentOrder, payment);
 
   return (
     <div className="right-panel">
-      <div className="panel-header panel-header--tabs">
-        <button type="button" className={"panel-header-tab" + (activeView === "summary" ? " panel-header-tab--active" : "")} onClick={() => setActiveView("summary")}><span className="panel-header-tab-label">Summary</span></button>
-        <button type="button" className={"panel-header-tab" + (activeView === "activity" ? " panel-header-tab--active" : "")} onClick={() => setActiveView("activity")}><span className="panel-header-tab-label">Activity</span></button>
-        <button type="button" className={"panel-header-tab" + (activeView === "controls" ? " panel-header-tab--active" : "")} onClick={() => setActiveView("controls")}><span className="panel-header-tab-label">Controls</span></button>
-        <button type="button" className="rp-icon-button" onClick={() => void loadPanelData(false)} disabled={loading || isRefreshing} title="Refresh context" aria-label="Refresh context">Refresh</button>
-        {onClose ? <button type="button" className="rp-icon-button" onClick={onClose} title="Close context" aria-label="Close context">Close</button> : null}
-      </div>
-      {activeView === "summary" ? (
-        <div className="rp-stack">
-          <div className="panel-card panel-card--hero">
-            <div className="rp-hero-top">
-              <div><div className="rp-hero-title">{displayName}</div><div className="rp-hero-sub">{customer?.phone ? formatPhonePretty(customer.phone) : "No phone on record"}</div></div>
-              {customer?.lang ? <span className="rp-chip rp-chip--neutral">{customer.lang.toUpperCase()}</span> : null}
-            </div>
-            <div className="rp-hero-stats">
-              <div className="rp-hero-stat"><div className="rp-hero-stat-label">Order</div><div className="rp-hero-stat-value">{currentOrder ? orderUi.label : "None"}</div></div>
-              <div className="rp-hero-stat"><div className="rp-hero-stat-label">Payment</div><div className="rp-hero-stat-value">{paymentUi.label}</div></div>
-              <div className="rp-hero-stat"><div className="rp-hero-stat-label">Delivery</div><div className="rp-hero-stat-value">{currentOrder?.delivery_mode || delivery?.mode || "-"}</div></div>
-            </div>
-            <div className="rp-actions rp-actions--wrap">
-              <button type="button" className="btn btn-secondary btn-xs" onClick={handleOpenOrdersPage}>Order desk</button>
-              {payment?.id ? <button type="button" className="btn btn-secondary btn-xs" onClick={() => void handleUpdatePaymentStatus("verifying")} disabled={updatingPayment}>Verify payment</button> : null}
-              {currentOrder ? <button type="button" className="btn btn-secondary btn-xs" onClick={() => void handleUpdateOrderStatus("preparing")} disabled={updatingStatus}>Mark preparing</button> : null}
-            </div>
+      <div className="rp-header">
+        <div className="rp-header-copy">
+          <div className="rp-header-title-row">
+            <div className="rp-header-title">{displayName || "Customer"}</div>
+            <span className="conversation-inline-badge">{currentOrder ? orderStatusLabel(currentOrder.status) : "No order"}</span>
           </div>
-
-          <div className="panel-card">
-            <div className="rp-card-title-row">
-              <div className="panel-card-title">Customer</div>
-              {(restock?.subscribed_count ?? 0) > 0 ? <span className="badge badge--restock">Stock Alert{restock!.subscribed_count > 1 ? ` ${restock!.subscribed_count}` : ""}</span> : null}
-            </div>
-            <div className="rp-grid">
-              <div className="panel-row"><span className="panel-label">Name</span><span className="panel-value">{customer?.name || "-"}</span></div>
-              <div className="panel-row"><span className="panel-label">Phone</span><span className="panel-value">{customer?.phone ? formatPhonePretty(customer.phone) : "-"}</span></div>
-              <div className="panel-row"><span className="panel-label">Language</span><span className="panel-value">{(customer?.lang || "sw").toUpperCase()}</span></div>
-            </div>
-            <div className="rp-actions"><button type="button" className="btn btn-secondary btn-xs" onClick={handleOpenOrdersPage}>View order history</button></div>
-          </div>
-
-          <div className="panel-card">
-            <div className="rp-card-title-row">
-              <div><div className="panel-card-title">Order</div><div className="panel-card-body panel-card-body--muted">Latest fulfillment state and delivery handoff.</div></div>
-              <div className="rp-order-select-wrap">{orders.length > 1 ? <select className="rp-select" value={currentOrder?.id ?? ""} onChange={(e) => setSelectedOrderId(Number(e.target.value))}>{orders.slice(0, 8).map((o) => <option key={o.id} value={o.id}>{(o.order_code || `Order #${o.id}`) + " - " + formatDateTime(o.created_at)}</option>)}</select> : <span className={"rp-chip rp-chip--" + orderUi.tone}>{orderUi.label}</span>}</div>
-            </div>
-            {!currentOrder ? <div className="panel-card-body panel-card-body--muted">No orders found for this conversation yet.</div> : <>
-              <div className="rp-grid">
-                <div className="panel-row"><span className="panel-label">Code</span><span className="panel-value">{currentOrder.order_code || `#${currentOrder.id}`}</span></div>
-                <div className="panel-row"><span className="panel-label">Status</span><span className={"rp-chip rp-chip--" + orderUi.tone}>{orderUi.label}</span></div>
-                <div className="panel-row"><span className="panel-label">Created</span><span className="panel-value">{formatDateTime(currentOrder.created_at)}</span></div>
-                <div className="panel-row"><span className="panel-label">Total</span><span className="panel-value">{formatTzs(currentOrder.total_tzs)}</span></div>
-                <div className="panel-row"><span className="panel-label">Delivery</span><span className="panel-value">{currentOrder.delivery_mode || delivery?.mode || "-"}</span></div>
-                <div className="panel-row"><span className="panel-label">Distance</span><span className="panel-value">{currentOrder.km != null ? formatKm(currentOrder.km) : formatKm(delivery?.km)}</span></div>
-                <div className="panel-row"><span className="panel-label">Fee</span><span className="panel-value">{currentOrder.fee_tzs != null ? formatTzs(currentOrder.fee_tzs) : formatTzs(delivery?.fee_tzs)}</span></div>
-                <div className="panel-row"><span className="panel-label">Rider</span><span className="panel-value">{currentOrder.delivery_agent_phone ? formatPhonePretty(currentOrder.delivery_agent_phone) : "-"}</span></div>
-              </div>
-              <div className="rp-actions rp-actions--wrap">
-                <button type="button" className="btn btn-secondary btn-xs" onClick={() => void handleUpdateOrderStatus("preparing")} disabled={updatingStatus}>{updatingStatus ? "Updating..." : "Mark preparing"}</button>
-                <button type="button" className="btn btn-secondary btn-xs" onClick={() => { setShowRiderForm((p) => !p); setStatusError(null); }} disabled={updatingStatus}>{showRiderForm ? "Cancel" : "Out for delivery"}</button>
-                <button type="button" className="btn btn-success btn-xs" onClick={() => void handleUpdateOrderStatus("delivered")} disabled={updatingStatus}>{updatingStatus ? "Updating..." : "Mark delivered"}</button>
-              </div>
-              {showRiderForm ? <div className="rp-inline-form"><div className="rp-inline-form-row"><input type="tel" className="rp-input" placeholder="Rider phone (for example +2557...)" value={riderPhoneInput} onChange={(e) => { setRiderPhoneInput(e.target.value); if (statusError) setStatusError(null); }} /><button type="button" className="btn btn-secondary btn-xs" onClick={() => void handleUpdateOrderStatus("out_for_delivery")} disabled={updatingStatus}>{updatingStatus ? "Saving..." : "Confirm"}</button></div>{statusError ? <div className="rp-error">{statusError}</div> : null}</div> : null}
-            </>}
-          </div>
-
-          <div className="panel-card">
-            <div className="rp-card-title-row">
-              <div><div className="panel-card-title">Payment</div><div className="panel-card-body panel-card-body--muted">Verification and settlement status for the active order.</div></div>
-              <span className={"rp-chip rp-chip--" + paymentUi.tone}>{paymentUi.label}</span>
-            </div>
-            {!payment ? <div className="panel-card-body panel-card-body--muted">No payment record available yet.</div> : <>
-              <div className="rp-grid">
-                <div className="panel-row"><span className="panel-label">Order total</span><span className="panel-value">{formatTzs(orderTotal)}</span></div>
-                <div className="panel-row"><span className="panel-label">Paid</span><span className="panel-value">{formatTzs(paidSoFar)}</span></div>
-                <div className="panel-row"><span className="panel-label">Remaining</span><span className="panel-value">{formatTzs(remaining)}</span></div>
-                {payment.method ? <div className="panel-row"><span className="panel-label">Method</span><span className="panel-value">{payment.method}</span></div> : null}
-                {payment.recipient ? <div className="panel-row"><span className="panel-label">Recipient</span><span className="panel-value">{payment.recipient}</span></div> : null}
-              </div>
-              <div className="rp-actions rp-actions--wrap">
-                <button type="button" className="btn btn-secondary btn-xs" onClick={() => void handleUpdatePaymentStatus("verifying")} disabled={updatingPayment}>{updatingPayment ? "Updating..." : "Mark verifying"}</button>
-                <button type="button" className="btn btn-success btn-xs" onClick={() => { setShowPaymentForm((p) => !p); setPaymentError(null); }} disabled={updatingPayment}>{showPaymentForm ? "Cancel" : "Mark paid"}</button>
-              </div>
-              {showPaymentForm ? <div className="rp-inline-form"><div className="rp-inline-form-row"><input type="number" min={0} className="rp-input" placeholder="Amount in TZS" value={paymentAmountInput} onChange={(e) => { setPaymentAmountInput(e.target.value); if (paymentError) setPaymentError(null); }} /><button type="button" className="btn btn-success btn-xs" onClick={() => void handleUpdatePaymentStatus("paid")} disabled={updatingPayment}>{updatingPayment ? "Saving..." : "Confirm"}</button></div>{paymentError ? <div className="rp-error">{paymentError}</div> : null}</div> : null}
-            </>}
-          </div>
-
+          <div className="rp-header-subtitle">{formatPhonePretty(customer?.phone || conversation?.phone || "")}</div>
         </div>
-      ) : activeView === "activity" ? (
-        <div className="rp-stack">
-          {orders.length > 1 ? (
-            <div className="panel-card">
-              <div className="rp-card-title-row">
-                <div>
-                  <div className="panel-card-title">Related orders</div>
-                  <div className="panel-card-body panel-card-body--muted">Recent order history for this conversation.</div>
-                </div>
-              </div>
-              <div className="rp-list">
-                {orders.slice(0, 8).map((order) => {
-                  const statusUi = normalizeOrderStatus(order.status);
-                  const selected = order.id === currentOrder?.id;
-                  return (
-                    <button
-                      key={order.id}
-                      type="button"
-                      className={"rp-list-row rp-list-row--button" + (selected ? " rp-list-row--active" : "")}
-                      onClick={() => setSelectedOrderId(order.id)}
-                    >
-                      <div className="rp-list-main">
-                        <div className="rp-list-title">{order.order_code || `Order #${order.id}`}</div>
-                        <div className="rp-list-sub">{formatDateTime(order.created_at)}</div>
-                      </div>
-                      <div className="rp-list-right">
-                        <span className={"rp-chip rp-chip--" + statusUi.tone}>{statusUi.label}</span>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
+
+        <div className="rp-header-menu-wrap">
+          <button type="button" className="rp-header-menu-button" onClick={() => setMenuOpen((value) => !value)} aria-expanded={menuOpen}>
+            ...
+          </button>
+          {menuOpen ? (
+            <div className="rp-header-menu">
+              <button
+                type="button"
+                className="rp-header-menu-item"
+                onClick={() => {
+                  setMenuOpen(false);
+                  router.push(`/orders?phone=${encodeURIComponent(customer?.phone || conversation?.phone || "")}`);
+                }}
+              >
+                Open order desk
+              </button>
+              {onClose ? (
+                <button type="button" className="rp-header-menu-item" onClick={() => { setMenuOpen(false); onClose(); }}>
+                  Hide summary
+                </button>
+              ) : null}
             </div>
           ) : null}
+        </div>
+      </div>
 
-          {(restock?.subscribed_count ?? 0) > 0 && restock?.items?.length ? <div className="panel-card"><div className="rp-card-title-row"><div className="panel-card-title">Stock alerts</div><span className="badge badge--restock">{restock.subscribed_count}</span></div><div className="rp-list">{restock.items.slice(0, 8).map((it) => <div key={it.product_id} className="rp-list-row"><div className="rp-list-main"><div className="rp-list-title">{it.name || "Product"}</div><div className="rp-list-sub">{it.sku}</div></div><div className="rp-list-right">{it.status}</div></div>)}{restock.items.length > 8 ? <div className="rp-muted">+{restock.items.length - 8} more</div> : null}</div></div> : null}
+      <div className="rp-tabs">
+        <button type="button" className={"rp-tab" + (activeTab === "summary" ? " rp-tab--active" : "")} onClick={() => setActiveTab("summary")}>Summary</button>
+        <button type="button" className={"rp-tab" + (activeTab === "activity" ? " rp-tab--active" : "")} onClick={() => setActiveTab("activity")}>Activity</button>
+        <button type="button" className={"rp-tab" + (activeTab === "controls" ? " rp-tab--active" : "")} onClick={() => setActiveTab("controls")}>Controls</button>
+      </div>
 
-          <div className="panel-card">
-            <OperatorTimelineNotes title="Timeline & Notes" timelinePath={conversationId ? `/api/conversations/${conversationId}/timeline` : null} notePath={conversationId ? `/api/conversations/${conversationId}/notes` : null} emptyState="No business history yet for this conversation." notePlaceholder="Add an internal note for payment checks, delivery context, or customer history." refreshKey={`${conversationId ?? "none"}:${currentOrder?.id ?? "none"}`} />
-          </div>
+      {activeTab === "summary" ? (
+        <div className="rp-body">
+          <section className="rp-section">
+            <div className="rp-section-heading">Customer</div>
+            <div className="rp-customer-grid">
+              <div><div className="rp-meta-label">Name</div><div className="rp-meta-value">{customer?.name || displayName || "-"}</div></div>
+              <div><div className="rp-meta-label">Phone</div><div className="rp-meta-value">{formatPhonePretty(customer?.phone || conversation?.phone || "")}</div></div>
+              <div><div className="rp-meta-label">Language</div><div className="rp-meta-value">{(customer?.lang || conversation?.lang || "sw").toUpperCase()}</div></div>
+              <div><div className="rp-meta-label">Last activity</div><div className="rp-meta-value">{relativeLastActivity(conversation?.last_message_at || conversation?.last_user_message_at)}</div></div>
+              <div><div className="rp-meta-label">Orders</div><div className="rp-meta-value">{orders.length}</div></div>
+            </div>
+          </section>
+
+          <section className="rp-section">
+            <div className="rp-section-head">
+              <div>
+                <div className="rp-section-heading">Order progress</div>
+                <div className="rp-section-copy">Current order journey in one compact timeline.</div>
+              </div>
+              {orders.length > 1 ? (
+                <select className="rp-select" value={currentOrder?.id ?? ""} onChange={(event) => setSelectedOrderId(Number(event.target.value))}>
+                  {orders.slice(0, 8).map((order) => (
+                    <option key={order.id} value={order.id}>
+                      {(order.order_code || `Order #${order.id}`) + " - " + formatDateTime(order.created_at)}
+                    </option>
+                  ))}
+                </select>
+              ) : null}
+            </div>
+
+            <div className="rp-timeline">
+              {timeline.map((step) => (
+                <div key={step.key} className={"rp-timeline-item rp-timeline-item--" + step.state}>
+                  <div className="rp-timeline-dot" aria-hidden="true" />
+                  <div className="rp-timeline-label">{step.label}</div>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section className="rp-section">
+            <div className="rp-section-heading">Order details</div>
+            {!currentOrder ? (
+              <div className="rp-empty-copy">No orders found for this conversation yet.</div>
+            ) : (
+              <div className="rp-detail-grid">
+                <div><div className="rp-meta-label">Order ID</div><div className="rp-meta-value">{currentOrder.order_code || `#${currentOrder.id}`}</div></div>
+                <div><div className="rp-meta-label">Status</div><div className="rp-meta-value">{orderStatusLabel(currentOrder.status)}</div></div>
+                <div><div className="rp-meta-label">Payment</div><div className="rp-meta-value">{paymentStatusLabel(payment?.status)}</div></div>
+                <div><div className="rp-meta-label">Total</div><div className="rp-meta-value">{formatTzs(payment?.total_tzs ?? currentOrder.total_tzs)}</div></div>
+                <div><div className="rp-meta-label">Paid</div><div className="rp-meta-value">{formatTzs(payment?.amount_tzs ?? currentOrder.paid_amount)}</div></div>
+                <div><div className="rp-meta-label">Remaining</div><div className="rp-meta-value">{formatTzs(payment?.remaining_tzs)}</div></div>
+                <div><div className="rp-meta-label">Delivery type</div><div className="rp-meta-value">{currentOrder.delivery_mode || delivery?.mode || "-"}</div></div>
+                <div><div className="rp-meta-label">Recipient</div><div className="rp-meta-value">{payment?.recipient || payment?.method || "-"}</div></div>
+              </div>
+            )}
+          </section>
+        </div>
+      ) : activeTab === "activity" ? (
+        <div className="rp-body">
+          {(restock?.subscribed_count ?? 0) > 0 ? (
+            <section className="rp-section">
+              <div className="rp-section-heading">Stock alerts</div>
+              <div className="rp-activity-list">
+                {(restock?.items ?? []).slice(0, 8).map((item) => (
+                  <div key={item.product_id} className="rp-activity-item rp-activity-item--static">
+                    <div>
+                      <div className="rp-meta-value">{item.name || "Product"}</div>
+                      <div className="rp-meta-caption">{item.sku}</div>
+                    </div>
+                    <div className="rp-meta-caption">{item.status}</div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          ) : null}
+
+          <section className="rp-section">
+            <div className="rp-section-heading">Timeline and notes</div>
+            <OperatorTimelineNotes
+              title="Internal activity"
+              timelinePath={conversationId ? `/api/conversations/${conversationId}/timeline` : null}
+              notePath={conversationId ? `/api/conversations/${conversationId}/notes` : null}
+              emptyState="No business history yet for this conversation."
+              notePlaceholder="Add an internal note for payment checks, delivery context, or customer history."
+              refreshKey={`${conversationId}:${currentOrder?.id ?? "none"}`}
+            />
+          </section>
         </div>
       ) : (
-        <div className="rp-stack">
-          <div className="panel-card">
-            <div className="panel-card-title">Conversation controls</div>
-            <div className="rp-grid">
-              <div className="panel-row"><span className="panel-label">Conversation ID</span><span className="panel-value">{conversationId}</span></div>
-              <div className="panel-row"><span className="panel-label">Customer</span><span className="panel-value">{displayName}</span></div>
-            </div>
-            <div className="panel-card-body panel-card-body--muted">Destructive tools stay separated here so operators do not remove the wrong data while working in the thread.</div>
-            <div className="rp-actions rp-actions--column">
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => void handleClearConversation(false)}
-                disabled={clearingConversation || clearingMediaOnly}
-              >
+        <div className="rp-body">
+          <section className="rp-section">
+            <div className="rp-section-heading">Conversation controls</div>
+            <div className="rp-section-copy">Delete chat history or media here. Contact deletion is not available yet because customer business records may still be linked to orders and payments.</div>
+            <div className="rp-action-stack">
+              <button type="button" className="ui-button ui-button--secondary" onClick={() => void handleClearConversation(false)} disabled={clearingConversation || clearingMediaOnly}>
                 {clearingConversation ? "Clearing..." : "Clear chat history"}
               </button>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => void handleClearConversation(false)}
-                disabled={clearingConversation || clearingMediaOnly}
-              >
-                {clearingConversation ? "Deleting..." : "Delete all chat messages"}
-              </button>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => void handleClearConversation(true)}
-                disabled={clearingConversation || clearingMediaOnly}
-              >
+              <button type="button" className="ui-button ui-button--secondary" onClick={() => void handleClearConversation(true)} disabled={clearingConversation || clearingMediaOnly}>
                 {clearingMediaOnly ? "Deleting media..." : "Delete media only"}
               </button>
             </div>
-          </div>
-
-          {(restock?.subscribed_count ?? 0) > 0 && restock?.items?.length ? <div className="panel-card"><div className="panel-card-title">Stock alerts</div><div className="rp-list">{restock.items.slice(0, 10).map((it) => <div key={it.product_id} className="rp-list-row"><div className="rp-list-main"><div className="rp-list-title">{it.name || "Product"}</div><div className="rp-list-sub">{it.sku}</div></div><div className="rp-list-right">{it.status}</div></div>)}{restock.items.length > 10 ? <div className="rp-muted">+{restock.items.length - 10} more</div> : null}</div></div> : null}
-
+          </section>
         </div>
       )}
     </div>

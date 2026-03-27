@@ -193,16 +193,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       />
 
       <div className="console-shell__main">
-        {!pageMeta.immersive ? (
-          <Topbar
-            pageTitle={pageMeta.title}
-            pageSection={pageMeta.section}
-            pageDescription={pageMeta.description}
-            isInbox={pageMeta.immersive}
-            showSidebarToggle
-            onToggleSidebar={() => setSidebarOpen((v) => !v)}
-          />
-        ) : null}
+        <Topbar
+          pageTitle={pageMeta.title}
+          pageSection={pageMeta.section}
+          pageDescription={pageMeta.description}
+          isInbox={pageMeta.immersive}
+          showSidebarToggle
+          onToggleSidebar={() => setSidebarOpen((v) => !v)}
+        />
 
         <main className="console-shell__content" aria-label={pageMeta.title}>
           {pageMeta.immersive ? (
