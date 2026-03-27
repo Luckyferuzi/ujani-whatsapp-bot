@@ -13,8 +13,8 @@
   --inbox-accent-soft: color-mix(in srgb, var(--ds-color-accent-soft) 78%, white 22%);
   --inbox-accent-border: var(--ds-color-accent-border);
   --inbox-thread-lane: clamp(43rem, 68vw, 50rem);
-  height: calc(100vh - var(--topbar-height));
-  min-height: calc(100vh - var(--topbar-height));
+  height: 100%;
+  min-height: 100%;
   background:
     radial-gradient(circle at top left, color-mix(in srgb, var(--ds-color-accent-soft) 28%, transparent), transparent 34%),
     linear-gradient(180deg, color-mix(in srgb, var(--ds-color-bg-canvas) 94%, white 6%), var(--inbox-bg));
@@ -563,13 +563,13 @@
 }
 
 .thread-identity {
-  appearance: none;
   min-width: 0;
   display: grid;
   gap: 4px;
-  padding: 0;
-  border: 0;
-  background: transparent;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--inbox-border) 78%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--inbox-panel-raised) 96%, transparent);
   color: inherit;
   text-align: left;
   cursor: pointer;
@@ -584,15 +584,10 @@
   text-overflow: ellipsis;
 }
 
-.thread-title-badges { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .thread-subtitle { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .thread-header-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .thread-header-action--mobile { display: none; }
 .thread-header-action--inline { padding: 6px 10px; border-radius: 10px; }
-.thread-state-badge--button {
-  appearance: none;
-  cursor: pointer;
-}
 
 .thread-agent-toggle {
   min-width: 128px;
@@ -1273,7 +1268,7 @@
 @media (max-width: 767px) {
   .inbox-root {
     height: auto;
-    min-height: calc(100vh - var(--topbar-height));
+    min-height: 100vh;
     overflow: visible;
   }
 
@@ -1306,7 +1301,6 @@
   .thread-footer { padding: 0 14px 14px; }
   .thread-title-row { gap: 10px; }
   .thread-identity { width: 100%; }
-  .thread-title-badges { width: 100%; }
   .thread-bubble { max-width: 100%; }
 
   .thread-input-row { grid-template-columns: 1fr auto; }

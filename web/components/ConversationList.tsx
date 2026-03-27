@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { formatPhonePretty } from "@/lib/phone";
+import { socket } from "@/lib/socket";
 import {
   ConversationListSkeleton,
   EmptyState,
@@ -170,6 +171,32 @@ export default function ConversationList({
       cancelled = true;
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, []);
+
+  useEffect(() => {
+    const s = socket();
+    if (!s) return;
+
+    const clearedHandler = (payload: any) => {
+      if (!payload?.conversation_id) return;
+      setItems((current) =>
+        current.map((item) =>
+          String(item.id) === String(payload.conversation_id)
+            ? {
+                ...item,
+                unread_count: 0,
+                last_message_text: null,
+                last_message_at: null,
+              }
+            : item
+        )
+      );
+    };
+
+    s.on("conversation.cleared", clearedHandler);
+    return () => {
+      s.off("conversation.cleared", clearedHandler);
     };
   }, []);
 

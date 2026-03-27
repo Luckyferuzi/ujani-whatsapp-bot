@@ -704,6 +704,36 @@ export default function Thread({
     await loadMessages({ preserveExisting: true });
   }
 
+  async function clearConversationHistory(options?: { mediaOnly?: boolean }) {
+    const mediaOnly = options?.mediaOnly === true;
+    const confirmed = window.confirm(
+      mediaOnly
+        ? "Delete media messages from this conversation? Orders, payments, and customer records will remain."
+        : "Clear this chat history? Orders, payments, and the contact will remain."
+    );
+    if (!confirmed) return;
+
+    try {
+      const suffix = mediaOnly ? "?mediaOnly=1" : "";
+      await api(`/api/conversations/${convo.id}/messages${suffix}`, {
+        method: "DELETE",
+      });
+      setMessages((prev) =>
+        mediaOnly
+          ? prev.filter(
+              (message) =>
+                !["image", "document", "audio", "video"].includes(String(message.type ?? ""))
+            )
+          : []
+      );
+      setActiveMediaActionsId(null);
+      toast.success(mediaOnly ? "Media messages deleted." : "Chat history cleared.");
+    } catch (err: any) {
+      console.error("Failed to clear conversation history", err);
+      toast.error(err?.message ?? "Unable to update conversation history right now.");
+    }
+  }
+
   useEffect(() => {
     async function loadProducts() {
       try {
@@ -840,8 +870,18 @@ export default function Thread({
     };
 
     s.on("message.created", handler);
+
+    const clearedHandler = (payload: any) => {
+      if (!payload) return;
+      if (String(payload.conversation_id) !== String(convo.id)) return;
+      setMessages([]);
+      setActiveMediaActionsId(null);
+    };
+
+    s.on("conversation.cleared", clearedHandler);
     return () => {
       s.off("message.created", handler);
+      s.off("conversation.cleared", clearedHandler);
     };
   }, [convo.id]);
 
@@ -986,38 +1026,6 @@ export default function Thread({
               <div className="thread-title" title={title}>
                 {title}
               </div>
-              <div className="thread-title-badges">
-              <span
-                className={
-                  "thread-mode-chip" +
-                  (agentAllowed ? " thread-mode-chip--agent" : " thread-mode-chip--bot")
-                }
-              >
-                {agentAllowed ? "Human" : "Bot"}
-              </span>
-              {freeReplyState.allowed ? (
-                <span className={freeReplyState.className}>{freeReplyState.label}</span>
-              ) : (
-                <span
-                  className={freeReplyState.className + " thread-state-badge--button"}
-                  role="button"
-                  tabIndex={0}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    setTemplateModalOpen(true);
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      setTemplateModalOpen(true);
-                    }
-                  }}
-                >
-                  {freeReplyState.label}
-                </span>
-              )}
-              </div>
               <div className="thread-subtitle">
               {formatPhonePretty(convo.phone)}
               {convo.lang && (
@@ -1035,6 +1043,13 @@ export default function Thread({
               </div>
             </div>
             <div className="thread-header-actions">
+              <button
+                type="button"
+                className="thread-header-action"
+                onClick={() => void clearConversationHistory()}
+              >
+                Clear chat
+              </button>
               <button
                 type="button"
                 className="thread-header-action"

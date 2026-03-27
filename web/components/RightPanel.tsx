@@ -6,6 +6,7 @@ import { api } from "@/lib/api";
 import { formatPhonePretty } from "@/lib/phone";
 import { EmptyState, SidePanelSkeleton } from "@/components/ui";
 import OperatorTimelineNotes from "@/components/OperatorTimelineNotes";
+import { toast } from "sonner";
 
 export interface RightPanelProps {
   conversationId: string | null;
@@ -39,6 +40,8 @@ export default function RightPanel({ conversationId, onClose }: RightPanelProps)
   const [riderPhoneInput, setRiderPhoneInput] = useState("");
   const [statusError, setStatusError] = useState<string | null>(null);
   const [showRiderForm, setShowRiderForm] = useState(false);
+  const [clearingConversation, setClearingConversation] = useState(false);
+  const [clearingMediaOnly, setClearingMediaOnly] = useState(false);
 
   const customer = summary?.customer ?? null;
   const delivery = summary?.delivery ?? null;
@@ -82,6 +85,28 @@ export default function RightPanel({ conversationId, onClose }: RightPanelProps)
     try { await api(`/api/orders/${currentOrder.id}/status`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }); if (status === "out_for_delivery") { setShowRiderForm(false); setRiderPhoneInput(""); } await loadPanelData(false); }
     catch (err) { console.error("Failed to update order status", err); setStatusError("Failed to update order status. Please try again."); }
     finally { setUpdatingStatus(false); }
+  };
+  const handleClearConversation = async (mediaOnly = false) => {
+    const confirmed = window.confirm(
+      mediaOnly
+        ? "Delete media messages from this conversation? Orders, payments, and the contact will remain."
+        : "Clear this conversation history? Orders, payments, and the contact will remain."
+    );
+    if (!confirmed) return;
+
+    mediaOnly ? setClearingMediaOnly(true) : setClearingConversation(true);
+    try {
+      const suffix = mediaOnly ? "?mediaOnly=1" : "";
+      await api(`/api/conversations/${conversationId}/messages${suffix}`, {
+        method: "DELETE",
+      });
+      toast.success(mediaOnly ? "Media messages deleted." : "Conversation history cleared.");
+    } catch (err) {
+      console.error("Failed to clear conversation history", err);
+      toast.error("Failed to update conversation history. Please try again.");
+    } finally {
+      mediaOnly ? setClearingMediaOnly(false) : setClearingConversation(false);
+    }
   };
 
   if (!conversationId) return <div className="right-panel right-panel--empty"><div className="right-panel-state"><EmptyState eyebrow="Context" title="No conversation selected." description="Choose a conversation to view customer context, orders, payment state, and internal notes." /></div></div>;
@@ -232,9 +257,30 @@ export default function RightPanel({ conversationId, onClose }: RightPanelProps)
             </div>
             <div className="panel-card-body panel-card-body--muted">Destructive tools stay separated here so operators do not remove the wrong data while working in the thread.</div>
             <div className="rp-actions rp-actions--column">
-              <button type="button" className="btn btn-secondary" disabled>Delete selected message</button>
-              <button type="button" className="btn btn-secondary" disabled>Delete media messages</button>
-              <button type="button" className="btn btn-secondary" disabled>Delete orders and history</button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => void handleClearConversation(false)}
+                disabled={clearingConversation || clearingMediaOnly}
+              >
+                {clearingConversation ? "Clearing..." : "Clear chat history"}
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => void handleClearConversation(false)}
+                disabled={clearingConversation || clearingMediaOnly}
+              >
+                {clearingConversation ? "Deleting..." : "Delete all chat messages"}
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => void handleClearConversation(true)}
+                disabled={clearingConversation || clearingMediaOnly}
+              >
+                {clearingMediaOnly ? "Deleting media..." : "Delete media only"}
+              </button>
             </div>
           </div>
 
