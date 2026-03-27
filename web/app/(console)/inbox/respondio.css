@@ -485,6 +485,16 @@
   justify-content: flex-end;
 }
 
+.thread-action-cluster {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px;
+  border: 1px solid var(--inbox-border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--ds-color-surface-raised) 96%, white 4%);
+}
+
 .thread-primary-action,
 .thread-header-action,
 .thread-menu-button,
@@ -529,6 +539,11 @@
 .thread-header-action--placeholder {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+.thread-action-cluster .thread-primary-action,
+.thread-action-cluster .thread-header-action {
+  min-height: 36px;
 }
 
 .thread-primary-action:hover,
@@ -980,9 +995,32 @@
 }
 
 .thread-dock .thread-attach-button,
-.thread-dock .thread-header-action {
+.thread-dock .thread-dock-action {
   min-height: 34px;
   padding-inline: 12px;
+}
+
+.thread-dock-action {
+  appearance: none;
+  border: 1px solid var(--inbox-border);
+  background: color-mix(in srgb, var(--ds-color-surface-raised) 97%, white 3%);
+  color: var(--inbox-text);
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.36);
+  transition: background 180ms ease, border-color 180ms ease, color 180ms ease, transform 180ms ease;
+}
+
+.thread-dock-action:hover {
+  transform: translateY(-1px);
+  background: color-mix(in srgb, var(--ds-color-surface-muted) 72%, white 28%);
+}
+
+.thread-dock-action--placeholder {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .thread-input-row {
@@ -994,6 +1032,20 @@
   border: 1px solid var(--inbox-border);
   border-radius: 14px;
   background: color-mix(in srgb, var(--ds-color-surface-raised) 98%, white 2%);
+}
+
+.thread-editor {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.thread-editor-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--inbox-text-faint);
 }
 
 .thread-input {
@@ -1333,6 +1385,15 @@
   .thread-lane--header {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .thread-header-actions {
+    justify-content: space-between;
+  }
+
+  .thread-action-cluster {
+    flex: 1 1 auto;
+    justify-content: space-between;
   }
 
   .thread-body {

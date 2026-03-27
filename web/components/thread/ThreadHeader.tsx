@@ -113,17 +113,24 @@ export default function ThreadHeader({
         </div>
 
         <div className="thread-header-actions">
-          <button
-            type="button"
-            className={"thread-header-action" + (contextOpen ? " thread-header-action--active" : "")}
-            onClick={handleToggleContext}
-          >
-            {contextOpen ? "Hide details" : "Show details"}
-          </button>
+          <div className="thread-action-cluster">
+            <button
+              type="button"
+              className="thread-primary-action"
+              onClick={onPrimaryAction}
+              disabled={toggling}
+            >
+              {primaryActionLabel}
+            </button>
 
-          <button type="button" className="thread-primary-action" onClick={onPrimaryAction} disabled={toggling}>
-            {primaryActionLabel}
-          </button>
+            <button
+              type="button"
+              className={"thread-header-action" + (contextOpen ? " thread-header-action--active" : "")}
+              onClick={handleToggleContext}
+            >
+              {contextOpen ? "Hide details" : "Show details"}
+            </button>
+          </div>
 
           <div className="thread-action-menu-wrap" ref={menuRef}>
             <button
@@ -175,7 +182,7 @@ export default function ThreadHeader({
                     void onToggleAgentMode();
                   }}
                 >
-                  {agentAllowed ? "Switch to bot mode" : "Switch to agent mode"}
+                  {agentAllowed ? "Return to bot" : "Take over manually"}
                 </button>
               </div>
             ) : null}

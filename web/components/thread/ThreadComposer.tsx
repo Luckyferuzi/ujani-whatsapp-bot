@@ -100,10 +100,10 @@ export default function ThreadComposer({
               >
                 Attach
               </button>
-              <button type="button" className="thread-header-action" onClick={onOpenTemplate}>
+              <button type="button" className="thread-dock-action" onClick={onOpenTemplate}>
                 Template
               </button>
-              <button type="button" className="thread-header-action thread-header-action--placeholder" disabled>
+              <button type="button" className="thread-dock-action thread-dock-action--placeholder" disabled>
                 Catalog soon
               </button>
             </div>
@@ -118,43 +118,46 @@ export default function ThreadComposer({
           />
 
           <div className="thread-input-row">
-            <textarea
-              ref={inputRef}
-              className="thread-input thread-input--multiline"
-              value={text}
-              rows={1}
-              onChange={(event) => {
-                if (!agentAllowed) {
-                  onRequestAgentHint();
-                  return;
+            <div className="thread-editor">
+              <div className="thread-editor-label">Message</div>
+              <textarea
+                ref={inputRef}
+                className="thread-input thread-input--multiline"
+                value={text}
+                rows={1}
+                onChange={(event) => {
+                  if (!agentAllowed) {
+                    onRequestAgentHint();
+                    return;
+                  }
+                  if (composerBlockedByWindow) return;
+                  onTextChange(event.target.value);
+                }}
+                placeholder={
+                  !agentAllowed
+                    ? "Switch to Agent Mode to reply"
+                    : composerBlockedByWindow
+                      ? "Template required before the next manual reply"
+                      : "Write a reply for the customer..."
                 }
-                if (composerBlockedByWindow) return;
-                onTextChange(event.target.value);
-              }}
-              placeholder={
-                !agentAllowed
-                  ? "Switch to Agent Mode to reply"
-                  : composerBlockedByWindow
-                    ? "Template required before the next manual reply"
-                    : "Write a reply for the customer..."
-              }
-              onKeyDown={(event: KeyboardEvent<HTMLTextAreaElement>) => {
-                if (!agentAllowed && event.key !== "Tab") {
-                  event.preventDefault();
-                  onRequestAgentHint();
-                  return;
-                }
-                if (composerBlockedByWindow && event.key !== "Tab") {
-                  event.preventDefault();
-                  return;
-                }
-                if (event.key === "Enter" && !event.shiftKey) {
-                  event.preventDefault();
-                  void onSend(event as unknown as FormEvent);
-                }
-              }}
-              readOnly={composerLocked}
-            />
+                onKeyDown={(event: KeyboardEvent<HTMLTextAreaElement>) => {
+                  if (!agentAllowed && event.key !== "Tab") {
+                    event.preventDefault();
+                    onRequestAgentHint();
+                    return;
+                  }
+                  if (composerBlockedByWindow && event.key !== "Tab") {
+                    event.preventDefault();
+                    return;
+                  }
+                  if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault();
+                    void onSend(event as unknown as FormEvent);
+                  }
+                }}
+                readOnly={composerLocked}
+              />
+            </div>
 
             <div className="thread-send-stack">
               <div className="thread-send-meta">{sending ? "Sending message..." : "WhatsApp reply"}</div>
