@@ -663,7 +663,9 @@
 
 .thread-body {
   min-height: 0;
-  height: 100%;
+  height: auto;
+  display: flex;
+  flex-direction: column;
   padding: 0 18px;
   overflow: hidden;
   background:
@@ -771,7 +773,8 @@
 }
 
 .thread-messages {
-  height: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: auto;
   padding: 18px 0 132px;
   overscroll-behavior: contain;
@@ -1013,12 +1016,13 @@
 .thread-location-link { color: var(--inbox-accent); text-decoration: none; overflow-wrap: anywhere; }
 
 .thread-footer {
-  position: sticky;
-  bottom: 8px;
+  position: relative;
+  bottom: auto;
   z-index: 2;
-  padding: 10px 14px max(8px, env(safe-area-inset-bottom));
+  padding: 10px 14px calc(14px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--inbox-border);
   background:
-    linear-gradient(180deg, color-mix(in srgb, var(--inbox-bg) 58%, transparent), color-mix(in srgb, var(--inbox-bg) 93%, white 7%));
+    linear-gradient(180deg, color-mix(in srgb, var(--inbox-bg) 74%, transparent), color-mix(in srgb, var(--inbox-bg) 97%, white 3%));
   backdrop-filter: blur(10px);
 }
 
@@ -1481,8 +1485,7 @@
   }
 
   .thread-footer {
-    bottom: 6px;
-    padding: 8px 12px max(8px, env(safe-area-inset-bottom));
+    padding: 8px 12px calc(12px + env(safe-area-inset-bottom));
   }
 
   .thread-input-row {
