@@ -202,7 +202,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           onToggleSidebar={() => setSidebarOpen((v) => !v)}
         />
 
-        <main className="console-shell__content" aria-label={pageMeta.title}>
+        <main
+          className={
+            "console-shell__content" +
+            (pageMeta.immersive ? " console-shell__content--immersive" : "")
+          }
+          aria-label={pageMeta.title}
+        >
           {pageMeta.immersive ? (
             <div className="console-page console-page--immersive">{children}</div>
           ) : (

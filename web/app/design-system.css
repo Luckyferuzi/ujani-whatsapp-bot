@@ -971,10 +971,12 @@ body {
 }
 
 .console-shell {
-  min-height: 100vh;
+  height: 100dvh;
+  min-height: 100dvh;
   display: grid;
   grid-template-columns: 15rem minmax(0, 1fr);
   background: var(--ds-color-bg-canvas);
+  overflow: hidden;
 }
 
 .console-shell--sidebar-collapsed {
@@ -1253,14 +1255,21 @@ body {
 
 .console-shell__main {
   min-width: 0;
+  min-height: 0;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
 }
 
 .console-shell__content {
   min-height: 0;
   overflow-x: clip;
+  overflow-y: auto;
   scrollbar-gutter: stable both-edges;
+}
+
+.console-shell__content--immersive {
+  overflow: hidden;
 }
 
 .console-page {
@@ -1270,6 +1279,9 @@ body {
 
 .console-page--immersive {
   padding: 0;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .console-page__container {
