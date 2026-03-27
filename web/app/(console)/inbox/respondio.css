@@ -111,7 +111,7 @@
 .conversation-list-header,
 .thread-header,
 .rp-header {
-  padding: 16px;
+  padding: 12px 14px;
   border-bottom: 1px solid var(--inbox-border);
 }
 
@@ -381,7 +381,7 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
+  gap: 12px;
 }
 
 .thread-header-main,
@@ -394,9 +394,9 @@
   display: block;
   width: 100%;
   min-width: 0;
-  padding: 12px 14px;
+  padding: 10px 12px;
   border: 1px solid var(--inbox-border);
-  border-radius: 14px;
+  border-radius: 12px;
   cursor: pointer;
   transition: background 180ms ease, border-color 180ms ease, transform 180ms ease, box-shadow 180ms ease;
   background: linear-gradient(180deg, color-mix(in srgb, var(--ds-color-surface-raised) 98%, white 2%), var(--inbox-bg));
@@ -417,26 +417,26 @@
 .thread-identity-main {
   display: grid;
   grid-template-columns: 40px minmax(0, 1fr);
-  gap: 12px;
+  gap: 10px;
   align-items: center;
 }
 
 .thread-identity-avatar {
-  width: 40px;
-  height: 40px;
-  border-radius: 12px;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
   display: grid;
   place-items: center;
   background: color-mix(in srgb, var(--ds-color-accent-soft) 70%, white 30%);
   color: var(--inbox-accent);
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 700;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.54);
 }
 
 .thread-identity-copy {
   display: grid;
-  gap: 4px;
+  gap: 2px;
 }
 
 .thread-title-row {
@@ -456,7 +456,7 @@
 .thread-subtitle {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   flex-wrap: wrap;
   color: var(--inbox-text-muted);
 }
@@ -488,10 +488,10 @@
 .thread-action-cluster {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 4px;
+  gap: 6px;
+  padding: 3px;
   border: 1px solid var(--inbox-border);
-  border-radius: 12px;
+  border-radius: 10px;
   background: color-mix(in srgb, var(--ds-color-surface-raised) 96%, white 4%);
 }
 
@@ -514,8 +514,8 @@
   background: var(--ds-color-surface);
   color: var(--inbox-text);
   border-radius: 8px;
-  padding: 8px 12px;
-  font-size: 12px;
+  padding: 7px 10px;
+  font-size: 11px;
   font-weight: 700;
   cursor: pointer;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.36);
@@ -557,7 +557,7 @@
 .thread-action-cluster .thread-primary-action,
 .thread-action-cluster .thread-header-action,
 .thread-action-cluster .thread-mode-action {
-  min-height: 36px;
+  min-height: 32px;
 }
 
 .thread-primary-action:hover,
@@ -592,21 +592,21 @@
 .thread-status-strip {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   flex-wrap: wrap;
-  padding: 10px 0 0;
+  padding: 8px 0 0;
 }
 
 .thread-status-chip {
   display: inline-flex;
   align-items: center;
-  min-height: 24px;
-  padding: 0 10px;
+  min-height: 20px;
+  padding: 0 8px;
   border-radius: 999px;
   border: 1px solid var(--inbox-border);
   background: var(--ds-color-surface);
   color: var(--inbox-text-muted);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
 }
 
@@ -699,7 +699,7 @@
 .thread-body {
   min-height: 0;
   height: 100%;
-  padding: 0 20px;
+  padding: 0 18px;
   overflow: hidden;
   background:
     linear-gradient(
@@ -1051,7 +1051,7 @@
   position: sticky;
   bottom: 0;
   z-index: 2;
-  padding: 14px 16px 18px;
+  padding: 10px 14px max(14px, env(safe-area-inset-bottom));
   border-top: 1px solid var(--inbox-border);
   background:
     linear-gradient(180deg, color-mix(in srgb, var(--inbox-bg) 74%, transparent), color-mix(in srgb, var(--inbox-bg) 97%, white 3%));
@@ -1060,10 +1060,10 @@
 
 .thread-dock {
   display: grid;
-  gap: 12px;
-  padding: 12px;
+  gap: 10px;
+  padding: 10px;
   border: 1px solid color-mix(in srgb, var(--inbox-border-strong) 78%, white 22%);
-  border-radius: 18px;
+  border-radius: 14px;
   background:
     linear-gradient(180deg, color-mix(in srgb, var(--ds-color-surface-raised) 98%, white 2%), var(--ds-color-surface));
   box-shadow: var(--ds-shadow-sm);
@@ -1079,7 +1079,7 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
   flex-wrap: wrap;
 }
 
@@ -1090,7 +1090,7 @@
 }
 
 .thread-dock-title {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: -0.01em;
   color: var(--inbox-text-strong);
@@ -1112,8 +1112,8 @@
 
 .thread-dock .thread-attach-button,
 .thread-dock .thread-dock-action {
-  min-height: 34px;
-  padding-inline: 12px;
+  min-height: 32px;
+  padding-inline: 10px;
 }
 
 .thread-dock-action {
@@ -1142,11 +1142,11 @@
 .thread-input-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 12px;
+  gap: 10px;
   align-items: stretch;
-  padding: 12px;
+  padding: 10px;
   border: 1px solid var(--inbox-border);
-  border-radius: 14px;
+  border-radius: 12px;
   background: color-mix(in srgb, var(--ds-color-surface-raised) 98%, white 2%);
 }
 
@@ -1195,7 +1195,7 @@
 .thread-send-stack {
   display: grid;
   align-content: end;
-  gap: 8px;
+  gap: 6px;
   min-width: 104px;
 }
 
@@ -1208,7 +1208,7 @@
 
 .thread-send-button {
   min-width: 104px;
-  min-height: 42px;
+  min-height: 40px;
   justify-content: center;
 }
 
@@ -1509,7 +1509,7 @@
 
   .thread-action-cluster {
     flex: 1 1 auto;
-    justify-content: space-between;
+    justify-content: flex-start;
   }
 
   .thread-body {
@@ -1517,7 +1517,7 @@
   }
 
   .thread-footer {
-    padding: 10px 12px 12px;
+    padding: 8px 12px max(12px, env(safe-area-inset-bottom));
   }
 
   .thread-input-row {

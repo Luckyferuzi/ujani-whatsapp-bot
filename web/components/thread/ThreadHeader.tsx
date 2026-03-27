@@ -11,11 +11,9 @@ type ThreadHeaderProps = {
   contextOpen: boolean;
   agentAllowed: boolean;
   toggling: boolean;
-  primaryActionLabel: string;
   freeReplyAllowed: boolean;
   onToggleContext?: () => void;
   onOpenContext?: () => void;
-  onPrimaryAction: () => void;
   onClearChat: () => void | Promise<void>;
   onToggleAgentMode: () => void | Promise<void>;
 };
@@ -26,11 +24,9 @@ export default function ThreadHeader({
   contextOpen,
   agentAllowed,
   toggling,
-  primaryActionLabel,
   freeReplyAllowed,
   onToggleContext,
   onOpenContext,
-  onPrimaryAction,
   onClearChat,
   onToggleAgentMode,
 }: ThreadHeaderProps) {
@@ -116,17 +112,9 @@ export default function ThreadHeader({
           <div className="thread-action-cluster">
             <button
               type="button"
-              className="thread-primary-action"
-              onClick={onPrimaryAction}
-              disabled={toggling}
-            >
-              {primaryActionLabel}
-            </button>
-
-            <button
-              type="button"
               className={"thread-mode-action" + (agentAllowed ? " thread-mode-action--agent" : " thread-mode-action--bot")}
               onClick={() => void onToggleAgentMode()}
+              disabled={toggling}
             >
               {agentAllowed ? "Human mode" : "Bot mode"}
             </button>
