@@ -11,6 +11,7 @@
   --inbox-lane: min(100%, 54rem);
   --inbox-message-measure: min(100%, 42rem);
   --inbox-surface-soft: color-mix(in srgb, var(--ds-color-surface-muted) 74%, white 26%);
+  --thread-composer-height: 208px;
   height: 100%;
   min-height: 0;
   background: var(--ds-color-bg-canvas);
@@ -370,10 +371,12 @@
 }
 
 .thread {
+  position: relative;
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto minmax(0, 1fr);
   min-width: 0;
   height: 100%;
+  padding-bottom: var(--thread-composer-height);
 }
 
 .thread-lane {
@@ -663,7 +666,7 @@
 
 .thread-body {
   min-height: 0;
-  height: auto;
+  height: 100%;
   display: flex;
   flex-direction: column;
   padding: 0 18px;
@@ -776,10 +779,10 @@
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
-  padding: 18px 0 132px;
+  padding: 18px 0 calc(var(--thread-composer-height) + 16px);
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
-  scroll-padding-bottom: 132px;
+  scroll-padding-bottom: calc(var(--thread-composer-height) + 16px);
 }
 
 .thread-lane--messages {
@@ -1016,8 +1019,10 @@
 .thread-location-link { color: var(--inbox-accent); text-decoration: none; overflow-wrap: anywhere; }
 
 .thread-footer {
-  position: relative;
-  bottom: auto;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
   z-index: 2;
   padding: 10px 14px calc(14px + env(safe-area-inset-bottom));
   border-top: 1px solid var(--inbox-border);
@@ -1425,6 +1430,7 @@
   .inbox-root {
     --inbox-lane: min(100%, 50rem);
     --inbox-message-measure: min(100%, 38rem);
+    --thread-composer-height: 212px;
   }
 }
 
@@ -1450,6 +1456,7 @@
   .inbox-root {
     height: 100dvh;
     min-height: 100dvh;
+    --thread-composer-height: 228px;
   }
 
   .inbox-main {
