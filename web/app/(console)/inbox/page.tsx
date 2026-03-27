@@ -43,7 +43,7 @@ export default function InboxPage() {
   const [isMobile, setIsMobile] = useState(false);
   const [mobileView, setMobileView] = useState<MobileView>("list");
   const [showMobileMenu, setShowMobileMenu] = useState(false);
-  const [desktopContextOpen, setDesktopContextOpen] = useState(true);
+  const [desktopContextOpen, setDesktopContextOpen] = useState(false);
   const [savedId, setSavedId] = useState<string | null>(null);
   const [restoreDone, setRestoreDone] = useState(false);
   const searchParams = useSearchParams();
@@ -76,8 +76,6 @@ export default function InboxPage() {
     if (isMobile) {
       setMobileView("chat");
       setShowMobileMenu(false);
-    } else {
-      setDesktopContextOpen(true);
     }
 
     try {
@@ -92,6 +90,7 @@ export default function InboxPage() {
 
     if (active && !list.some((item) => item.id === active.id)) {
       setActive(null);
+      setDesktopContextOpen(false);
       clearSavedConversationId();
       setSavedId(null);
       if (isMobile) setMobileView("list");
@@ -159,12 +158,12 @@ export default function InboxPage() {
             ) : null}
           </>
         ) : (
-          <>
-            <div className="inbox-rail inbox-rail--list">
+          <div className={"inbox-workspace" + (active && desktopContextOpen ? " inbox-workspace--drawer-open" : "")}>
+            <aside className="inbox-region inbox-region--queue">
               <ConversationList activeId={active?.id ?? null} onPick={handlePick} phoneFilter={phoneFromUrl} onLoaded={handleLoaded} />
-            </div>
+            </aside>
 
-            <div className="inbox-focus-region">
+            <section className="inbox-region inbox-region--thread">
               {active ? (
                 <Thread convo={active} onOpenContext={() => setDesktopContextOpen(true)} onToggleContext={() => setDesktopContextOpen((value) => !value)} contextOpen={desktopContextOpen} />
               ) : (
@@ -174,14 +173,14 @@ export default function InboxPage() {
                   <div className="inbox-empty-copy">Review customer history, payment status, delivery progress, and internal notes from one working view.</div>
                 </div>
               )}
+            </section>
 
-              {active && desktopContextOpen ? (
-                <div className="inbox-summary-region">
-                  <RightPanel conversationId={active.id} conversation={active} />
-                </div>
-              ) : null}
-            </div>
-          </>
+            {active && desktopContextOpen ? (
+              <aside className="inbox-region inbox-region--context">
+                <RightPanel conversationId={active.id} conversation={active} onClose={() => setDesktopContextOpen(false)} />
+              </aside>
+            ) : null}
+          </div>
         )}
       </div>
     </div>

@@ -144,13 +144,15 @@ export default function ConversationList({ activeId, onPick, phoneFilter, onLoad
       </div>
 
       <div className="conversation-search">
-        <input
-          type="text"
-          className="conversation-search-input"
-          placeholder="Search by name, phone, or message"
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-        />
+        <div className="conversation-search-shell">
+          <input
+            type="text"
+            className="conversation-search-input"
+            placeholder="Search by name, phone, or message"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+          />
+        </div>
       </div>
 
       {loading && items.length === 0 ? (
@@ -182,11 +184,16 @@ export default function ConversationList({ activeId, onPick, phoneFilter, onLoad
               (item.agent_allowed ? "Assigned to an operator" : "Bot is handling this thread");
             const timeSource = item.last_message_at || item.last_user_message_at;
             const unread = item.unread_count ?? 0;
+            const statusLabel = item.agent_allowed ? "Human" : "Bot";
 
             return (
               <li
                 key={item.id}
-                className={"conversation-item" + (item.id === activeId ? " conversation-item--selected" : "")}
+                className={
+                  "conversation-item" +
+                  (item.id === activeId ? " conversation-item--selected" : "") +
+                  (unread > 0 ? " conversation-item--unread" : "")
+                }
                 onClick={() => onPick(item)}
               >
                 <div className="conversation-avatar">
@@ -195,8 +202,19 @@ export default function ConversationList({ activeId, onPick, phoneFilter, onLoad
 
                 <div className="conversation-main">
                   <div className="conversation-top-row">
-                    <div className="conversation-title">{title}</div>
+                    <div className="conversation-title-wrap">
+                      <div className="conversation-title">{title}</div>
+                      {unread > 0 ? <span className="conversation-inline-badge conversation-inline-badge--strong">Unread {unread}</span> : null}
+                    </div>
                     <div className="conversation-time">{timeSource ? formatListTime(timeSource) : ""}</div>
+                  </div>
+
+                  <div className="conversation-meta-row">
+                    <div className="conversation-phone">{formatPhonePretty(item.phone)}</div>
+                    <div className="conversation-status">
+                      <span className={"conversation-status-dot" + (item.agent_allowed ? " conversation-status-dot--human" : " conversation-status-dot--bot")} />
+                      <span className="conversation-status-label">{statusLabel}</span>
+                    </div>
                   </div>
 
                   <div className="conversation-subtitle" title={subtitle}>
@@ -204,11 +222,11 @@ export default function ConversationList({ activeId, onPick, phoneFilter, onLoad
                   </div>
 
                   <div className="conversation-bottom-row">
-                    <div className="conversation-phone">{formatPhonePretty(item.phone)}</div>
                     <div className="conversation-badges">
-                      <span className={"conversation-status-dot" + (item.agent_allowed ? " conversation-status-dot--human" : " conversation-status-dot--bot")} />
-                      <span className="conversation-status-label">{item.agent_allowed ? "Human" : "Bot"}</span>
-                      {unread > 0 ? <span className="conversation-inline-badge">Unread {unread}</span> : null}
+                      {item.lang ? <span className="conversation-inline-badge">{item.lang.toUpperCase()}</span> : null}
+                      {item.restock_subscribed_count && item.restock_subscribed_count > 0 ? (
+                        <span className="conversation-inline-badge">Stock {item.restock_subscribed_count}</span>
+                      ) : null}
                     </div>
                   </div>
                 </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
@@ -128,6 +128,7 @@ export default function RightPanel({ conversationId, conversation, onClose }: Ri
   const [menuOpen, setMenuOpen] = useState(false);
   const [clearingConversation, setClearingConversation] = useState(false);
   const [clearingMediaOnly, setClearingMediaOnly] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -155,6 +156,29 @@ export default function RightPanel({ conversationId, conversation, onClose }: Ri
       cancelled = true;
     };
   }, [conversationId]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setMenuOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleEscape as unknown as EventListener);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleEscape as unknown as EventListener);
+    };
+  }, [menuOpen]);
 
   const customer = summary?.customer ?? null;
   const payment = summary?.payment ?? null;
@@ -217,15 +241,16 @@ export default function RightPanel({ conversationId, conversation, onClose }: Ri
     <div className="right-panel">
       <div className="rp-header">
         <div className="rp-header-copy">
+          <div className="rp-kicker">Context drawer</div>
           <div className="rp-header-title-row">
             <div className="rp-header-title">{displayName || "Customer"}</div>
-            <span className="conversation-inline-badge">{currentOrder ? orderStatusLabel(currentOrder.status) : "No order"}</span>
+            <span className="conversation-inline-badge rp-inline-badge">{currentOrder ? orderStatusLabel(currentOrder.status) : "No order"}</span>
           </div>
           <div className="rp-header-subtitle">{formatPhonePretty(customer?.phone || conversation?.phone || "")}</div>
         </div>
 
-        <div className="rp-header-menu-wrap">
-          <button type="button" className="rp-header-menu-button" onClick={() => setMenuOpen((value) => !value)} aria-expanded={menuOpen}>
+        <div className="rp-header-menu-wrap" ref={menuRef}>
+          <button type="button" className="rp-header-menu-button" onClick={() => setMenuOpen((value) => !value)} aria-expanded={menuOpen} aria-label="Open context actions">
             ...
           </button>
           {menuOpen ? (
@@ -259,7 +284,12 @@ export default function RightPanel({ conversationId, conversation, onClose }: Ri
       {activeTab === "summary" ? (
         <div className="rp-body">
           <section className="rp-section">
-            <div className="rp-section-heading">Customer</div>
+            <div className="rp-section-head">
+              <div>
+                <div className="rp-section-kicker">Profile</div>
+                <div className="rp-section-heading">Customer</div>
+              </div>
+            </div>
             <div className="rp-customer-grid">
               <div><div className="rp-meta-label">Name</div><div className="rp-meta-value">{customer?.name || displayName || "-"}</div></div>
               <div><div className="rp-meta-label">Phone</div><div className="rp-meta-value">{formatPhonePretty(customer?.phone || conversation?.phone || "")}</div></div>
@@ -272,6 +302,7 @@ export default function RightPanel({ conversationId, conversation, onClose }: Ri
           <section className="rp-section">
             <div className="rp-section-head">
               <div>
+                <div className="rp-section-kicker">Orders</div>
                 <div className="rp-section-heading">Order progress</div>
                 <div className="rp-section-copy">Current order journey in one compact timeline.</div>
               </div>
@@ -297,7 +328,12 @@ export default function RightPanel({ conversationId, conversation, onClose }: Ri
           </section>
 
           <section className="rp-section">
-            <div className="rp-section-heading">Order details</div>
+            <div className="rp-section-head">
+              <div>
+                <div className="rp-section-kicker">Details</div>
+                <div className="rp-section-heading">Order details</div>
+              </div>
+            </div>
             {!currentOrder ? (
               <div className="rp-empty-copy">No orders found for this conversation yet.</div>
             ) : (
@@ -318,7 +354,12 @@ export default function RightPanel({ conversationId, conversation, onClose }: Ri
         <div className="rp-body">
           {(restock?.subscribed_count ?? 0) > 0 ? (
             <section className="rp-section">
-              <div className="rp-section-heading">Stock alerts</div>
+              <div className="rp-section-head">
+                <div>
+                  <div className="rp-section-kicker">Inventory</div>
+                  <div className="rp-section-heading">Stock alerts</div>
+                </div>
+              </div>
               <div className="rp-activity-list">
                 {(restock?.items ?? []).slice(0, 8).map((item) => (
                   <div key={item.product_id} className="rp-activity-item rp-activity-item--static">
@@ -334,7 +375,12 @@ export default function RightPanel({ conversationId, conversation, onClose }: Ri
           ) : null}
 
           <section className="rp-section">
-            <div className="rp-section-heading">Timeline and notes</div>
+            <div className="rp-section-head">
+              <div>
+                <div className="rp-section-kicker">Internal</div>
+                <div className="rp-section-heading">Timeline and notes</div>
+              </div>
+            </div>
             <OperatorTimelineNotes
               title="Internal activity"
               timelinePath={conversationId ? `/api/conversations/${conversationId}/timeline` : null}
@@ -348,7 +394,12 @@ export default function RightPanel({ conversationId, conversation, onClose }: Ri
       ) : (
         <div className="rp-body">
           <section className="rp-section">
-            <div className="rp-section-heading">Conversation controls</div>
+            <div className="rp-section-head">
+              <div>
+                <div className="rp-section-kicker">Controls</div>
+                <div className="rp-section-heading">Conversation controls</div>
+              </div>
+            </div>
             <div className="rp-section-copy">Delete chat history or media here. Contact deletion is not available yet because customer business records may still be linked to orders and payments.</div>
             <div className="rp-action-stack">
               <button type="button" className="ui-button ui-button--secondary" onClick={() => void handleClearConversation(false)} disabled={clearingConversation || clearingMediaOnly}>

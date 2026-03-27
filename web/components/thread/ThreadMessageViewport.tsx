@@ -1,0 +1,209 @@
+"use client";
+
+import { Fragment, type MutableRefObject, type RefObject, type ReactNode } from "react";
+import { EmptyState, ThreadSkeleton } from "@/components/ui";
+import type { Msg } from "./types";
+
+type ThreadMessageViewportProps = {
+  messages: Msg[];
+  loading: boolean;
+  messagesRef: RefObject<HTMLDivElement | null>;
+  firstUnreadRef: MutableRefObject<HTMLDivElement | null>;
+  oldestUnreadIndex: number;
+  customerInitial: string;
+  hoveredMessageId: string | number | null;
+  activeMediaActionsId: string | number | null;
+  isInbound: (msg: Pick<Msg, "direction">) => boolean;
+  getRole: (msg: Msg) => string;
+  minutesBetween: (a: string, b: string) => number;
+  formatDayLabel: (iso: string) => string;
+  formatTime: (iso: string) => string;
+  describeTransport: (msg: Msg) => { icon: string; label: string; className: string } | null;
+  describeFailure: (msg: Msg) => string;
+  renderBody: (
+    msg: Msg,
+    onResendMedia?: (kind: string, mediaId: string) => void,
+    onDeleteMedia?: (messageId: string | number) => void,
+    activeMediaActionsId?: string | number | null,
+    onToggleMediaActions?: (messageId: string | number) => void
+  ) => ReactNode;
+  onScrollBottomStateChange: (isAtBottom: boolean) => void;
+  onMessageHover: (id: string | number | null) => void;
+  onCopyMessage: (body: string | null) => void | Promise<void>;
+  onDeleteMessage: (id: string | number) => void | Promise<void>;
+  onResendMedia: (kind: string, mediaId: string) => void | Promise<void>;
+  onDeleteMedia: (messageId: string | number) => void | Promise<void>;
+  onToggleMediaActions: (messageId: string | number) => void;
+};
+
+const GROUP_GAP_MINUTES = 6;
+
+export default function ThreadMessageViewport({
+  messages,
+  loading,
+  messagesRef,
+  firstUnreadRef,
+  oldestUnreadIndex,
+  customerInitial,
+  hoveredMessageId,
+  activeMediaActionsId,
+  isInbound,
+  getRole,
+  minutesBetween,
+  formatDayLabel,
+  formatTime,
+  describeTransport,
+  describeFailure,
+  renderBody,
+  onScrollBottomStateChange,
+  onMessageHover,
+  onCopyMessage,
+  onDeleteMessage,
+  onResendMedia,
+  onDeleteMedia,
+  onToggleMediaActions,
+}: ThreadMessageViewportProps) {
+  return (
+    <div className="thread-body">
+      {loading && messages.length === 0 ? (
+        <div className="thread-loading-state">
+          <ThreadSkeleton rows={8} />
+        </div>
+      ) : messages.length === 0 ? (
+        <div className="thread-loading-state">
+          <EmptyState
+            eyebrow="Conversation"
+            title="No messages yet."
+            description="This thread will populate as the customer and operators exchange messages."
+          />
+        </div>
+      ) : (
+        <div
+          className="thread-messages"
+          ref={messagesRef}
+          onScroll={() => {
+            const el = messagesRef.current;
+            if (!el) return;
+            onScrollBottomStateChange(el.scrollHeight - (el.scrollTop + el.clientHeight) <= 50);
+          }}
+        >
+          <div className="thread-lane thread-lane--messages">
+            {messages.map((msg, index) => {
+              const prev = index > 0 ? messages[index - 1] : null;
+              const next = index < messages.length - 1 ? messages[index + 1] : null;
+              const role = getRole(msg);
+              const outbound = !isInbound(msg);
+              const groupedWithPrev = !!prev && getRole(prev) === role && minutesBetween(prev.created_at, msg.created_at) <= GROUP_GAP_MINUTES;
+              const groupedWithNext = !!next && getRole(next) === role && minutesBetween(msg.created_at, next.created_at) <= GROUP_GAP_MINUTES;
+              const showMeta = !groupedWithNext;
+              const showDayDivider = index === 0 || msg.created_at.slice(0, 10) !== prev?.created_at?.slice(0, 10);
+              const transport = outbound ? describeTransport(msg) : null;
+              const isFailed = outbound && String(msg.status ?? "").toLowerCase() === "failed";
+
+              return (
+                <Fragment key={msg.id}>
+                  {showDayDivider ? (
+                    <div className="thread-day-divider">
+                      <span>{formatDayLabel(msg.created_at)}</span>
+                    </div>
+                  ) : null}
+
+                  <div
+                    ref={index === oldestUnreadIndex ? firstUnreadRef : null}
+                    className={
+                      "thread-message" +
+                      (outbound ? " thread-message--outbound" : " thread-message--inbound") +
+                      (groupedWithPrev ? " thread-message--grouped" : "")
+                    }
+                    onMouseEnter={() => onMessageHover(msg.id)}
+                    onMouseLeave={() => onMessageHover(null)}
+                  >
+                    <div className={"thread-message-row" + (outbound ? " thread-message-row--outbound" : "")}>
+                      {!groupedWithPrev ? (
+                        <div
+                          className={
+                            "thread-avatar" +
+                            (outbound ? " thread-avatar--outbound" : "") +
+                            (role === "bot" ? " thread-avatar--bot" : "")
+                          }
+                        >
+                          {outbound ? (role === "bot" ? "B" : "A") : customerInitial}
+                        </div>
+                      ) : (
+                        <div className="thread-avatar thread-avatar--spacer" />
+                      )}
+
+                      <div className="thread-message-stack">
+                        {role === "bot" && !groupedWithPrev ? <div className="thread-role-label">Bot</div> : null}
+                        {msg.message_kind === "template" && !groupedWithPrev ? (
+                          <div className="thread-role-label">
+                            Template
+                            {msg.template_name || msg.template_key
+                              ? ` · ${String(msg.template_name || msg.template_key).replaceAll("_", " ")}`
+                              : ""}
+                          </div>
+                        ) : null}
+
+                        <div
+                          className={
+                            "thread-bubble" +
+                            (outbound ? " thread-bubble--outbound" : " thread-bubble--inbound") +
+                            (role === "bot" ? " thread-bubble--bot" : "") +
+                            (isFailed ? " thread-bubble--failed" : "")
+                          }
+                        >
+                          {String(hoveredMessageId ?? "") === String(msg.id) ? (
+                            <div className="thread-bubble-actions">
+                              {msg.body ? (
+                                <button
+                                  type="button"
+                                  className="thread-bubble-action"
+                                  onClick={() => void onCopyMessage(msg.body)}
+                                >
+                                  Copy
+                                </button>
+                              ) : null}
+                              <button
+                                type="button"
+                                className="thread-bubble-action thread-bubble-action--danger"
+                                onClick={() => void onDeleteMessage(msg.id)}
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          ) : null}
+                          {renderBody(
+                            msg,
+                            onResendMedia,
+                            onDeleteMedia,
+                            activeMediaActionsId,
+                            onToggleMediaActions
+                          )}
+                          {showMeta ? (
+                            <div className="thread-meta">
+                              <span className="thread-time">{formatTime(msg.created_at)}</span>
+                              {transport ? (
+                                <span
+                                  className={transport.className}
+                                  aria-label={transport.label}
+                                  title={transport.label}
+                                >
+                                  {transport.icon}
+                                </span>
+                              ) : null}
+                            </div>
+                          ) : null}
+                          {isFailed ? <div className="thread-failure-copy">{describeFailure(msg)}</div> : null}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </Fragment>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
