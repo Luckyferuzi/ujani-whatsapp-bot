@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, type MutableRefObject, type RefObject, type ReactNode } from "react";
-import { EmptyState, ThreadSkeleton } from "@/components/ui";
+import { EmptyState } from "@/components/ui";
 import type { Msg } from "./types";
 
 type ThreadMessageViewportProps = {
@@ -66,8 +66,45 @@ export default function ThreadMessageViewport({
   return (
     <div className="thread-body">
       {loading && messages.length === 0 ? (
-        <div className="thread-loading-state">
-          <ThreadSkeleton rows={8} />
+        <div className="thread-loading-state thread-loading-state--workspace" aria-hidden="true">
+          <div className="thread-lane thread-lane--messages thread-loading-lane">
+            <div className="thread-loading-group">
+              <div className="thread-loading-row">
+                <div className="thread-avatar thread-avatar--loading ui-skeleton" />
+                <div className="thread-loading-stack">
+                  <div className="thread-loading-label ui-skeleton" />
+                  <div className="thread-loading-bubble thread-loading-bubble--inbound ui-skeleton" />
+                  <div className="thread-loading-bubble thread-loading-bubble--inbound thread-loading-bubble--short ui-skeleton" />
+                  <div className="thread-loading-meta ui-skeleton" />
+                </div>
+              </div>
+            </div>
+
+            <div className="thread-day-divider thread-day-divider--loading">
+              <span className="ui-skeleton thread-loading-divider" />
+            </div>
+
+            <div className="thread-loading-group thread-loading-group--outbound">
+              <div className="thread-loading-row thread-loading-row--outbound">
+                <div className="thread-loading-stack thread-loading-stack--outbound">
+                  <div className="thread-loading-bubble thread-loading-bubble--outbound ui-skeleton" />
+                  <div className="thread-loading-bubble thread-loading-bubble--outbound thread-loading-bubble--short ui-skeleton" />
+                  <div className="thread-loading-meta ui-skeleton" />
+                </div>
+                <div className="thread-avatar thread-avatar--loading ui-skeleton" />
+              </div>
+            </div>
+
+            <div className="thread-loading-group">
+              <div className="thread-loading-row">
+                <div className="thread-avatar thread-avatar--loading ui-skeleton" />
+                <div className="thread-loading-stack">
+                  <div className="thread-loading-bubble thread-loading-bubble--media ui-skeleton" />
+                  <div className="thread-loading-meta ui-skeleton" />
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       ) : messages.length === 0 ? (
         <div className="thread-loading-state">
