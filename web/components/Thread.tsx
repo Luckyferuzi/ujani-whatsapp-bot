@@ -56,6 +56,48 @@ function describeFailure(msg: Msg) {
   return msg.error_details || msg.error_title || "WhatsApp could not deliver this message.";
 }
 
+type ParsedMediaBody = {
+  kind: "image" | "video" | "audio" | "document";
+  mediaId: string;
+  filename: string | null;
+  caption: string | null;
+};
+
+type PendingAttachment = {
+  mediaId: string;
+  mediaKind: "image" | "video" | "audio" | "document";
+  filename: string;
+  mimeType: string;
+};
+
+function parseMediaBody(body: string | null): ParsedMediaBody | null {
+  if (!body?.startsWith("MEDIA:")) return null;
+  const match = body.match(/^MEDIA:([a-z]+):([^|\n]+)(?:\|([^|\n]*))?(?:\|([^\n]*))?/i);
+  if (!match) return null;
+
+  const kind = match[1];
+  if (kind !== "image" && kind !== "video" && kind !== "audio" && kind !== "document") {
+    return null;
+  }
+
+  const decode = (value?: string) => {
+    if (!value) return null;
+    try {
+      const decoded = decodeURIComponent(value);
+      return decoded || null;
+    } catch {
+      return value || null;
+    }
+  };
+
+  return {
+    kind,
+    mediaId: match[2],
+    filename: decode(match[3]),
+    caption: decode(match[4]),
+  };
+}
+
 function renderBody(
   msg: Msg,
   onResendMedia?: (kind: string, mediaId: string) => void,
@@ -86,10 +128,10 @@ function renderBody(
     );
   }
 
-  const media = body.match(/^MEDIA:([a-z]+):(.+)$/);
+  const media = parseMediaBody(body);
   if (media) {
-    const kind = media[1];
-    const mediaId = media[2];
+    const kind = media.kind;
+    const mediaId = media.mediaId;
     const src = `${API}/api/media/${encodeURIComponent(mediaId)}`;
     const showActions = activeMediaActionsId != null && String(activeMediaActionsId) === String(msg.id);
 
@@ -98,9 +140,12 @@ function renderBody(
         {kind === "image" ? <img src={src} className="thread-image" alt="Media sent in conversation" /> : null}
         {kind === "video" ? <video src={src} controls className="thread-video" /> : null}
         {kind === "audio" ? <audio src={src} controls className="thread-audio" /> : null}
-        <a className="thread-media-link" href={src} target="_blank" rel="noreferrer">
-          {kind === "document" ? "Open file" : "Open media"}
-        </a>
+        <div className="thread-media-meta">
+          <a className="thread-media-link" href={src} target="_blank" rel="noreferrer">
+            {media.filename || (kind === "document" ? "Open file" : "Open media")}
+          </a>
+          {media.caption ? <div className="thread-media-caption">{media.caption}</div> : null}
+        </div>
         {typeof onToggleMediaActions === "function" ? (
           <button type="button" className="thread-media-edit" onClick={() => onToggleMediaActions(msg.id)}>
             Edit
@@ -140,6 +185,7 @@ export default function Thread({ convo, onOpenContext, onToggleContext, contextO
   const [dismissedComposerNoticeKey, setDismissedComposerNoticeKey] = useState<string | null>(null);
   const [activeMediaActionsId, setActiveMediaActionsId] = useState<string | number | null>(null);
   const [hoveredMessageId, setHoveredMessageId] = useState<string | number | null>(null);
+  const [pendingAttachment, setPendingAttachment] = useState<PendingAttachment | null>(null);
   const messagesRef = useRef<HTMLDivElement | null>(null);
   const firstUnreadRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -227,9 +273,35 @@ export default function Thread({ convo, onOpenContext, onToggleContext, contextO
   async function handleSend(event: FormEvent) {
     event.preventDefault();
     const value = text.trim();
-    if (!value) return;
+    if (!value && !pendingAttachment) return;
     if (!agentAllowed) {
       setShowBotModeHint(true);
+      return;
+    }
+
+    if (pendingAttachment) {
+      setSending(true);
+      try {
+        await api("/api/send-media", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            conversationId: convo.id,
+            kind: pendingAttachment.mediaKind,
+            mediaId: pendingAttachment.mediaId,
+            filename: pendingAttachment.filename,
+            caption: value,
+          }),
+        });
+        setPendingAttachment(null);
+        setText("");
+        await loadMessages();
+      } catch (error: any) {
+        console.error("Failed to send media message", error);
+        toast.error(error?.message ?? "Unable to send the attachment right now.");
+      } finally {
+        setSending(false);
+      }
       return;
     }
 
@@ -273,7 +345,7 @@ export default function Thread({ convo, onOpenContext, onToggleContext, contextO
       const data = await api<{ ok: boolean; message: Msg }>("/api/send-media", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ conversationId: convo.id, kind, mediaId }),
+        body: JSON.stringify({ conversationId: convo.id, kind, mediaId, filename: "file" }),
       });
       if (data?.message) setMessages((prev) => [...prev, data.message]);
     } catch (error: any) {
@@ -319,13 +391,26 @@ export default function Thread({ convo, onOpenContext, onToggleContext, contextO
       const form = new FormData();
       form.append("conversationId", String(convo.id));
       form.append("file", file);
-      const data = await api<{ ok: boolean; message: Msg }>("/api/upload-media", {
+      const data = await api<{
+        ok: boolean;
+        mediaId: string;
+        mediaKind: "image" | "video" | "audio" | "document";
+        filename: string;
+        mimeType: string;
+      }>("/api/upload-media", {
         method: "POST",
         body: form,
       });
-      if (data?.message) setMessages((prev) => [...prev, data.message]);
+      if (data?.mediaId) {
+        setPendingAttachment({
+          mediaId: data.mediaId,
+          mediaKind: data.mediaKind,
+          filename: data.filename,
+          mimeType: data.mimeType,
+        });
+      }
     } catch (error: any) {
-      toast.error(error?.message ?? "Unable to send media right now.");
+      toast.error(error?.message ?? "Unable to upload media right now.");
     } finally {
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
@@ -350,6 +435,7 @@ export default function Thread({ convo, onOpenContext, onToggleContext, contextO
     setTemplateModalOpen(false);
     setDismissedHeaderFailureId(null);
     setDismissedComposerNoticeKey(null);
+    setPendingAttachment(null);
     initialScrolledRef.current = false;
     void loadMessages();
   }, [convo.id, convo.agent_allowed]);
@@ -455,7 +541,9 @@ export default function Thread({ convo, onOpenContext, onToggleContext, contextO
         visibleComposerNotice={visibleComposerNotice}
         fileInputRef={fileInputRef}
         inputRef={inputRef}
+        pendingAttachment={pendingAttachment}
         onOpenTemplate={() => setTemplateModalOpen(true)}
+        onClearAttachment={() => setPendingAttachment(null)}
         onDismissNotice={(key) => setDismissedComposerNoticeKey(key)}
         onRequestAgentHint={() => setShowBotModeHint(true)}
         onTextChange={setText}

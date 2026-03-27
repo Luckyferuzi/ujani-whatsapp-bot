@@ -11,7 +11,14 @@ type ThreadComposerProps = {
   visibleComposerNotice: ComposerNotice | null;
   fileInputRef: RefObject<HTMLInputElement | null>;
   inputRef: RefObject<HTMLTextAreaElement | null>;
+  pendingAttachment: {
+    mediaId: string;
+    mediaKind: "image" | "video" | "audio" | "document";
+    filename: string;
+    mimeType: string;
+  } | null;
   onOpenTemplate: () => void;
+  onClearAttachment: () => void;
   onDismissNotice: (key: string) => void;
   onRequestAgentHint: () => void;
   onTextChange: (value: string) => void;
@@ -27,7 +34,9 @@ export default function ThreadComposer({
   visibleComposerNotice,
   fileInputRef,
   inputRef,
+  pendingAttachment,
   onOpenTemplate,
+  onClearAttachment,
   onDismissNotice,
   onRequestAgentHint,
   onTextChange,
@@ -40,7 +49,9 @@ export default function ThreadComposer({
     ? "Take over the conversation to send a manual reply."
     : composerBlockedByWindow
       ? "Use an approved template before the next free-text reply."
-      : "Enter sends. Shift+Enter adds a new line.";
+      : pendingAttachment
+        ? "Add an optional note, then send the attachment."
+        : "Enter sends. Shift+Enter adds a new line.";
 
   useEffect(() => {
     const el = inputRef.current;
@@ -77,7 +88,7 @@ export default function ThreadComposer({
           </div>
         ) : null}
 
-        <div className={"thread-dock" + (composerLocked ? " thread-dock--locked" : "")}>
+          <div className={"thread-dock" + (composerLocked ? " thread-dock--locked" : "")}>
           <div className="thread-dock-top">
             <div className="thread-dock-status">
               <div className="thread-dock-title">{dockLabel}</div>
@@ -116,6 +127,24 @@ export default function ThreadComposer({
             accept="image/*,video/*,audio/*,application/pdf,.doc,.docx,.xls,.xlsx"
             onChange={(event) => void onFileChange(event)}
           />
+
+          {pendingAttachment ? (
+            <div className="thread-attachment-preview">
+              <div className="thread-attachment-preview-main">
+                <div className="thread-attachment-preview-kicker">
+                  {pendingAttachment.mediaKind}
+                </div>
+                <div className="thread-attachment-preview-name">{pendingAttachment.filename}</div>
+              </div>
+              <button
+                type="button"
+                className="thread-dock-action"
+                onClick={onClearAttachment}
+              >
+                Remove
+              </button>
+            </div>
+          ) : null}
 
           <div className="thread-input-row">
             <div className="thread-editor">
@@ -167,7 +196,7 @@ export default function ThreadComposer({
                 onClick={(event) => void onSend(event as unknown as FormEvent)}
                 disabled={sending || composerLocked}
               >
-                {sending ? "Sending..." : "Send"}
+                {sending ? "Sending..." : pendingAttachment ? "Send attachment" : "Send"}
               </button>
             </div>
           </div>

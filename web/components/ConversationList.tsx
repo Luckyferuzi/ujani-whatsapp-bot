@@ -32,6 +32,34 @@ function describeLastMessage(text: string | null | undefined) {
   if (!text) return null;
   const value = text.trim();
   if (!value) return null;
+  const mediaMatch = value.match(/^MEDIA:([a-z]+):([^|\n]+)(?:\|([^|\n]*))?(?:\|([^\n]*))?/i);
+  if (mediaMatch) {
+    const kind = mediaMatch[1];
+    const filename = mediaMatch[3]
+      ? (() => {
+          try {
+            return decodeURIComponent(mediaMatch[3]);
+          } catch {
+            return mediaMatch[3];
+          }
+        })()
+      : "";
+    const caption = mediaMatch[4]
+      ? (() => {
+          try {
+            return decodeURIComponent(mediaMatch[4]);
+          } catch {
+            return mediaMatch[4];
+          }
+        })()
+      : "";
+    if (caption) return caption;
+    if (filename) return filename;
+    if (kind === "document") return "Document shared";
+    if (kind === "image") return "Image shared";
+    if (kind === "audio") return "Audio shared";
+    if (kind === "video") return "Video shared";
+  }
   if (value.startsWith("LOCATION")) return "Customer shared a location";
   if (value.startsWith("[image")) return "Image received";
   if (value.startsWith("[document")) return "Document received";

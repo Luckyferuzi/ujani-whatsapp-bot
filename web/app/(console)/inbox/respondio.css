@@ -11,7 +11,7 @@
   --inbox-lane: min(100%, 54rem);
   --inbox-message-measure: min(100%, 42rem);
   --inbox-surface-soft: color-mix(in srgb, var(--ds-color-surface-muted) 74%, white 26%);
-  --thread-composer-height: 156px;
+  --thread-composer-height: 148px;
   height: 100%;
   min-height: 0;
   background: var(--ds-color-bg-canvas);
@@ -674,7 +674,7 @@
   background:
     linear-gradient(
       180deg,
-      color-mix(in srgb, var(--ds-color-surface-muted) 22%, transparent),
+      color-mix(in srgb, var(--ds-color-bg-subtle) 74%, white 26%),
       transparent 18%
     );
 }
@@ -779,10 +779,10 @@
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
-  padding: 18px 0 calc(var(--thread-composer-height) + 8px);
+  padding: 18px 0 calc(var(--thread-composer-height) + 4px);
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
-  scroll-padding-bottom: calc(var(--thread-composer-height) + 8px);
+  scroll-padding-bottom: calc(var(--thread-composer-height) + 4px);
 }
 
 .thread-lane--messages {
@@ -948,6 +948,7 @@
 
 .thread-bubble--outbound {
   margin-left: auto;
+  padding-bottom: 24px;
   background: color-mix(in srgb, var(--ds-color-accent-soft) 24%, white 76%);
   border-color: color-mix(in srgb, var(--ds-color-accent-border) 82%, var(--inbox-border) 18%);
 }
@@ -978,6 +979,13 @@
   align-items: center;
 }
 
+.thread-bubble--outbound .thread-meta {
+  position: absolute;
+  right: 12px;
+  bottom: 8px;
+  margin-top: 0;
+}
+
 .thread-time {
   font-size: 10px;
   letter-spacing: 0.01em;
@@ -1004,6 +1012,11 @@
   gap: 10px;
 }
 
+.thread-media-meta {
+  display: grid;
+  gap: 4px;
+}
+
 .thread-image,
 .thread-video {
   display: block;
@@ -1018,6 +1031,20 @@
 .thread-media-link,
 .thread-location-link { color: var(--inbox-accent); text-decoration: none; overflow-wrap: anywhere; }
 
+.thread-media-link {
+  font-weight: 700;
+}
+
+.thread-media-caption {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--inbox-text-muted);
+}
+
+.thread-bubble--outbound .thread-media-caption {
+  color: color-mix(in srgb, var(--inbox-text) 74%, white 26%);
+}
+
 .thread-footer {
   position: absolute;
   left: 0;
@@ -1027,7 +1054,7 @@
   padding: 10px 14px calc(14px + env(safe-area-inset-bottom));
   border-top: 1px solid var(--inbox-border);
   background:
-    linear-gradient(180deg, color-mix(in srgb, var(--inbox-bg) 74%, transparent), color-mix(in srgb, var(--inbox-bg) 97%, white 3%));
+    linear-gradient(180deg, color-mix(in srgb, var(--ds-color-bg-subtle) 64%, transparent), color-mix(in srgb, var(--ds-color-surface-raised) 98%, white 2%));
   backdrop-filter: blur(10px);
 }
 
@@ -1110,6 +1137,41 @@
 .thread-dock-action--placeholder {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+.thread-attachment-preview {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--inbox-border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--ds-color-bg-subtle) 84%, white 16%);
+}
+
+.thread-attachment-preview-main {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.thread-attachment-preview-kicker {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--inbox-text-faint);
+}
+
+.thread-attachment-preview-name {
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 620;
+  color: var(--inbox-text-strong);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .thread-input-row {
@@ -1430,7 +1492,7 @@
   .inbox-root {
     --inbox-lane: min(100%, 50rem);
     --inbox-message-measure: min(100%, 38rem);
-    --thread-composer-height: 164px;
+    --thread-composer-height: 156px;
   }
 }
 
@@ -1456,7 +1518,7 @@
   .inbox-root {
     height: 100dvh;
     min-height: 100dvh;
-    --thread-composer-height: 176px;
+    --thread-composer-height: 168px;
   }
 
   .inbox-main {

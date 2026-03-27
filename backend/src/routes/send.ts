@@ -208,6 +208,23 @@ function buildTemplateUiLabel(template: InboxTemplateConfig) {
   return "Restock / re-engagement";
 }
 
+function encodeMediaBody(args: {
+  kind: "image" | "video" | "audio" | "document";
+  mediaId: string;
+  filename?: string | null;
+  caption?: string | null;
+}) {
+  const extras = [
+    encodeURIComponent(args.filename?.trim() ?? ""),
+    encodeURIComponent(args.caption?.trim() ?? ""),
+  ];
+  return `MEDIA:${args.kind}:${args.mediaId}|${extras.join("|")}`;
+}
+
+function canMediaCarryCaption(kind: "image" | "video" | "audio" | "document") {
+  return kind === "image" || kind === "video" || kind === "document";
+}
+
 async function finalizeOutboundMessage(args: {
   messageId: number;
   waResponse?: WhatsAppSendResponse | null;
@@ -776,60 +793,22 @@ sendRoutes.post("/upload-media", upload.single("file"), async (req, res) => {
       phoneNumberId: (convo as any).phone_number_id ?? null,
     });
 
-    const pendingMessage = await insertOutboundMessage(id, type, `MEDIA:${type}:${mediaId}`, {
-      status: "pending",
-      messageKind: "freeform",
+    return res.json({
+      ok: true,
+      mediaId,
+      mediaKind: type,
+      filename,
+      mimeType: mime,
     });
-
-    req.app.get("io")?.emit("message.created", {
-      conversation_id: id,
-      message: pendingMessage,
-    });
-
-    try {
-      const waResponse = await sendMediaById(waId, type, mediaId, undefined, {
-        phoneNumberId: (convo as any).phone_number_id ?? null,
-      });
-
-      const message = await finalizeOutboundMessage({
-        messageId: Number(pendingMessage.id),
-        waResponse,
-        status: "sent",
-      });
-
-      req.app.get("io")?.emit("message.created", {
-        conversation_id: id,
-        message: message ?? pendingMessage,
-      });
-
-      return res.json({ ok: true, message: message ?? pendingMessage, transport: waResponse });
-    } catch (err: any) {
-      const parsed = parseWhatsAppApiError(err);
-      const message = await finalizeOutboundMessage({
-        messageId: Number(pendingMessage.id),
-        status: "failed",
-        statusReason: "transport_failed",
-        errorCode: parsed.code,
-        errorTitle: parsed.title,
-        errorDetails: parsed.details,
-      });
-
-      req.app.get("io")?.emit("message.created", {
-        conversation_id: id,
-        message: message ?? pendingMessage,
-      });
-
-      throw err;
-    }
   } catch (e: any) {
     console.error("POST /api/upload-media failed", e);
-    return res.status(500).json({ error: e?.message ?? "Failed to upload / send media" });
+    return res.status(500).json({ error: e?.message ?? "Failed to upload media" });
   }
 });
 
 sendRoutes.post("/send-media", async (req, res) => {
   try {
-    const { conversationId, kind, mediaId } = req.body ?? {};
+    const { conversationId, kind, mediaId, caption, filename } = req.body ?? {};
     const id = Number(conversationId);
 
     if (!Number.isFinite(id)) {
@@ -863,10 +842,29 @@ sendRoutes.post("/send-media", async (req, res) => {
       type = kind;
     }
 
-    const pendingMessage = await insertOutboundMessage(id, type, `MEDIA:${type}:${mediaId}`, {
+    const trimmedCaption = String(caption ?? "").trim();
+    if (trimmedCaption && !canMediaCarryCaption(type)) {
+      return res.status(400).json({
+        error: "Captions are not supported for this media type yet",
+        code: "media_caption_not_supported",
+      });
+    }
+
+    const safeFilename = String(filename ?? "").trim() || "file";
+    const pendingMessage = await insertOutboundMessage(
+      id,
+      type,
+      encodeMediaBody({
+        kind: type,
+        mediaId,
+        filename: safeFilename,
+        caption: trimmedCaption,
+      }),
+      {
       status: "pending",
       messageKind: "freeform",
-    });
+      }
+    );
 
     req.app.get("io")?.emit("message.created", {
       conversation_id: id,
@@ -874,7 +872,7 @@ sendRoutes.post("/send-media", async (req, res) => {
     });
 
     try {
-      const waResponse = await sendMediaById(waId, type, mediaId, undefined, {
+      const waResponse = await sendMediaById(waId, type, mediaId, trimmedCaption || undefined, {
         phoneNumberId: (convo as any).phone_number_id ?? null,
       });
 
