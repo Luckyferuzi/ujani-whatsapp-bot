@@ -887,7 +887,7 @@
 }
 
 .thread-bubble-wrap--outbound {
-  flex-direction: row-reverse;
+  flex-direction: row;
 }
 
 .thread-bubble {
@@ -897,7 +897,7 @@
   padding: 11px 13px;
   border: 1px solid var(--inbox-border);
   border-radius: 12px;
-  background: color-mix(in srgb, var(--ds-color-surface-muted) 82%, white 18%);
+  background: color-mix(in srgb, var(--ds-color-surface) 92%, var(--ds-color-bg-subtle) 8%);
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.68);
   transition: transform 180ms ease, box-shadow 180ms ease, background 180ms ease, border-color 180ms ease;
 }
@@ -910,6 +910,7 @@
 .thread-bubble-actions {
   flex: 0 0 auto;
   display: inline-flex;
+  align-self: flex-start;
   align-items: center;
   gap: 4px;
   padding: 3px;
@@ -949,12 +950,12 @@
 .thread-bubble--outbound {
   margin-left: auto;
   padding-bottom: 24px;
-  background: color-mix(in srgb, var(--ds-color-accent-soft) 24%, white 76%);
-  border-color: color-mix(in srgb, var(--ds-color-accent-border) 82%, var(--inbox-border) 18%);
+  background: color-mix(in srgb, var(--ds-color-accent-solid) 18%, white 82%);
+  border-color: color-mix(in srgb, var(--ds-color-accent-border) 74%, var(--inbox-border) 26%);
 }
 
 .thread-bubble--bot {
-  background: color-mix(in srgb, var(--ds-color-info-soft) 24%, white 76%);
+  background: color-mix(in srgb, var(--ds-color-info-soft) 20%, white 80%);
   border-color: var(--ds-color-info-border);
 }
 
@@ -969,7 +970,7 @@
   overflow-wrap: anywhere;
   font-size: 14px;
   line-height: 1.62;
-  color: var(--inbox-text);
+  color: var(--inbox-text-strong);
 }
 
 .thread-meta {
@@ -977,6 +978,7 @@
   justify-content: flex-end;
   gap: 6px;
   align-items: center;
+  min-height: 12px;
 }
 
 .thread-bubble--outbound .thread-meta {
@@ -990,6 +992,7 @@
   font-size: 10px;
   letter-spacing: 0.01em;
   color: var(--inbox-text-faint);
+  white-space: nowrap;
 }
 
 .thread-ticks { font-size: 12px; font-weight: 700; line-height: 1; }
@@ -1009,12 +1012,13 @@
 .thread-media,
 .thread-location {
   display: grid;
-  gap: 10px;
+  gap: 8px;
 }
 
 .thread-media-meta {
   display: grid;
-  gap: 4px;
+  gap: 3px;
+  min-width: 0;
 }
 
 .thread-image,
@@ -1032,7 +1036,11 @@
 .thread-location-link { color: var(--inbox-accent); text-decoration: none; overflow-wrap: anywhere; }
 
 .thread-media-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-weight: 700;
+  color: var(--inbox-text-strong);
 }
 
 .thread-media-caption {
@@ -1042,7 +1050,7 @@
 }
 
 .thread-bubble--outbound .thread-media-caption {
-  color: color-mix(in srgb, var(--inbox-text) 74%, white 26%);
+  color: color-mix(in srgb, var(--inbox-text-muted) 88%, white 12%);
 }
 
 .thread-footer {
@@ -1591,8 +1599,7 @@
     justify-items: stretch;
   }
 
-  .thread-bubble-actions,
-  .thread-bubble-actions--outbound {
+  .thread-bubble-actions {
     margin-top: 6px;
     width: fit-content;
   }

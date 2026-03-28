@@ -146,25 +146,6 @@ function renderBody(
           </a>
           {media.caption ? <div className="thread-media-caption">{media.caption}</div> : null}
         </div>
-        {typeof onToggleMediaActions === "function" ? (
-          <button type="button" className="thread-media-edit" onClick={() => onToggleMediaActions(msg.id)}>
-            Edit
-          </button>
-        ) : null}
-        {showActions ? (
-          <div className="thread-media-actions">
-            {typeof onResendMedia === "function" ? (
-              <button type="button" className="thread-media-resend" onClick={() => onResendMedia(kind, mediaId)}>
-                Resend media
-              </button>
-            ) : null}
-            {typeof onDeleteMedia === "function" ? (
-              <button type="button" className="thread-media-delete" onClick={() => onDeleteMedia(msg.id)}>
-                Delete media
-              </button>
-            ) : null}
-          </div>
-        ) : null}
       </div>
     );
   }
@@ -384,6 +365,15 @@ export default function Thread({ convo, onOpenContext, onToggleContext, contextO
     }
   }
 
+  function handleEditMessage(msg: Msg) {
+    const media = parseMediaBody(msg.body);
+    if (media) {
+      toast.info("Media captions can be changed only by sending a new message.");
+      return;
+    }
+    toast.info("Editing an already sent WhatsApp message is not supported here yet.");
+  }
+
   async function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -524,6 +514,7 @@ export default function Thread({ convo, onOpenContext, onToggleContext, contextO
         onMessageHover={setHoveredMessageId}
         onCopyMessage={handleCopyMessage}
         onDeleteMessage={handleDeleteMessage}
+        onEditMessage={handleEditMessage}
         onResendMedia={handleResendMedia}
         onDeleteMedia={handleDeleteMedia}
         onToggleMediaActions={(messageId) =>

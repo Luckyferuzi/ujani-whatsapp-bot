@@ -320,37 +320,12 @@ export function createWebhookProcessor(deps: ProcessorDeps) {
       console.error("[webhook.processor] inbound persist error:", err);
     }
 
-    const rawTextForAgentGate = (text || "").trim();
-    const txtForAgentGate = rawTextForAgentGate.toLowerCase();
-    const returnToBotKeywords = new Set(["hi", "hello", "mambo", "start", "anza", "menu", "menyu", "bot", "rudi"]);
-    const wantsReturnToBotFromText =
-      !interactiveId && returnToBotKeywords.has(txtForAgentGate);
-
     const agentAllowed = await deps.isAgentAllowed(from);
     if (agentAllowed) {
-      if (!wantsReturnToBotFromText) {
-        console.log("[webhook.processor] bot skip: agent mode still ON", {
-          from,
-          txtForAgentGate,
-          interactiveId: interactiveId ?? null,
-        });
-        return;
-      }
-
-      const { id: customerId } = await upsertCustomerByWa(from, undefined, from);
-      const conversationId = await getOrCreateConversationForPhone(
-        customerId,
-        businessPhoneNumberId
-      );
-
-      await db("conversations").where({ id: conversationId }).update({ agent_allowed: false });
-      emit("conversation.updated", { id: conversationId, agent_allowed: false });
-      console.log("[webhook.processor] customer requested return-to-bot via text", {
+      console.log("[webhook.processor] bot skip: agent mode still ON", {
         from,
-        text: txtForAgentGate,
-        conversationId,
+        interactiveId: interactiveId ?? null,
       });
-      await deps.showEntryMenu(from, lang);
       return;
     }
 

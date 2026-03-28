@@ -31,6 +31,7 @@ type ThreadMessageViewportProps = {
   onMessageHover: (id: string | number | null) => void;
   onCopyMessage: (body: string | null) => void | Promise<void>;
   onDeleteMessage: (id: string | number) => void | Promise<void>;
+  onEditMessage: (msg: Msg) => void | Promise<void>;
   onResendMedia: (kind: string, mediaId: string) => void | Promise<void>;
   onDeleteMedia: (messageId: string | number) => void | Promise<void>;
   onToggleMediaActions: (messageId: string | number) => void;
@@ -59,6 +60,7 @@ export default function ThreadMessageViewport({
   onMessageHover,
   onCopyMessage,
   onDeleteMessage,
+  onEditMessage,
   onResendMedia,
   onDeleteMedia,
   onToggleMediaActions,
@@ -182,6 +184,38 @@ export default function ThreadMessageViewport({
                         ) : null}
 
                         <div className={"thread-bubble-wrap" + (outbound ? " thread-bubble-wrap--outbound" : "")}>
+                          {String(hoveredMessageId ?? "") === String(msg.id) ? (
+                            <div className="thread-bubble-actions">
+                              <button
+                                type="button"
+                                className="thread-bubble-action"
+                                onClick={() => void onCopyMessage(msg.body)}
+                                aria-label="Copy message"
+                                title="Copy"
+                              >
+                                C
+                              </button>
+                              <button
+                                type="button"
+                                className="thread-bubble-action"
+                                onClick={() => void onEditMessage(msg)}
+                                aria-label="Edit message"
+                                title="Edit"
+                              >
+                                E
+                              </button>
+                              <button
+                                type="button"
+                                className="thread-bubble-action thread-bubble-action--danger"
+                                onClick={() => void onDeleteMessage(msg.id)}
+                                aria-label="Delete message"
+                                title="Delete"
+                              >
+                                D
+                              </button>
+                            </div>
+                          ) : null}
+
                           <div
                             className={
                               "thread-bubble" +
@@ -213,31 +247,6 @@ export default function ThreadMessageViewport({
                             ) : null}
                             {isFailed ? <div className="thread-failure-copy">{describeFailure(msg)}</div> : null}
                           </div>
-
-                          {String(hoveredMessageId ?? "") === String(msg.id) ? (
-                            <div className={"thread-bubble-actions" + (outbound ? " thread-bubble-actions--outbound" : "")}>
-                              {msg.body ? (
-                                <button
-                                  type="button"
-                                  className="thread-bubble-action"
-                                  onClick={() => void onCopyMessage(msg.body)}
-                                  aria-label="Copy message"
-                                  title="Copy"
-                                >
-                                  C
-                                </button>
-                              ) : null}
-                              <button
-                                type="button"
-                                className="thread-bubble-action thread-bubble-action--danger"
-                                onClick={() => void onDeleteMessage(msg.id)}
-                                aria-label="Delete message"
-                                title="Delete"
-                              >
-                                D
-                              </button>
-                            </div>
-                          ) : null}
                         </div>
                       </div>
                     </div>
