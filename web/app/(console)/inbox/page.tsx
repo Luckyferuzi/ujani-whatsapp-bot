@@ -88,7 +88,7 @@ export default function InboxPage() {
   const handleLoaded = (items: Convo[]) => {
     const list = items ?? [];
 
-    if (active && !list.some((item) => item.id === active.id)) {
+    if (active && !list.some((item) => String(item.id) === String(active.id))) {
       setActive(null);
       setDesktopContextOpen(false);
       clearSavedConversationId();
@@ -104,7 +104,7 @@ export default function InboxPage() {
     if (restoreDone) return;
 
     if (savedId) {
-      const match = list.find((item) => item.id === savedId);
+      const match = list.find((item) => String(item.id) === String(savedId));
       if (match) {
         setActive(match);
         if (isMobile) setMobileView("chat");
