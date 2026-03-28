@@ -897,7 +897,7 @@
   padding: 11px 13px;
   border: 1px solid var(--inbox-border);
   border-radius: 12px;
-  background: color-mix(in srgb, var(--ds-color-surface) 92%, var(--ds-color-bg-subtle) 8%);
+  background: #ececec;
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.68);
   transition: transform 180ms ease, box-shadow 180ms ease, background 180ms ease, border-color 180ms ease;
 }
@@ -950,13 +950,13 @@
 .thread-bubble--outbound {
   margin-left: auto;
   padding-bottom: 24px;
-  background: color-mix(in srgb, var(--ds-color-accent-solid) 18%, white 82%);
-  border-color: color-mix(in srgb, var(--ds-color-accent-border) 74%, var(--inbox-border) 26%);
+  background: #e6e6e6;
+  border-color: color-mix(in srgb, var(--inbox-border-strong) 70%, #d9d9d9 30%);
 }
 
 .thread-bubble--bot {
-  background: color-mix(in srgb, var(--ds-color-info-soft) 20%, white 80%);
-  border-color: var(--ds-color-info-border);
+  background: #e8e8e8;
+  border-color: color-mix(in srgb, var(--inbox-border-strong) 68%, #dcdcdc 32%);
 }
 
 .thread-bubble--failed {
@@ -970,7 +970,7 @@
   overflow-wrap: anywhere;
   font-size: 14px;
   line-height: 1.62;
-  color: var(--inbox-text-strong);
+  color: #111111;
 }
 
 .thread-meta {
@@ -1040,17 +1040,13 @@
   align-items: center;
   gap: 6px;
   font-weight: 700;
-  color: var(--inbox-text-strong);
+  color: #111111;
 }
 
 .thread-media-caption {
   font-size: 12px;
   line-height: 1.5;
-  color: var(--inbox-text-muted);
-}
-
-.thread-bubble--outbound .thread-media-caption {
-  color: color-mix(in srgb, var(--inbox-text-muted) 88%, white 12%);
+  color: #222222;
 }
 
 .thread-footer {
