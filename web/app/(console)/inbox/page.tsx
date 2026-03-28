@@ -45,6 +45,7 @@ export default function InboxPage() {
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [desktopContextOpen, setDesktopContextOpen] = useState(false);
   const [savedId, setSavedId] = useState<string | null>(null);
+  const [savedIdHydrated, setSavedIdHydrated] = useState(false);
   const [restoreDone, setRestoreDone] = useState(false);
   const searchParams = useSearchParams();
   const phoneFromUrl = searchParams.get("phone");
@@ -65,6 +66,7 @@ export default function InboxPage() {
 
   useEffect(() => {
     setSavedId(readSavedConversationId());
+    setSavedIdHydrated(true);
   }, []);
 
   const handlePick = async (convo: Convo) => {
@@ -98,6 +100,10 @@ export default function InboxPage() {
 
     if (phoneFromUrl) {
       if (!restoreDone) setRestoreDone(true);
+      return;
+    }
+
+    if (!savedIdHydrated) {
       return;
     }
 
