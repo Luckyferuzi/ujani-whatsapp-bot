@@ -40,6 +40,7 @@ function clearSavedConversationId() {
 
 export default function InboxPage() {
   const [active, setActive] = useState<Convo | null>(null);
+  const [loadedItems, setLoadedItems] = useState<Convo[]>([]);
   const [isMobile, setIsMobile] = useState(false);
   const [mobileView, setMobileView] = useState<MobileView>("list");
   const [showMobileMenu, setShowMobileMenu] = useState(false);
@@ -89,6 +90,7 @@ export default function InboxPage() {
 
   const handleLoaded = (items: Convo[]) => {
     const list = items ?? [];
+    setLoadedItems(list);
 
     if (active && !list.some((item) => String(item.id) === String(active.id))) {
       setActive(null);
@@ -99,29 +101,36 @@ export default function InboxPage() {
     }
 
     if (phoneFromUrl) {
+      return;
+    }
+  };
+
+  useEffect(() => {
+    if (phoneFromUrl) {
       if (!restoreDone) setRestoreDone(true);
       return;
     }
 
-    if (!savedIdHydrated) {
+    if (!savedIdHydrated || restoreDone || loadedItems.length === 0) {
       return;
     }
 
-    if (restoreDone) return;
+    if (!savedId) {
+      setRestoreDone(true);
+      return;
+    }
 
-    if (savedId) {
-      const match = list.find((item) => String(item.id) === String(savedId));
-      if (match) {
-        setActive(match);
-        if (isMobile) setMobileView("chat");
-      } else {
-        clearSavedConversationId();
-        setSavedId(null);
-      }
+    const match = loadedItems.find((item) => String(item.id) === String(savedId));
+    if (match) {
+      setActive(match);
+      if (isMobile) setMobileView("chat");
+    } else {
+      clearSavedConversationId();
+      setSavedId(null);
     }
 
     setRestoreDone(true);
-  };
+  }, [phoneFromUrl, savedIdHydrated, restoreDone, loadedItems, savedId, isMobile]);
 
   const displayName = useMemo(() => {
     if (active?.name?.trim()) return active.name;
