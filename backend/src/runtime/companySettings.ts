@@ -45,6 +45,15 @@ export type InboxTemplateConfig = {
   params: TemplateParameterMeta[];
 };
 
+const INBOX_TEMPLATE_KEY_ALIASES: Record<string, string> = {
+  payment_reminder: "payment_reminder",
+  payment_reminder_sw: "payment_reminder",
+  order_followup: "order_followup",
+  order_followup_sw: "order_followup",
+  restock_reengagement: "restock_reengagement",
+  restock_reengagement_sw: "restock_reengagement",
+};
+
 export type BusinessTextOverrideKey =
   | "faq.intro"
   | "order.preparing_message"
@@ -139,14 +148,14 @@ export const DEFAULT_COMPANY_SETTINGS: CompanySettings = {
 
 export const DEFAULT_INBOX_TEMPLATES: InboxTemplateConfig[] = [
   {
-    key: "payment_reminder_sw",
+    key: "payment_reminder",
     metaTemplateName: null,
-    languageCode: "sw",
+    languageCode: null,
     category: "payment_reminder",
     displayName: "Payment reminder",
     description: "Re-open an unpaid order conversation after the 24-hour freeform window closes.",
     enabled: true,
-    allowedLanguages: ["sw"],
+    allowedLanguages: [],
     deprecated: false,
     sortOrder: 10,
     params: [
@@ -156,14 +165,14 @@ export const DEFAULT_INBOX_TEMPLATES: InboxTemplateConfig[] = [
     ],
   },
   {
-    key: "order_followup_sw",
+    key: "order_followup",
     metaTemplateName: null,
-    languageCode: "sw",
+    languageCode: null,
     category: "order_followup",
     displayName: "Order follow-up",
     description: "Send a post-order or action-needed follow-up when freeform messaging is closed.",
     enabled: true,
-    allowedLanguages: ["sw"],
+    allowedLanguages: [],
     deprecated: false,
     sortOrder: 20,
     params: [
@@ -172,14 +181,14 @@ export const DEFAULT_INBOX_TEMPLATES: InboxTemplateConfig[] = [
     ],
   },
   {
-    key: "restock_reengagement_sw",
+    key: "restock_reengagement",
     metaTemplateName: null,
-    languageCode: "sw",
+    languageCode: null,
     category: "restock_reengagement",
     displayName: "Restock / re-engagement",
     description: "Reconnect with opted-in customers when a requested product is available again.",
     enabled: true,
-    allowedLanguages: ["sw"],
+    allowedLanguages: [],
     deprecated: false,
     sortOrder: 30,
     params: [
@@ -190,6 +199,16 @@ export const DEFAULT_INBOX_TEMPLATES: InboxTemplateConfig[] = [
 ];
 
 let cached: CompanySettings = { ...DEFAULT_COMPANY_SETTINGS };
+
+function hasOwn(value: unknown, key: string) {
+  return !!value && Object.prototype.hasOwnProperty.call(value, key);
+}
+
+export function normalizeInboxTemplateKey(templateKey: unknown): string {
+  const key = String(templateKey ?? "").trim();
+  if (!key) return "";
+  return INBOX_TEMPLATE_KEY_ALIASES[key] ?? key;
+}
 
 export function getCompanySettingsCached(): CompanySettings {
   return cached;
@@ -428,27 +447,36 @@ function normalizeInboxTemplateConfig(
   value: any,
   fallback: InboxTemplateConfig
 ): InboxTemplateConfig {
-  const key = String(value?.key ?? fallback.key).trim() || fallback.key;
-  const explicitMetaTemplateName =
-    value?.metaTemplateName ?? value?.meta_template_name ?? null;
+  const key = normalizeInboxTemplateKey(value?.key ?? fallback.key) || fallback.key;
+  const explicitMetaTemplateNameProvided =
+    hasOwn(value, "metaTemplateName") || hasOwn(value, "meta_template_name");
+  const explicitMetaTemplateName = explicitMetaTemplateNameProvided
+    ? value?.metaTemplateName ?? value?.meta_template_name ?? null
+    : null;
   const legacyTemplateName = value?.template_name ?? null;
   const resolvedMetaTemplateNameRaw =
-    explicitMetaTemplateName != null ? explicitMetaTemplateName : legacyTemplateName;
+    explicitMetaTemplateNameProvided
+      ? explicitMetaTemplateName
+      : legacyTemplateName ?? fallback.metaTemplateName;
   const resolvedMetaTemplateName = String(resolvedMetaTemplateNameRaw ?? "").trim() || null;
   const normalizedMetaTemplateName =
-    explicitMetaTemplateName == null && resolvedMetaTemplateName === key
+    !explicitMetaTemplateNameProvided && resolvedMetaTemplateName === key
       ? null
       : resolvedMetaTemplateName;
+  const explicitLanguageCodeProvided =
+    hasOwn(value, "languageCode") || hasOwn(value, "language_code");
   const languageCode =
     String(
-      value?.languageCode ??
-        value?.language_code ??
-        fallback.languageCode ??
+      explicitLanguageCodeProvided
+        ? value?.languageCode ?? value?.language_code ?? ""
+        : fallback.languageCode ??
         ""
     ).trim() || null;
   const allowedLanguages = normalizeLanguageCodes(
-    value?.allowedLanguages ?? value?.allowed_languages,
-    languageCode ? [languageCode] : fallback.allowedLanguages
+    hasOwn(value, "allowedLanguages") || hasOwn(value, "allowed_languages")
+      ? value?.allowedLanguages ?? value?.allowed_languages
+      : fallback.allowedLanguages,
+    fallback.allowedLanguages
   );
   const category = (value?.category ?? fallback.category) as InboxTemplateConfig["category"];
 
@@ -493,7 +521,7 @@ export async function getInboxTemplateRegistry(): Promise<InboxTemplateConfig[]>
 }
 
 export async function getInboxTemplateByKey(templateKey: string): Promise<InboxTemplateConfig | null> {
-  const key = String(templateKey ?? "").trim();
+  const key = normalizeInboxTemplateKey(templateKey);
   if (!key) return null;
   const registry = await getInboxTemplateRegistry();
   return registry.find((item) => item.key === key) ?? null;

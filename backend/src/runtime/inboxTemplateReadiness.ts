@@ -80,7 +80,10 @@ export function resolveInboxTemplateReadiness(
   const languageAllowed =
     !!languageCode &&
     (allowedLanguages.length === 0 || allowedLanguages.includes(languageCode));
-  const warnings = template.deprecated === true ? ["template_deprecated"] : [];
+  const warnings = [
+    ...(template.deprecated === true ? ["template_deprecated"] : []),
+    ...(!languageAllowed && !!languageCode ? ["template_language_not_in_local_allowlist"] : []),
+  ];
 
   if (!key) {
     return {
@@ -186,32 +189,6 @@ export function resolveInboxTemplateReadiness(
     };
   }
 
-  if (!languageAllowed) {
-    return {
-      key,
-      can_send: false,
-      available: false,
-      status: "invalid",
-      status_label: "Configured language is not allowed",
-      reason_code: "template_language_not_allowed",
-      meta_template_name: metaTemplateName,
-      language_code: languageCode,
-      enabled: true,
-      category: template.category,
-      display_name: normalizeString(template.displayName),
-      description: normalizeString(template.description),
-      allowed_languages: allowedLanguages,
-      deprecated: template.deprecated === true,
-      sort_order: Number.isFinite(template.sortOrder) ? template.sortOrder : null,
-      is_mapped: true,
-      has_language: true,
-      language_allowed: false,
-      blockers: ["template_language_not_allowed"],
-      warnings,
-      params,
-    };
-  }
-
   return {
     key,
     can_send: true,
@@ -230,7 +207,7 @@ export function resolveInboxTemplateReadiness(
     sort_order: Number.isFinite(template.sortOrder) ? template.sortOrder : null,
     is_mapped: true,
     has_language: true,
-    language_allowed: true,
+    language_allowed: languageAllowed,
     blockers: [],
     warnings,
     params,

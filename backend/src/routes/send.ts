@@ -178,13 +178,13 @@ export function buildTemplatePreview(
   const amountDue = params.amount_due || "the outstanding balance";
   const productName = params.product_name || "your requested item";
 
-  if (template.key === "payment_reminder_sw") {
+  if (template.key === "payment_reminder") {
     return `Payment reminder for ${customerName} on ${orderCode}. Outstanding amount: ${amountDue}.`;
   }
-  if (template.key === "order_followup_sw") {
+  if (template.key === "order_followup") {
     return `Order follow-up for ${customerName} about ${orderCode}.`;
   }
-  if (template.key === "restock_reengagement_sw") {
+  if (template.key === "restock_reengagement") {
     return `Restock / re-engagement for ${customerName} about ${productName}.`;
   }
 
@@ -198,6 +198,16 @@ function buildTemplateUiLabel(template: InboxTemplateConfig) {
   if (template.category === "payment_reminder") return "Payment reminder";
   if (template.category === "order_followup") return "Order follow-up";
   return "Restock / re-engagement";
+}
+
+export function resolveTemplateTransportMapping(
+  template: InboxTemplateConfig
+): { metaTemplateName: string; languageCode: string } {
+  const readiness = resolveInboxTemplateReadiness(template);
+  return {
+    metaTemplateName: String(readiness.meta_template_name ?? "").trim(),
+    languageCode: String(readiness.language_code ?? "").trim(),
+  };
 }
 
 function encodeMediaBody(args: {
@@ -407,8 +417,7 @@ export async function sendConfiguredTemplateForConversation(args: {
       const field = template.params[index];
       return field.required || value.length > 0;
     });
-  const metaTemplateName = String(readiness.meta_template_name ?? "").trim();
-  const languageCode = String(readiness.language_code ?? "").trim();
+  const { metaTemplateName, languageCode } = resolveTemplateTransportMapping(template);
 
   const pendingMessage = await insertOutboundMessage(id, "text", validatedPreview, {
     status: "pending",

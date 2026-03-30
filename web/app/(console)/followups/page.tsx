@@ -63,9 +63,9 @@ function getQueueLabel(queue: QueueKey) {
 }
 
 function getTemplateLabel(templateKey: string) {
-  if (templateKey === "payment_reminder_sw") return "Payment reminder";
-  if (templateKey === "order_followup_sw") return "Order follow-up";
-  if (templateKey === "restock_reengagement_sw") return "Restock / re-engagement";
+  if (templateKey === "payment_reminder") return "Payment reminder";
+  if (templateKey === "order_followup") return "Order follow-up";
+  if (templateKey === "restock_reengagement") return "Restock / re-engagement";
   return templateKey;
 }
 

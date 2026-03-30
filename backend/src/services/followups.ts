@@ -223,7 +223,7 @@ export async function listFollowupQueues() {
       const customerId = Number(row.customer_id);
       const convo = convoMap.get(customerId);
       const itemKey = `order:${row.order_id}`;
-      const readiness = getTemplateReadiness("payment_reminder_sw");
+      const readiness = getTemplateReadiness("payment_reminder");
       return {
         queue: "unpaid_orders" as const,
         item_key: itemKey,
@@ -239,7 +239,7 @@ export async function listFollowupQueues() {
         status: String(row.status ?? ""),
         reason: "Order still has an unpaid balance and needs customer payment follow-up.",
         last_interaction_at: mapLastInteraction(convo),
-        template_key: "payment_reminder_sw",
+        template_key: "payment_reminder",
         can_send_template: readiness?.can_send ?? false,
         template_status: readiness?.status ?? "invalid",
         template_status_label: readiness?.status_label ?? "Template unavailable",
@@ -256,7 +256,7 @@ export async function listFollowupQueues() {
       const convo = convoMap.get(customerId);
       const status = String(row.status ?? "");
       const reason = describeOrderActionReason(status);
-      const readiness = getTemplateReadiness("order_followup_sw");
+      const readiness = getTemplateReadiness("order_followup");
       return {
         queue: "order_action_needed" as const,
         item_key: `order:${row.order_id}`,
@@ -269,7 +269,7 @@ export async function listFollowupQueues() {
         status,
         reason,
         last_interaction_at: mapLastInteraction(convo),
-        template_key: "order_followup_sw",
+        template_key: "order_followup",
         can_send_template: readiness?.can_send ?? false,
         template_status: readiness?.status ?? "invalid",
         template_status_label: readiness?.status_label ?? "Template unavailable",
@@ -285,7 +285,7 @@ export async function listFollowupQueues() {
       const customerId = Number(row.customer_id);
       const convo = convoMap.get(customerId);
       const stockQty = Number(row.stock_qty ?? 0) || 0;
-      const readiness = getTemplateReadiness("restock_reengagement_sw");
+      const readiness = getTemplateReadiness("restock_reengagement");
       return {
         queue: "restock_reengagement" as const,
         item_key: `restock:${row.subscription_id}`,
@@ -297,7 +297,7 @@ export async function listFollowupQueues() {
         stock_qty: stockQty,
         reason: describeRestockFollowupReason(stockQty),
         last_interaction_at: mapLastInteraction(convo),
-        template_key: "restock_reengagement_sw",
+        template_key: "restock_reengagement",
         can_send_template: readiness?.can_send ?? false,
         template_status: readiness?.status ?? "invalid",
         template_status_label: readiness?.status_label ?? "Template unavailable",

@@ -229,6 +229,10 @@ function getDraftTemplateReadiness(template: {
   const languageAllowed =
     !!languageCode &&
     (allowedLanguages.length === 0 || allowedLanguages.includes(languageCode));
+  const warnings = [
+    ...(template.deprecated ? ["template_deprecated"] : []),
+    ...(!languageAllowed && !!languageCode ? ["template_language_not_in_local_allowlist"] : []),
+  ];
 
   if (!template.enabled) {
     return {
@@ -251,7 +255,7 @@ function getDraftTemplateReadiness(template: {
       has_language: !!languageCode,
       language_allowed: languageAllowed,
       blockers: ["template_disabled"],
-      warnings: template.deprecated ? ["template_deprecated"] : [],
+      warnings,
     };
   }
 
@@ -276,7 +280,7 @@ function getDraftTemplateReadiness(template: {
       has_language: !!languageCode,
       language_allowed: languageAllowed,
       blockers: ["template_config_missing"],
-      warnings: template.deprecated ? ["template_deprecated"] : [],
+      warnings,
     };
   }
 
@@ -301,32 +305,7 @@ function getDraftTemplateReadiness(template: {
       has_language: false,
       language_allowed: false,
       blockers: ["template_language_unavailable"],
-      warnings: template.deprecated ? ["template_deprecated"] : [],
-    };
-  }
-
-  if (!languageAllowed) {
-    return {
-      ...template.readiness,
-      key: template.key,
-      can_send: false,
-      available: false,
-      status: "invalid",
-      status_label: "Configured language is not allowed",
-      reason_code: "template_language_not_allowed",
-      enabled: true,
-      meta_template_name: template.metaTemplateName,
-      language_code: languageCode,
-      display_name: template.displayName,
-      description: template.description,
-      allowed_languages: allowedLanguages,
-      deprecated: template.deprecated,
-      sort_order: template.sortOrder,
-      is_mapped: true,
-      has_language: true,
-      language_allowed: false,
-      blockers: ["template_language_not_allowed"],
-      warnings: template.deprecated ? ["template_deprecated"] : [],
+      warnings,
     };
   }
 
@@ -348,9 +327,9 @@ function getDraftTemplateReadiness(template: {
     sort_order: template.sortOrder,
     is_mapped: true,
     has_language: true,
-    language_allowed: true,
+    language_allowed: languageAllowed,
     blockers: [],
-    warnings: template.deprecated ? ["template_deprecated"] : [],
+    warnings,
   };
 }
 
