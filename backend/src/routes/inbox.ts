@@ -15,6 +15,7 @@ import {
   createInternalNote,
   createManualOrderFromSkus,
   createOrderWithPayment,
+  getConversationWindowState,
   getOrdersForCustomer,
   insertOutboundMessage,
   listInternalNotesForOrder,
@@ -278,6 +279,13 @@ inboxRoutes.get("/conversations", async (_req, res) => {
     }
 
     const convoIds = items.map((row: any) => row.id as number);
+    const windowStates = await Promise.all(
+      convoIds.map((conversationId) => getConversationWindowState(conversationId))
+    );
+    const windowStateByConvo = new Map<number, Awaited<ReturnType<typeof getConversationWindowState>>>();
+    convoIds.forEach((conversationId, index) => {
+      windowStateByConvo.set(conversationId, windowStates[index]);
+    });
 
     // Back-in-stock subscriptions (count per customer)
 const customerIds = Array.from(
@@ -354,6 +362,14 @@ for (const r of restockCounts as any[]) {
       row.last_message_text = meta.last_message_text;
       row.last_message_at =
         meta.last_message_at ?? row.last_user_message_at ?? row.last_activity_at ?? null;
+      row.windowState =
+        windowStateByConvo.get(Number(row.id)) ?? {
+          mode: "template_required",
+          lastInboundAt: null,
+          expiresAt: null,
+          remainingSeconds: null,
+          reason: "no_inbound_history",
+        };
     }
 
     // Final sort by last activity (incoming OR outgoing)
@@ -448,6 +464,7 @@ inboxRoutes.get("/conversations/:id/summary", async (req, res) => {
       phone: conv.customer_phone ?? "",
       lang: conv.customer_lang ?? "sw",
     };
+    const windowState = await getConversationWindowState(conversationId);
 
     const restockItems = await db("restock_subscriptions as rs")
   .join("products as p", "p.id", "rs.product_id")
@@ -512,6 +529,7 @@ const restock = {
       delivery,
       payment,
       restock,
+      windowState,
     });
   } catch (err: any) {
     console.error("GET /conversations/:id/summary failed", err);
@@ -3046,6 +3064,7 @@ inboxRoutes.post("/customers/broadcast", async (req: Request, res: Response) => 
         templateKey: parsed.data.templateKey,
         params: parsed.data.params ?? {},
         app: req.app,
+        triggerSource: "broadcast",
       });
 
       if (result.ok) {

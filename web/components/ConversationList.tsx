@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import { formatPhonePretty } from "@/lib/phone";
 import { socket } from "@/lib/socket";
 import { ConversationListSkeleton, EmptyState } from "@/components/ui";
+import type { ConversationWindowState } from "@/lib/types";
 
 export type Convo = {
   id: string;
@@ -13,6 +14,7 @@ export type Convo = {
   lang?: string | null;
   agent_allowed: boolean;
   last_user_message_at: string;
+  windowState: ConversationWindowState;
   last_message_at?: string | null;
   unread_count?: number;
   last_message_text?: string | null;
@@ -82,6 +84,7 @@ export default function ConversationList({ activeId, onPick, phoneFilter, onLoad
   const [items, setItems] = useState<Convo[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [queueFilter, setQueueFilter] = useState<"all" | "unread" | "human" | "bot">("all");
   const onLoadedRef = useRef<Props["onLoaded"]>(onLoaded);
 
   useEffect(() => {
@@ -150,14 +153,18 @@ export default function ConversationList({ activeId, onPick, phoneFilter, onLoad
 
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
-    if (!query) return items;
     return items.filter((item) => {
+      if (queueFilter === "unread" && (item.unread_count ?? 0) <= 0) return false;
+      if (queueFilter === "human" && !item.agent_allowed) return false;
+      if (queueFilter === "bot" && item.agent_allowed) return false;
+
+      if (!query) return true;
       const name = (item.name ?? "").toLowerCase();
       const phone = (item.phone ?? "").toLowerCase();
       const last = (item.last_message_text ?? "").toLowerCase();
       return name.includes(query) || phone.includes(query) || last.includes(query);
     });
-  }, [items, search]);
+  }, [items, search, queueFilter]);
 
   const unreadCount = useMemo(() => items.reduce((sum, item) => sum + (item.unread_count ?? 0), 0), [items]);
 
@@ -180,6 +187,36 @@ export default function ConversationList({ activeId, onPick, phoneFilter, onLoad
             value={search}
             onChange={(event) => setSearch(event.target.value)}
           />
+        </div>
+        <div className="conversation-filters" role="tablist" aria-label="Conversation filters">
+          <button
+            type="button"
+            className={"conversation-filter-chip" + (queueFilter === "all" ? " conversation-filter-chip--active" : "")}
+            onClick={() => setQueueFilter("all")}
+          >
+            All
+          </button>
+          <button
+            type="button"
+            className={"conversation-filter-chip" + (queueFilter === "unread" ? " conversation-filter-chip--active" : "")}
+            onClick={() => setQueueFilter("unread")}
+          >
+            Unread
+          </button>
+          <button
+            type="button"
+            className={"conversation-filter-chip" + (queueFilter === "human" ? " conversation-filter-chip--active" : "")}
+            onClick={() => setQueueFilter("human")}
+          >
+            Human
+          </button>
+          <button
+            type="button"
+            className={"conversation-filter-chip" + (queueFilter === "bot" ? " conversation-filter-chip--active" : "")}
+            onClick={() => setQueueFilter("bot")}
+          >
+            Bot
+          </button>
         </div>
       </div>
 
@@ -213,6 +250,7 @@ export default function ConversationList({ activeId, onPick, phoneFilter, onLoad
             const timeSource = item.last_message_at || item.last_user_message_at;
             const unread = item.unread_count ?? 0;
             const statusLabel = item.agent_allowed ? "Human" : "Bot";
+            const needsTemplate = item.windowState?.mode === "template_required";
 
             return (
               <li
@@ -252,6 +290,9 @@ export default function ConversationList({ activeId, onPick, phoneFilter, onLoad
                   <div className="conversation-bottom-row">
                     <div className="conversation-badges">
                       {item.lang ? <span className="conversation-inline-badge">{item.lang.toUpperCase()}</span> : null}
+                      {needsTemplate ? (
+                        <span className="conversation-inline-badge">Template</span>
+                      ) : null}
                       {item.restock_subscribed_count && item.restock_subscribed_count > 0 ? (
                         <span className="conversation-inline-badge">Stock {item.restock_subscribed_count}</span>
                       ) : null}

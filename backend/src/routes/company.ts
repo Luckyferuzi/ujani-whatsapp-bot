@@ -109,7 +109,12 @@ const templateConfigSchema = z
       "order_followup",
       "restock_reengagement",
     ]),
+    displayName: z.string().trim().min(1).optional(),
+    description: z.string().trim().nullable().optional(),
     enabled: z.boolean().optional(),
+    allowedLanguages: z.array(z.string().trim().min(1)).optional(),
+    deprecated: z.boolean().optional(),
+    sortOrder: z.number().int().optional(),
     params: z
       .array(
         z.object({
@@ -123,18 +128,36 @@ const templateConfigSchema = z
   .strict();
 
 function serializeInboxTemplates(templates: InboxTemplateConfig[]) {
-  return templates.map((template) => {
+  const items = templates
+    .slice()
+    .sort((a, b) => a.sortOrder - b.sortOrder || a.key.localeCompare(b.key))
+    .map((template) => {
     const readiness = resolveInboxTemplateReadiness(template);
     return {
       key: template.key,
       category: template.category,
+      displayName: template.displayName,
+      description: template.description,
       enabled: template.enabled,
+      allowedLanguages: template.allowedLanguages,
+      deprecated: template.deprecated,
+      sortOrder: template.sortOrder,
       metaTemplateName: template.metaTemplateName,
       languageCode: template.languageCode,
       params: template.params,
       readiness,
     };
   });
+
+  const summary = {
+    total: items.length,
+    ready: items.filter((item) => item.readiness.can_send).length,
+    blocked: items.filter((item) => !item.readiness.can_send).length,
+    disabled: items.filter((item) => item.readiness.status === "disabled").length,
+    deprecated: items.filter((item) => item.deprecated).length,
+  };
+
+  return { items, summary };
 }
 
 function mergeSettings(
@@ -186,9 +209,11 @@ companyRoutes.get("/company/settings", async (_req, res) => {
 
 companyRoutes.get("/company/whatsapp-templates", async (_req, res) => {
   const templates = await getInboxTemplateRegistry();
+  const serialized = serializeInboxTemplates(templates);
   return res.json({
     ok: true,
-    templates: serializeInboxTemplates(templates),
+    templates: serialized.items,
+    summary: serialized.summary,
   });
 });
 
@@ -214,10 +239,24 @@ companyRoutes.put("/company/whatsapp-templates", async (req, res) => {
 
   const nextTemplates = DEFAULT_INBOX_TEMPLATES.map((fallback) => {
     const template = providedByKey.get(fallback.key) ?? fallback;
+    const nextSortOrder = Number(template.sortOrder);
     return {
       key: fallback.key,
       category: template.category ?? fallback.category,
+      displayName: String(template.displayName ?? fallback.displayName).trim() || fallback.displayName,
+      description: String(template.description ?? fallback.description ?? "").trim() || null,
       enabled: template.enabled !== false,
+      allowedLanguages: Array.isArray(template.allowedLanguages)
+        ? Array.from(
+            new Set(
+              template.allowedLanguages
+                .map((item) => String(item ?? "").trim())
+                .filter(Boolean)
+            )
+          )
+        : fallback.allowedLanguages,
+      deprecated: template.deprecated === true,
+      sortOrder: Number.isFinite(nextSortOrder) ? nextSortOrder : fallback.sortOrder,
       metaTemplateName: String(template.metaTemplateName ?? "").trim() || null,
       languageCode: String(template.languageCode ?? "").trim() || null,
       params: Array.isArray(template.params)
@@ -231,9 +270,11 @@ companyRoutes.put("/company/whatsapp-templates", async (req, res) => {
   });
 
   const saved = await saveInboxTemplateRegistry(nextTemplates);
+  const serialized = serializeInboxTemplates(saved);
   return res.json({
     ok: true,
-    templates: serializeInboxTemplates(saved),
+    templates: serialized.items,
+    summary: serialized.summary,
   });
 });
 
@@ -416,6 +457,11 @@ companyRoutes.post("/setup/test-send", async (req, res) => {
 companyRoutes.get("/setup/diagnostics", async (_req, res) => {
   try {
     const s = await loadCompanySettingsToCache().catch(() => getCompanySettingsCached());
+    const templates = await getInboxTemplateRegistry();
+    const serializedTemplates = serializeInboxTemplates(templates);
+    const templateEventsTablePresent = await db.schema
+      .hasTable("template_send_events")
+      .catch(() => false);
 
     const missing: string[] = [];
     if (!s.whatsapp_token) missing.push("whatsapp_token");
@@ -423,7 +469,8 @@ companyRoutes.get("/setup/diagnostics", async (_req, res) => {
     if (!s.verify_token) missing.push("verify_token");
     if (!s.app_secret) missing.push("app_secret");
 
-    const [convAgg, msgAgg, lastInbound, phoneSummary] = await Promise.all([
+    const [convAgg, msgAgg, lastInbound, phoneSummary, templateAuditAgg, templateRecentFailure] =
+      await Promise.all([
       db("conversations").count<{ count: string }>("id as count").first(),
       db("messages")
         .select(
@@ -446,6 +493,34 @@ companyRoutes.get("/setup/diagnostics", async (_req, res) => {
         )
         .first(),
       getPhoneNumberSummary().catch(() => null),
+      templateEventsTablePresent
+        ? db("template_send_events")
+            .select(
+              db.raw("COUNT(*)::int as total"),
+              db.raw(
+                "SUM(CASE WHEN created_at >= NOW() - INTERVAL '24 hours' THEN 1 ELSE 0 END)::int as last_24h_total"
+              ),
+              db.raw(
+                "SUM(CASE WHEN send_status = 'failed' AND created_at >= NOW() - INTERVAL '24 hours' THEN 1 ELSE 0 END)::int as last_24h_failed"
+              ),
+              db.raw("MAX(created_at) as last_event_at")
+            )
+            .first()
+        : Promise.resolve(null),
+      templateEventsTablePresent
+        ? db("template_send_events")
+            .where("send_status", "failed")
+            .orderBy("created_at", "desc")
+            .select(
+              "template_key",
+              "template_name",
+              "template_language",
+              "error_code",
+              "error_title",
+              "created_at"
+            )
+            .first()
+        : Promise.resolve(null),
     ]);
 
     const nowMs = Date.now();
@@ -488,6 +563,17 @@ companyRoutes.get("/setup/diagnostics", async (_req, res) => {
       });
     }
 
+    const templateBlocked = serializedTemplates.items.filter(
+      (item) => !item.readiness.can_send
+    );
+    if (templateBlocked.length > 0) {
+      issues.push({
+        level: "warn",
+        code: "template_readiness_blockers",
+        message: `${templateBlocked.length} WhatsApp template mapping(s) are not currently send-ready.`,
+      });
+    }
+
     return res.json({
       ok: true,
       diagnostics: {
@@ -514,6 +600,37 @@ companyRoutes.get("/setup/diagnostics", async (_req, res) => {
                 body_preview: String(lastInbound.body ?? "").slice(0, 120),
               }
             : null,
+        },
+        templates: {
+          ...serializedTemplates.summary,
+          event_table_present: templateEventsTablePresent,
+          audit: {
+            total_events: Number((templateAuditAgg as any)?.total ?? 0),
+            last_24h_total: Number((templateAuditAgg as any)?.last_24h_total ?? 0),
+            last_24h_failed: Number((templateAuditAgg as any)?.last_24h_failed ?? 0),
+            last_event_at:
+              (templateAuditAgg as any)?.last_event_at != null
+                ? new Date((templateAuditAgg as any).last_event_at).toISOString()
+                : null,
+            last_failure: templateRecentFailure
+              ? {
+                  template_key: String(templateRecentFailure.template_key ?? ""),
+                  template_name: templateRecentFailure.template_name ?? null,
+                  template_language: templateRecentFailure.template_language ?? null,
+                  error_code: templateRecentFailure.error_code ?? null,
+                  error_title: templateRecentFailure.error_title ?? null,
+                  created_at: new Date(templateRecentFailure.created_at).toISOString(),
+                }
+              : null,
+          },
+          items: serializedTemplates.items.map((item) => ({
+            key: item.key,
+            displayName: item.displayName,
+            category: item.category,
+            enabled: item.enabled,
+            deprecated: item.deprecated,
+            readiness: item.readiness,
+          })),
         },
         issues,
       },

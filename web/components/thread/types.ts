@@ -1,4 +1,5 @@
 import type { Convo } from "@/components/ConversationList";
+import type { ConversationWindowState } from "@/lib/types";
 
 export type ThreadProps = {
   convo: Convo;
@@ -28,3 +29,5 @@ export type ComposerNotice = {
   message: string;
   actionLabel: string | null;
 };
+
+export type ThreadComposerWindowState = ConversationWindowState;

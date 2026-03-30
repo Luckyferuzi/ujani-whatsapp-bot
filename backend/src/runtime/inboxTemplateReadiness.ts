@@ -21,6 +21,16 @@ export type InboxTemplateReadiness = {
   language_code: string | null;
   enabled: boolean;
   category: InboxTemplateConfig["category"] | null;
+  display_name: string | null;
+  description: string | null;
+  allowed_languages: string[];
+  deprecated: boolean;
+  sort_order: number | null;
+  is_mapped: boolean;
+  has_language: boolean;
+  language_allowed: boolean;
+  blockers: string[];
+  warnings: string[];
   params: TemplateParameterMeta[];
 };
 
@@ -44,6 +54,16 @@ export function resolveInboxTemplateReadiness(
       language_code: null,
       enabled: false,
       category: null,
+      display_name: null,
+      description: null,
+      allowed_languages: [],
+      deprecated: false,
+      sort_order: null,
+      is_mapped: false,
+      has_language: false,
+      language_allowed: false,
+      blockers: ["template_not_found"],
+      warnings: [],
       params: [],
     };
   }
@@ -52,6 +72,15 @@ export function resolveInboxTemplateReadiness(
   const metaTemplateName = normalizeString(template.metaTemplateName);
   const languageCode = normalizeString(template.languageCode);
   const params = Array.isArray(template.params) ? template.params : [];
+  const allowedLanguages = Array.isArray(template.allowedLanguages)
+    ? template.allowedLanguages
+        .map((item) => normalizeString(item))
+        .filter((item): item is string => item != null)
+    : [];
+  const languageAllowed =
+    !!languageCode &&
+    (allowedLanguages.length === 0 || allowedLanguages.includes(languageCode));
+  const warnings = template.deprecated === true ? ["template_deprecated"] : [];
 
   if (!key) {
     return {
@@ -65,6 +94,16 @@ export function resolveInboxTemplateReadiness(
       language_code: languageCode,
       enabled: template.enabled !== false,
       category: template.category ?? null,
+      display_name: normalizeString(template.displayName),
+      description: normalizeString(template.description),
+      allowed_languages: allowedLanguages,
+      deprecated: template.deprecated === true,
+      sort_order: Number.isFinite(template.sortOrder) ? template.sortOrder : null,
+      is_mapped: !!metaTemplateName,
+      has_language: !!languageCode,
+      language_allowed: languageAllowed,
+      blockers: ["template_config_missing"],
+      warnings,
       params,
     };
   }
@@ -81,6 +120,16 @@ export function resolveInboxTemplateReadiness(
       language_code: languageCode,
       enabled: false,
       category: template.category,
+      display_name: normalizeString(template.displayName),
+      description: normalizeString(template.description),
+      allowed_languages: allowedLanguages,
+      deprecated: template.deprecated === true,
+      sort_order: Number.isFinite(template.sortOrder) ? template.sortOrder : null,
+      is_mapped: !!metaTemplateName,
+      has_language: !!languageCode,
+      language_allowed: languageAllowed,
+      blockers: ["template_disabled"],
+      warnings,
       params,
     };
   }
@@ -97,6 +146,16 @@ export function resolveInboxTemplateReadiness(
       language_code: languageCode,
       enabled: true,
       category: template.category,
+      display_name: normalizeString(template.displayName),
+      description: normalizeString(template.description),
+      allowed_languages: allowedLanguages,
+      deprecated: template.deprecated === true,
+      sort_order: Number.isFinite(template.sortOrder) ? template.sortOrder : null,
+      is_mapped: false,
+      has_language: !!languageCode,
+      language_allowed: languageAllowed,
+      blockers: ["template_config_missing"],
+      warnings,
       params,
     };
   }
@@ -113,6 +172,42 @@ export function resolveInboxTemplateReadiness(
       language_code: null,
       enabled: true,
       category: template.category,
+      display_name: normalizeString(template.displayName),
+      description: normalizeString(template.description),
+      allowed_languages: allowedLanguages,
+      deprecated: template.deprecated === true,
+      sort_order: Number.isFinite(template.sortOrder) ? template.sortOrder : null,
+      is_mapped: true,
+      has_language: false,
+      language_allowed: false,
+      blockers: ["template_language_unavailable"],
+      warnings,
+      params,
+    };
+  }
+
+  if (!languageAllowed) {
+    return {
+      key,
+      can_send: false,
+      available: false,
+      status: "invalid",
+      status_label: "Configured language is not allowed",
+      reason_code: "template_language_not_allowed",
+      meta_template_name: metaTemplateName,
+      language_code: languageCode,
+      enabled: true,
+      category: template.category,
+      display_name: normalizeString(template.displayName),
+      description: normalizeString(template.description),
+      allowed_languages: allowedLanguages,
+      deprecated: template.deprecated === true,
+      sort_order: Number.isFinite(template.sortOrder) ? template.sortOrder : null,
+      is_mapped: true,
+      has_language: true,
+      language_allowed: false,
+      blockers: ["template_language_not_allowed"],
+      warnings,
       params,
     };
   }
@@ -128,6 +223,16 @@ export function resolveInboxTemplateReadiness(
     language_code: languageCode,
     enabled: true,
     category: template.category,
+    display_name: normalizeString(template.displayName),
+    description: normalizeString(template.description),
+    allowed_languages: allowedLanguages,
+    deprecated: template.deprecated === true,
+    sort_order: Number.isFinite(template.sortOrder) ? template.sortOrder : null,
+    is_mapped: true,
+    has_language: true,
+    language_allowed: true,
+    blockers: [],
+    warnings,
     params,
   };
 }

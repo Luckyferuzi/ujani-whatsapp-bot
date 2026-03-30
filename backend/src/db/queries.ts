@@ -899,6 +899,54 @@ export async function insertOutboundMessage(
   return inserted;
 }
 
+export const FREE_REPLY_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+export type ConversationWindowState = {
+  mode: "freeform" | "template_required";
+  lastInboundAt: string | null;
+  expiresAt: string | null;
+  remainingSeconds: number | null;
+  reason: "within_24h" | "outside_24h" | "no_inbound_history";
+};
+
+export function resolveConversationWindowStateFromLastInbound(
+  lastInboundAt: string | null | undefined,
+  now = Date.now()
+): ConversationWindowState {
+  if (!lastInboundAt) {
+    return {
+      mode: "template_required",
+      lastInboundAt: null,
+      expiresAt: null,
+      remainingSeconds: null,
+      reason: "no_inbound_history",
+    };
+  }
+
+  const openedAt = new Date(lastInboundAt).getTime();
+  if (!Number.isFinite(openedAt)) {
+    return {
+      mode: "template_required",
+      lastInboundAt: null,
+      expiresAt: null,
+      remainingSeconds: null,
+      reason: "no_inbound_history",
+    };
+  }
+
+  const expiresAtMs = openedAt + FREE_REPLY_WINDOW_MS;
+  const remainingMs = Math.max(0, expiresAtMs - now);
+  const withinWindow = expiresAtMs > now;
+
+  return {
+    mode: withinWindow ? "freeform" : "template_required",
+    lastInboundAt: new Date(openedAt).toISOString(),
+    expiresAt: new Date(expiresAtMs).toISOString(),
+    remainingSeconds: Math.floor(remainingMs / 1000),
+    reason: withinWindow ? "within_24h" : "outside_24h",
+  };
+}
+
 export async function getConversationLastInboundAt(conversationId: number): Promise<string | null> {
   const row = await db("conversations")
     .where({ id: conversationId })
@@ -906,6 +954,115 @@ export async function getConversationLastInboundAt(conversationId: number): Prom
     .first();
 
   return (row?.last_user_message_at as string | null | undefined) ?? null;
+}
+
+export async function getConversationWindowState(
+  conversationId: number,
+  now = Date.now()
+): Promise<ConversationWindowState> {
+  return resolveConversationWindowStateFromLastInbound(
+    await getConversationLastInboundAt(conversationId),
+    now
+  );
+}
+
+export async function canSendFreeform(conversationId: number): Promise<boolean> {
+  return (await getConversationWindowState(conversationId)).mode === "freeform";
+}
+
+export async function requiresTemplate(conversationId: number): Promise<boolean> {
+  return (await getConversationWindowState(conversationId)).mode === "template_required";
+}
+
+export type TemplateSendEventRow = {
+  id: number;
+  conversation_id: number;
+  message_id: number | null;
+  customer_id: number | null;
+  template_key: string | null;
+  template_name: string | null;
+  template_language: string | null;
+  template_category: string | null;
+  window_mode_at_send: string;
+  send_status: string;
+  wa_message_id: string | null;
+  error_code: string | null;
+  error_title: string | null;
+  error_details: string | null;
+  trigger_source: string;
+  actor_user_id: number | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export async function createTemplateSendEvent(input: {
+  conversationId: number;
+  messageId?: number | null;
+  customerId?: number | null;
+  templateKey?: string | null;
+  templateName?: string | null;
+  templateLanguage?: string | null;
+  templateCategory?: string | null;
+  windowModeAtSend: ConversationWindowState["mode"];
+  sendStatus: string;
+  waMessageId?: string | null;
+  errorCode?: string | null;
+  errorTitle?: string | null;
+  errorDetails?: string | null;
+  triggerSource: string;
+  actorUserId?: number | null;
+}) {
+  const [inserted] = await db("template_send_events")
+    .insert({
+      conversation_id: input.conversationId,
+      message_id: input.messageId ?? null,
+      customer_id: input.customerId ?? null,
+      template_key: input.templateKey ?? null,
+      template_name: input.templateName ?? null,
+      template_language: input.templateLanguage ?? null,
+      template_category: input.templateCategory ?? null,
+      window_mode_at_send: input.windowModeAtSend,
+      send_status: input.sendStatus,
+      wa_message_id: input.waMessageId ?? null,
+      error_code: input.errorCode ?? null,
+      error_title: input.errorTitle ?? null,
+      error_details: input.errorDetails ?? null,
+      trigger_source: input.triggerSource,
+      actor_user_id: input.actorUserId ?? null,
+    })
+    .returning("*");
+
+  return (inserted ?? null) as TemplateSendEventRow | null;
+}
+
+export async function updateTemplateSendEvent(
+  id: number,
+  input: {
+    messageId?: number | null;
+    sendStatus?: string;
+    waMessageId?: string | null;
+    errorCode?: string | null;
+    errorTitle?: string | null;
+    errorDetails?: string | null;
+  }
+) {
+  const patch: Record<string, unknown> = {
+    updated_at: db.fn.now(),
+  };
+
+  if (input.messageId !== undefined) patch.message_id = input.messageId;
+  if (input.sendStatus !== undefined) patch.send_status = input.sendStatus;
+  if (input.waMessageId !== undefined) patch.wa_message_id = input.waMessageId;
+  if (input.errorCode !== undefined) patch.error_code = input.errorCode;
+  if (input.errorTitle !== undefined) patch.error_title = input.errorTitle;
+  if (input.errorDetails !== undefined) patch.error_details = input.errorDetails;
+
+  const [updated] = await db("template_send_events")
+    .where({ id })
+    .update(patch)
+    .returning("*");
+
+  return (updated ?? null) as TemplateSendEventRow | null;
 }
 
 export async function updateMessageTransportState(

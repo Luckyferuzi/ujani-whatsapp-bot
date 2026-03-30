@@ -92,6 +92,38 @@ type SetupDiagnostics = {
         }
       | null;
   };
+  templates: {
+    total: number;
+    ready: number;
+    blocked: number;
+    disabled: number;
+    deprecated: number;
+    event_table_present: boolean;
+    audit: {
+      total_events: number;
+      last_24h_total: number;
+      last_24h_failed: number;
+      last_event_at: string | null;
+      last_failure:
+        | {
+            template_key: string;
+            template_name: string | null;
+            template_language: string | null;
+            error_code: string | null;
+            error_title: string | null;
+            created_at: string;
+          }
+        | null;
+    };
+    items: Array<{
+      key: string;
+      displayName: string;
+      category: "payment_reminder" | "order_followup" | "restock_reengagement";
+      enabled: boolean;
+      deprecated: boolean;
+      readiness: TemplateReadiness;
+    }>;
+  };
   issues: Array<{ level: "error" | "warn"; code: string; message: string }>;
 };
 
@@ -127,12 +159,27 @@ type TemplateReadiness = {
   meta_template_name: string | null;
   language_code: string | null;
   enabled: boolean;
+  display_name: string | null;
+  description: string | null;
+  allowed_languages: string[];
+  deprecated: boolean;
+  sort_order: number | null;
+  is_mapped: boolean;
+  has_language: boolean;
+  language_allowed: boolean;
+  blockers: string[];
+  warnings: string[];
 };
 
 type WhatsAppTemplateConfig = {
   key: string;
   category: "payment_reminder" | "order_followup" | "restock_reengagement";
+  displayName: string;
+  description: string | null;
   enabled: boolean;
+  allowedLanguages: string[];
+  deprecated: boolean;
+  sortOrder: number;
   metaTemplateName: string | null;
   languageCode: string | null;
   params: TemplateParam[];
@@ -161,11 +208,28 @@ function getTemplateTone(status: TemplateReadiness["status"]) {
 
 function getDraftTemplateReadiness(template: {
   key: string;
+  displayName: string;
+  description: string | null;
   enabled: boolean;
+  allowedLanguages: string[];
+  deprecated: boolean;
+  sortOrder: number;
   metaTemplateName: string | null;
   languageCode: string | null;
   readiness: TemplateReadiness;
 }): TemplateReadiness {
+  const languageCode = String(template.languageCode ?? "").trim() || null;
+  const allowedLanguages = Array.from(
+    new Set(
+      (template.allowedLanguages ?? [])
+        .map((item) => String(item ?? "").trim())
+        .filter(Boolean)
+    )
+  );
+  const languageAllowed =
+    !!languageCode &&
+    (allowedLanguages.length === 0 || allowedLanguages.includes(languageCode));
+
   if (!template.enabled) {
     return {
       ...template.readiness,
@@ -177,7 +241,17 @@ function getDraftTemplateReadiness(template: {
       reason_code: "template_disabled",
       enabled: false,
       meta_template_name: template.metaTemplateName,
-      language_code: template.languageCode,
+      language_code: languageCode,
+      display_name: template.displayName,
+      description: template.description,
+      allowed_languages: allowedLanguages,
+      deprecated: template.deprecated,
+      sort_order: template.sortOrder,
+      is_mapped: !!String(template.metaTemplateName ?? "").trim(),
+      has_language: !!languageCode,
+      language_allowed: languageAllowed,
+      blockers: ["template_disabled"],
+      warnings: template.deprecated ? ["template_deprecated"] : [],
     };
   }
 
@@ -192,11 +266,21 @@ function getDraftTemplateReadiness(template: {
       reason_code: "template_config_missing",
       enabled: true,
       meta_template_name: null,
-      language_code: template.languageCode,
+      language_code: languageCode,
+      display_name: template.displayName,
+      description: template.description,
+      allowed_languages: allowedLanguages,
+      deprecated: template.deprecated,
+      sort_order: template.sortOrder,
+      is_mapped: false,
+      has_language: !!languageCode,
+      language_allowed: languageAllowed,
+      blockers: ["template_config_missing"],
+      warnings: template.deprecated ? ["template_deprecated"] : [],
     };
   }
 
-  if (!String(template.languageCode ?? "").trim()) {
+  if (!languageCode) {
     return {
       ...template.readiness,
       key: template.key,
@@ -208,6 +292,41 @@ function getDraftTemplateReadiness(template: {
       enabled: true,
       meta_template_name: template.metaTemplateName,
       language_code: null,
+      display_name: template.displayName,
+      description: template.description,
+      allowed_languages: allowedLanguages,
+      deprecated: template.deprecated,
+      sort_order: template.sortOrder,
+      is_mapped: true,
+      has_language: false,
+      language_allowed: false,
+      blockers: ["template_language_unavailable"],
+      warnings: template.deprecated ? ["template_deprecated"] : [],
+    };
+  }
+
+  if (!languageAllowed) {
+    return {
+      ...template.readiness,
+      key: template.key,
+      can_send: false,
+      available: false,
+      status: "invalid",
+      status_label: "Configured language is not allowed",
+      reason_code: "template_language_not_allowed",
+      enabled: true,
+      meta_template_name: template.metaTemplateName,
+      language_code: languageCode,
+      display_name: template.displayName,
+      description: template.description,
+      allowed_languages: allowedLanguages,
+      deprecated: template.deprecated,
+      sort_order: template.sortOrder,
+      is_mapped: true,
+      has_language: true,
+      language_allowed: false,
+      blockers: ["template_language_not_allowed"],
+      warnings: template.deprecated ? ["template_deprecated"] : [],
     };
   }
 
@@ -221,7 +340,17 @@ function getDraftTemplateReadiness(template: {
     reason_code: null,
     enabled: true,
     meta_template_name: template.metaTemplateName,
-    language_code: template.languageCode,
+    language_code: languageCode,
+    display_name: template.displayName,
+    description: template.description,
+    allowed_languages: allowedLanguages,
+    deprecated: template.deprecated,
+    sort_order: template.sortOrder,
+    is_mapped: true,
+    has_language: true,
+    language_allowed: true,
+    blockers: [],
+    warnings: template.deprecated ? ["template_deprecated"] : [],
   };
 }
 
@@ -455,7 +584,12 @@ export default function SetupPage() {
             templates: templateConfigs.map((template) => ({
               key: template.key,
               category: template.category,
+              displayName: template.displayName,
+              description: template.description || null,
               enabled: template.enabled,
+              allowedLanguages: template.allowedLanguages,
+              deprecated: template.deprecated,
+              sortOrder: template.sortOrder,
               metaTemplateName: template.metaTemplateName || null,
               languageCode: template.languageCode || null,
               params: template.params,
@@ -480,7 +614,19 @@ export default function SetupPage() {
 
   function updateTemplateConfig(
     key: string,
-    patch: Partial<Pick<WhatsAppTemplateConfig, "enabled" | "metaTemplateName" | "languageCode">>
+    patch: Partial<
+      Pick<
+        WhatsAppTemplateConfig,
+        | "displayName"
+        | "description"
+        | "enabled"
+        | "allowedLanguages"
+        | "deprecated"
+        | "sortOrder"
+        | "metaTemplateName"
+        | "languageCode"
+      >
+    >
   ) {
     setTemplateConfigs((current) =>
       current.map((template) =>
@@ -508,6 +654,7 @@ export default function SetupPage() {
   const readyTemplateCount = templateConfigs.filter(
     (item) => getDraftTemplateReadiness(item).status === "ready"
   ).length;
+  const blockedTemplateCount = diag?.templates.blocked ?? 0;
   const setupReadinessScore = Math.max(0, 4 - Math.min(4, missingRequiredCount + blockingIssueCount));
   const setupProgressPercent = `${(setupReadinessScore / 4) * 100}%`;
 
@@ -595,6 +742,11 @@ export default function SetupPage() {
               <span className="config-stat-label">Payment rails</span>
               <div className="config-stat-value"><MetricValue value={paymentMethodCount} refreshing={isRefreshing} width="4ch" /></div>
               <div className="config-stat-meta">Operator-facing payment instructions currently configured.</div>
+            </div>
+            <div className="config-stat-card">
+              <span className="config-stat-label">Template blockers</span>
+              <div className="config-stat-value"><MetricValue value={blockedTemplateCount} refreshing={isRefreshing} width="4ch" /></div>
+              <div className="config-stat-meta">Template mappings that still cannot send.</div>
             </div>
           </div>
         </Card>
@@ -720,7 +872,7 @@ export default function SetupPage() {
             <Card key={template.key} tone="muted" padding="lg" className="config-section-card">
               <div className="config-section-head">
                 <div>
-                  <div className="config-list-label">{formatTemplateCategory(template.category)}</div>
+                  <div className="config-list-label">{template.displayName || formatTemplateCategory(template.category)}</div>
                   <div className="config-list-copy">{template.key}</div>
                 </div>
                 <Badge tone={getTemplateTone(draftReadiness.status)}>
@@ -736,6 +888,18 @@ export default function SetupPage() {
                 <div className="config-field">
                   <label className="config-field-label">Category</label>
                   <Input value={formatTemplateCategory(template.category)} disabled />
+                </div>
+                <div className="config-field">
+                  <label className="config-field-label">Display name</label>
+                  <Input
+                    value={template.displayName ?? ""}
+                    placeholder={formatTemplateCategory(template.category)}
+                    onChange={(e) =>
+                      updateTemplateConfig(template.key, {
+                        displayName: e.target.value,
+                      })
+                    }
+                  />
                 </div>
                 <div className="config-field">
                   <label className="config-field-label">Meta template name</label>
@@ -761,6 +925,44 @@ export default function SetupPage() {
                     }
                   />
                 </div>
+                <div className="config-field">
+                  <label className="config-field-label">Allowed languages</label>
+                  <Input
+                    value={(template.allowedLanguages ?? []).join(", ")}
+                    placeholder="sw, en"
+                    onChange={(e) =>
+                      updateTemplateConfig(template.key, {
+                        allowedLanguages: e.target.value
+                          .split(",")
+                          .map((item) => item.trim())
+                          .filter(Boolean),
+                      })
+                    }
+                  />
+                </div>
+                <div className="config-field">
+                  <label className="config-field-label">Sort order</label>
+                  <Input
+                    type="number"
+                    value={String(template.sortOrder ?? 0)}
+                    onChange={(e) =>
+                      updateTemplateConfig(template.key, {
+                        sortOrder: Number(e.target.value || 0),
+                      })
+                    }
+                  />
+                </div>
+                <div className="config-field" style={{ gridColumn: "1 / -1" }}>
+                  <label className="config-field-label">Description</label>
+                  <Textarea
+                    value={template.description ?? ""}
+                    onChange={(e) =>
+                      updateTemplateConfig(template.key, {
+                        description: e.target.value,
+                      })
+                    }
+                  />
+                </div>
               </div>
 
               <div className="config-list">
@@ -782,6 +984,29 @@ export default function SetupPage() {
                       }
                     />
                     <span>Enabled</span>
+                  </label>
+                </div>
+                <div className="config-list-item">
+                  <div className="config-list-item__copy">
+                    <div className="config-list-title">Diagnostics</div>
+                    <div className="config-list-copy">
+                      {draftReadiness.blockers.length > 0
+                        ? draftReadiness.blockers.join(", ")
+                        : "No blocking config issues detected."}
+                      {draftReadiness.warnings.length > 0 ? ` Warnings: ${draftReadiness.warnings.join(", ")}.` : ""}
+                    </div>
+                  </div>
+                  <label className="config-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={template.deprecated}
+                      onChange={(e) =>
+                        updateTemplateConfig(template.key, {
+                          deprecated: e.target.checked,
+                        })
+                      }
+                    />
+                    <span>Deprecated</span>
                   </label>
                 </div>
               </div>
@@ -832,7 +1057,10 @@ export default function SetupPage() {
             <div className="config-list">
               <div className="config-list-item"><div className="config-list-item__copy"><div className="config-list-title">Inbox activity</div><div className="config-list-copy">Conversations: {diag.inbox.conversations}. Messages: {diag.inbox.messages_total} (in {diag.inbox.messages_inbound}, out {diag.inbox.messages_outbound}).</div></div><Badge tone="neutral">{diag.inbox.last_inbound ? `${diag.inbox.last_inbound.age_minutes ?? 0} min` : "No inbound"}</Badge></div>
               <div className="config-list-item"><div className="config-list-item__copy"><div className="config-list-title">Graph phone check</div><div className="config-list-copy">Configured phone number ID: {diag.setup.configured_phone_number_id || "-"}</div></div><Badge tone={diag.graph.phone_summary ? "success" : "warning"}>{diag.graph.phone_summary ? "Reachable" : "Not reachable"}</Badge></div>
+              <div className="config-list-item"><div className="config-list-item__copy"><div className="config-list-title">Template readiness</div><div className="config-list-copy">{diag.templates.ready}/{diag.templates.total} ready, {diag.templates.blocked} blocked, {diag.templates.disabled} disabled.</div></div><Badge tone={diag.templates.blocked > 0 ? "warning" : "success"}>{diag.templates.event_table_present ? "Audited" : "No audit table"}</Badge></div>
+              <div className="config-list-item"><div className="config-list-item__copy"><div className="config-list-title">Template audit volume</div><div className="config-list-copy">Total events: {diag.templates.audit.total_events}. Last 24h: {diag.templates.audit.last_24h_total}. Failures in last 24h: {diag.templates.audit.last_24h_failed}.</div></div><Badge tone="neutral">{diag.templates.audit.last_event_at ? new Date(diag.templates.audit.last_event_at).toLocaleString() : "No events"}</Badge></div>
               {diag.setup.missing_required.length > 0 ? <Alert tone="warning" title="Missing required values" description={diag.setup.missing_required.join(", ")} /> : null}
+              {diag.templates.audit.last_failure ? <Alert tone="warning" title="Latest template failure" description={`${diag.templates.audit.last_failure.template_key}: ${diag.templates.audit.last_failure.error_title || diag.templates.audit.last_failure.error_code || "Unknown failure"}`} /> : null}
               {diag.issues.length > 0 ? diag.issues.map((issue) => <Alert key={issue.code} tone={issue.level === "error" ? "danger" : "warning"} title={issue.code} description={issue.message} />) : <Alert tone="success" title="No blocking issues detected" description="Diagnostics currently report a healthy setup state." />}
             </div>
           ) : <div className="config-empty">No diagnostics available yet.</div>}

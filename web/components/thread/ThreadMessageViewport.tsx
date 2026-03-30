@@ -158,20 +158,6 @@ export default function ThreadMessageViewport({
                     onMouseLeave={() => onMessageHover(null)}
                   >
                     <div className={"thread-message-row" + (outbound ? " thread-message-row--outbound" : "")}>
-                      {!groupedWithPrev ? (
-                        <div
-                          className={
-                            "thread-avatar" +
-                            (outbound ? " thread-avatar--outbound" : "") +
-                            (role === "bot" ? " thread-avatar--bot" : "")
-                          }
-                        >
-                          {outbound ? (role === "bot" ? "B" : "A") : customerInitial}
-                        </div>
-                      ) : (
-                        <div className="thread-avatar thread-avatar--spacer" />
-                      )}
-
                       <div className="thread-message-stack">
                         {role === "bot" && !groupedWithPrev ? <div className="thread-role-label">Bot</div> : null}
                         {msg.message_kind === "template" && !groupedWithPrev ? (
@@ -184,8 +170,8 @@ export default function ThreadMessageViewport({
                         ) : null}
 
                         <div className={"thread-bubble-wrap" + (outbound ? " thread-bubble-wrap--outbound" : "")}>
-                          {String(hoveredMessageId ?? "") === String(msg.id) ? (
-                            <div className="thread-bubble-actions">
+                          {outbound && String(hoveredMessageId ?? "") === String(msg.id) ? (
+                            <div className="thread-bubble-actions thread-bubble-actions--left">
                               <button
                                 type="button"
                                 className="thread-bubble-action"
@@ -247,6 +233,38 @@ export default function ThreadMessageViewport({
                             ) : null}
                             {isFailed ? <div className="thread-failure-copy">{describeFailure(msg)}</div> : null}
                           </div>
+
+                          {!outbound && String(hoveredMessageId ?? "") === String(msg.id) ? (
+                            <div className="thread-bubble-actions thread-bubble-actions--right">
+                              <button
+                                type="button"
+                                className="thread-bubble-action"
+                                onClick={() => void onCopyMessage(msg.body)}
+                                aria-label="Copy message"
+                                title="Copy"
+                              >
+                                C
+                              </button>
+                              <button
+                                type="button"
+                                className="thread-bubble-action"
+                                onClick={() => void onEditMessage(msg)}
+                                aria-label="Edit message"
+                                title="Edit"
+                              >
+                                E
+                              </button>
+                              <button
+                                type="button"
+                                className="thread-bubble-action thread-bubble-action--danger"
+                                onClick={() => void onDeleteMessage(msg.id)}
+                                aria-label="Delete message"
+                                title="Delete"
+                              >
+                                D
+                              </button>
+                            </div>
+                          ) : null}
                         </div>
                       </div>
                     </div>

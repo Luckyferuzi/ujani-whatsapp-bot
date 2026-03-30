@@ -10,6 +10,7 @@ import {
 import {
   DEFAULT_INBOX_TEMPLATES,
   isInboxTemplateMapped,
+  normalizeInboxTemplateRegistry,
 } from "../src/runtime/companySettings.ts";
 import { resolveInboxTemplateReadiness } from "../src/runtime/inboxTemplateReadiness.ts";
 
@@ -104,4 +105,37 @@ test("resolveInboxTemplateReadiness marks fully mapped template as ready", () =>
   assert.equal(readiness.can_send, true);
   assert.equal(readiness.status, "ready");
   assert.equal(readiness.meta_template_name, "payment_reminder_live");
+});
+
+test("normalizeInboxTemplateRegistry backfills operational metadata for legacy records", () => {
+  const [normalized] = normalizeInboxTemplateRegistry([
+    {
+      key: "payment_reminder_sw",
+      metaTemplateName: "payment_reminder_live",
+      languageCode: "sw",
+      category: "payment_reminder",
+      enabled: true,
+      params: DEFAULT_INBOX_TEMPLATES[0]?.params ?? [],
+    },
+  ]);
+
+  assert.equal(normalized.displayName, "Payment reminder");
+  assert.equal(normalized.description?.length ? true : false, true);
+  assert.deepEqual(normalized.allowedLanguages, ["sw"]);
+  assert.equal(normalized.deprecated, false);
+  assert.equal(normalized.sortOrder, 10);
+});
+
+test("resolveInboxTemplateReadiness flags disallowed configured languages", () => {
+  const readiness = resolveInboxTemplateReadiness({
+    ...DEFAULT_INBOX_TEMPLATES[0],
+    metaTemplateName: "payment_reminder_live",
+    languageCode: "en",
+    allowedLanguages: ["sw"],
+  });
+
+  assert.equal(readiness.can_send, false);
+  assert.equal(readiness.status, "invalid");
+  assert.equal(readiness.reason_code, "template_language_not_allowed");
+  assert.deepEqual(readiness.blockers, ["template_language_not_allowed"]);
 });

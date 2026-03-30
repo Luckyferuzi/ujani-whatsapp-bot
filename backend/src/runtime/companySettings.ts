@@ -36,7 +36,12 @@ export type InboxTemplateConfig = {
   metaTemplateName: string | null;
   languageCode: string | null;
   category: "payment_reminder" | "order_followup" | "restock_reengagement";
+  displayName: string;
+  description: string | null;
   enabled: boolean;
+  allowedLanguages: string[];
+  deprecated: boolean;
+  sortOrder: number;
   params: TemplateParameterMeta[];
 };
 
@@ -138,7 +143,12 @@ export const DEFAULT_INBOX_TEMPLATES: InboxTemplateConfig[] = [
     metaTemplateName: null,
     languageCode: "sw",
     category: "payment_reminder",
+    displayName: "Payment reminder",
+    description: "Re-open an unpaid order conversation after the 24-hour freeform window closes.",
     enabled: true,
+    allowedLanguages: ["sw"],
+    deprecated: false,
+    sortOrder: 10,
     params: [
       { key: "customer_name", label: "Customer name", required: true },
       { key: "order_code", label: "Order code", required: true },
@@ -150,7 +160,12 @@ export const DEFAULT_INBOX_TEMPLATES: InboxTemplateConfig[] = [
     metaTemplateName: null,
     languageCode: "sw",
     category: "order_followup",
+    displayName: "Order follow-up",
+    description: "Send a post-order or action-needed follow-up when freeform messaging is closed.",
     enabled: true,
+    allowedLanguages: ["sw"],
+    deprecated: false,
+    sortOrder: 20,
     params: [
       { key: "customer_name", label: "Customer name", required: true },
       { key: "order_code", label: "Order code", required: true },
@@ -161,7 +176,12 @@ export const DEFAULT_INBOX_TEMPLATES: InboxTemplateConfig[] = [
     metaTemplateName: null,
     languageCode: "sw",
     category: "restock_reengagement",
+    displayName: "Restock / re-engagement",
+    description: "Reconnect with opted-in customers when a requested product is available again.",
     enabled: true,
+    allowedLanguages: ["sw"],
+    deprecated: false,
+    sortOrder: 30,
     params: [
       { key: "customer_name", label: "Customer name", required: true },
       { key: "product_name", label: "Product name", required: false },
@@ -382,6 +402,28 @@ function normalizeTemplateParameterMeta(
     .filter((item) => item.key.length > 0);
 }
 
+function normalizeLanguageCodes(
+  value: unknown,
+  fallback: string[] = []
+): string[] {
+  const source = Array.isArray(value) ? value : fallback;
+  return Array.from(
+    new Set(
+      source
+        .map((item) => String(item ?? "").trim())
+        .filter((item) => item.length > 0)
+    )
+  );
+}
+
+function getTemplateCategoryLabel(
+  category: InboxTemplateConfig["category"]
+): string {
+  if (category === "payment_reminder") return "Payment reminder";
+  if (category === "order_followup") return "Order follow-up";
+  return "Restock / re-engagement";
+}
+
 function normalizeInboxTemplateConfig(
   value: any,
   fallback: InboxTemplateConfig
@@ -397,19 +439,37 @@ function normalizeInboxTemplateConfig(
     explicitMetaTemplateName == null && resolvedMetaTemplateName === key
       ? null
       : resolvedMetaTemplateName;
+  const languageCode =
+    String(
+      value?.languageCode ??
+        value?.language_code ??
+        fallback.languageCode ??
+        ""
+    ).trim() || null;
+  const allowedLanguages = normalizeLanguageCodes(
+    value?.allowedLanguages ?? value?.allowed_languages,
+    languageCode ? [languageCode] : fallback.allowedLanguages
+  );
+  const category = (value?.category ?? fallback.category) as InboxTemplateConfig["category"];
 
   return {
     key,
     metaTemplateName: normalizedMetaTemplateName,
-    languageCode:
-      String(
-        value?.languageCode ??
-          value?.language_code ??
-          fallback.languageCode ??
-          ""
-      ).trim() || null,
-    category: (value?.category ?? fallback.category) as InboxTemplateConfig["category"],
+    languageCode,
+    category,
+    displayName:
+      String(value?.displayName ?? value?.display_name ?? fallback.displayName ?? "").trim() ||
+      fallback.displayName ||
+      getTemplateCategoryLabel(category),
+    description: String(
+      value?.description ?? value?.template_description ?? fallback.description ?? ""
+    ).trim() || fallback.description || null,
     enabled: value?.enabled !== false,
+    allowedLanguages,
+    deprecated: value?.deprecated === true,
+    sortOrder: Number.isFinite(Number(value?.sortOrder ?? value?.sort_order))
+      ? Number(value?.sortOrder ?? value?.sort_order)
+      : fallback.sortOrder,
     params: normalizeTemplateParameterMeta(
       value?.params ?? value?.parameter_meta ?? fallback.params
     ),

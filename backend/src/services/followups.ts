@@ -154,7 +154,12 @@ export async function listFollowupQueues() {
       metaTemplateName: null,
       languageCode: null,
       category: "payment_reminder",
+      displayName: key,
+      description: null,
       enabled: false,
+      allowedLanguages: [],
+      deprecated: false,
+      sortOrder: 0,
       params: [],
     });
 

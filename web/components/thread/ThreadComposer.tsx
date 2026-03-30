@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, type ChangeEvent, type FormEvent, type KeyboardEvent, type RefObject } from "react";
-import type { ComposerNotice } from "./types";
+import type { ComposerNotice, ThreadComposerWindowState } from "./types";
 
 type ThreadComposerProps = {
   text: string;
   sending: boolean;
   agentAllowed: boolean;
+  windowState: ThreadComposerWindowState;
   composerBlockedByWindow: boolean;
   visibleComposerNotice: ComposerNotice | null;
   fileInputRef: RefObject<HTMLInputElement | null>;
@@ -30,6 +31,7 @@ export default function ThreadComposer({
   text,
   sending,
   agentAllowed,
+  windowState,
   composerBlockedByWindow,
   visibleComposerNotice,
   fileInputRef,
@@ -48,7 +50,9 @@ export default function ThreadComposer({
   const dockMeta = !agentAllowed
     ? "Take over the conversation to send a manual reply."
     : composerBlockedByWindow
-      ? "Use an approved template before the next free-text reply."
+      ? windowState.reason === "no_inbound_history"
+        ? "Use an approved template before the first outbound reply."
+        : "Use an approved template before the next free-text reply."
       : pendingAttachment
         ? "Add an optional note, then send the attachment."
         : "Enter sends. Shift+Enter adds a new line.";

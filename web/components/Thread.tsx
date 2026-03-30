@@ -12,8 +12,6 @@ import ThreadMessageViewport from "./thread/ThreadMessageViewport";
 import ThreadStatusStrip from "./thread/ThreadStatusStrip";
 import type { ComposerNotice, Msg, ThreadProps } from "./thread/types";
 
-const FREE_REPLY_WINDOW_MS = 24 * 60 * 60 * 1000;
-
 const isInbound = (msg: Pick<Msg, "direction">) => msg.direction === "in" || msg.direction === "inbound";
 const formatTime = (iso: string) =>
   new Date(iso).toLocaleTimeString("sw-TZ", { hour: "2-digit", minute: "2-digit" });
@@ -26,12 +24,6 @@ function getRole(msg: Msg) {
   if (isInbound(msg)) return "customer";
   if ((msg.body ?? "").startsWith("[MENU]")) return "bot";
   return "agent";
-}
-
-function getFreeReplyState(lastInboundAt?: string | null) {
-  const openedAt = lastInboundAt ? new Date(lastInboundAt).getTime() : NaN;
-  const allowed = Number.isFinite(openedAt) && openedAt + FREE_REPLY_WINDOW_MS > Date.now();
-  return { allowed, label: allowed ? "Free reply open" : "Template required" };
 }
 
 function describeTransport(msg: Msg) {
@@ -178,8 +170,8 @@ export default function Thread({ convo, onOpenContext, onToggleContext, contextO
     () => messages.findIndex((msg) => isInbound(msg) && msg.status !== "read"),
     [messages]
   );
-  const freeReplyState = useMemo(() => getFreeReplyState(convo.last_user_message_at), [convo.last_user_message_at]);
-  const composerBlockedByWindow = agentAllowed && !freeReplyState.allowed;
+  const windowState = convo.windowState;
+  const composerBlockedByWindow = agentAllowed && windowState.mode !== "freeform";
   const latestOutbound = useMemo(
     () => [...messages].reverse().find((msg) => !isInbound(msg)) ?? null,
     [messages]
@@ -199,7 +191,10 @@ export default function Thread({ convo, onOpenContext, onToggleContext, contextO
     : composerBlockedByWindow
       ? {
           key: "template_required",
-          message: "Manual free-text is paused because the conversation is outside WhatsApp's free reply window.",
+          message:
+            windowState.reason === "no_inbound_history"
+              ? "Manual free-text is paused because this conversation has no inbound WhatsApp history yet."
+              : "Manual free-text is paused because the conversation is outside WhatsApp's free reply window.",
           actionLabel: "Use template",
         }
       : null;
@@ -528,6 +523,7 @@ export default function Thread({ convo, onOpenContext, onToggleContext, contextO
         text={text}
         sending={sending}
         agentAllowed={agentAllowed}
+        windowState={windowState}
         composerBlockedByWindow={composerBlockedByWindow}
         visibleComposerNotice={visibleComposerNotice}
         fileInputRef={fileInputRef}

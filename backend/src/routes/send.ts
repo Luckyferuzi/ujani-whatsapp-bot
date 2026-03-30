@@ -18,46 +18,35 @@ import {
   type WhatsAppSendResponse,
 } from "../whatsapp.js";
 import {
-  getConversationLastInboundAt,
+  createTemplateSendEvent,
+  getConversationWindowState,
   insertOutboundMessage,
+  resolveConversationWindowStateFromLastInbound,
+  updateTemplateSendEvent,
   updateMessageTransportState,
 } from "../db/queries.js";
 
+export { FREE_REPLY_WINDOW_MS } from "../db/queries.js";
+
 export const sendRoutes = Router();
 const upload = multer();
-
-export const FREE_REPLY_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 export function getFreeReplyWindowState(
   lastInboundAt: string | null | undefined,
   now = Date.now()
 ) {
-  if (!lastInboundAt) {
-    return {
-      allowed: false,
-      state: "template_required" as const,
-      expiresAt: null,
-      remainingMs: 0,
-    };
-  }
-
-  const openedAt = new Date(lastInboundAt).getTime();
-  if (!Number.isFinite(openedAt)) {
-    return {
-      allowed: false,
-      state: "template_required" as const,
-      expiresAt: null,
-      remainingMs: 0,
-    };
-  }
-
-  const expiresAtMs = openedAt + FREE_REPLY_WINDOW_MS;
-  const remainingMs = Math.max(0, expiresAtMs - now);
+  const state = resolveConversationWindowStateFromLastInbound(lastInboundAt, now);
+  const expiresAtMs = state.expiresAt ? new Date(state.expiresAt).getTime() : null;
+  const remainingMs =
+    state.remainingSeconds != null ? Math.max(0, state.remainingSeconds * 1000) : 0;
 
   return {
-    allowed: expiresAtMs > now,
-    state: expiresAtMs > now ? ("free_reply_open" as const) : ("template_required" as const),
-    expiresAt: new Date(expiresAtMs).toISOString(),
+    allowed: state.mode === "freeform",
+    state: state.mode === "freeform" ? ("free_reply_open" as const) : ("template_required" as const),
+    expiresAt:
+      expiresAtMs != null && Number.isFinite(expiresAtMs)
+        ? new Date(expiresAtMs).toISOString()
+        : null,
     remainingMs,
   };
 }
@@ -203,6 +192,9 @@ export function buildTemplatePreview(
 }
 
 function buildTemplateUiLabel(template: InboxTemplateConfig) {
+  if (String(template.displayName ?? "").trim()) {
+    return String(template.displayName).trim();
+  }
   if (template.category === "payment_reminder") return "Payment reminder";
   if (template.category === "order_followup") return "Order follow-up";
   return "Restock / re-engagement";
@@ -271,11 +263,15 @@ async function loadConversation(id: number) {
     .first();
 }
 
+type TemplateSendTriggerSource = "inbox" | "broadcast" | "followups" | "api";
+
 export async function sendConfiguredTemplateForConversation(args: {
   conversationId: number;
   templateKey: string;
   params: Record<string, unknown>;
   app?: { get?: (name: string) => any } | null;
+  triggerSource?: TemplateSendTriggerSource;
+  actorUserId?: number | null;
 }) {
   const id = Number(args.conversationId);
   const convo = await loadConversation(id);
@@ -290,12 +286,27 @@ export async function sendConfiguredTemplateForConversation(args: {
   const templateKey = String(args.templateKey ?? "").trim();
   const template = await getInboxTemplateByKey(templateKey);
   if (!template) {
+    const windowState = await getConversationWindowState(id);
+    await createTemplateSendEvent({
+      conversationId: id,
+      customerId: Number(convo.customer_id ?? 0) || null,
+      templateKey: templateKey || null,
+      windowModeAtSend: windowState.mode,
+      sendStatus: "failed",
+      errorCode: "template_not_found",
+      errorTitle: "Template unavailable",
+      errorDetails: "Template is not available for this conversation.",
+      triggerSource: args.triggerSource ?? "api",
+      actorUserId: args.actorUserId ?? null,
+    });
     return {
       ok: false as const,
       status: 404,
       body: { error: "Template is not available for this conversation", code: "template_not_found" },
     };
   }
+
+  const windowState = await getConversationWindowState(id);
   const readiness = resolveInboxTemplateReadiness(template);
   const draftParams = normalizeTemplateParams(template.params, args.params ?? {});
   const preview = buildTemplatePreview(template, draftParams);
@@ -315,6 +326,28 @@ export async function sendConfiguredTemplateForConversation(args: {
       templateKey: template.key,
       templateName: readiness.meta_template_name,
       templateLanguage: readiness.language_code,
+    });
+
+    await createTemplateSendEvent({
+      conversationId: id,
+      messageId: Number(failedMessage.id),
+      customerId: Number(convo.customer_id ?? 0) || null,
+      templateKey: template.key,
+      templateName: readiness.meta_template_name,
+      templateLanguage: readiness.language_code,
+      templateCategory: template.category,
+      windowModeAtSend: windowState.mode,
+      sendStatus: "failed",
+      errorCode: readiness.reason_code,
+      errorTitle: readiness.status_label,
+      errorDetails:
+        readiness.status === "disabled"
+          ? "This template is disabled in setup and cannot be sent."
+          : readiness.status === "language_missing"
+          ? "This template is missing the exact WhatsApp language code needed for sending."
+          : "This internal template key is not mapped to an approved WhatsApp template name yet.",
+      triggerSource: args.triggerSource ?? "api",
+      actorUserId: args.actorUserId ?? null,
     });
 
     args.app?.get?.("io")?.emit("message.created", {
@@ -341,6 +374,21 @@ export async function sendConfiguredTemplateForConversation(args: {
 
   const validation = validateTemplateParams(template.params, args.params ?? {});
   if (!validation.ok) {
+    await createTemplateSendEvent({
+      conversationId: id,
+      customerId: Number(convo.customer_id ?? 0) || null,
+      templateKey: template.key,
+      templateName: readiness.meta_template_name,
+      templateLanguage: readiness.language_code,
+      templateCategory: template.category,
+      windowModeAtSend: windowState.mode,
+      sendStatus: "failed",
+      errorCode: "template_params_missing",
+      errorTitle: "Missing required template parameters",
+      errorDetails: `Missing required template parameters: ${validation.missing.join(", ")}`,
+      triggerSource: args.triggerSource ?? "api",
+      actorUserId: args.actorUserId ?? null,
+    });
     return {
       ok: false as const,
       status: 400,
@@ -366,8 +414,22 @@ export async function sendConfiguredTemplateForConversation(args: {
     status: "pending",
     messageKind: "template",
     templateKey: template.key,
+      templateName: metaTemplateName,
+      templateLanguage: languageCode,
+    });
+
+  const auditRow = await createTemplateSendEvent({
+    conversationId: id,
+    messageId: Number(pendingMessage.id),
+    customerId: Number(convo.customer_id ?? 0) || null,
+    templateKey: template.key,
     templateName: metaTemplateName,
     templateLanguage: languageCode,
+    templateCategory: template.category,
+    windowModeAtSend: windowState.mode,
+    sendStatus: "attempted",
+    triggerSource: args.triggerSource ?? "api",
+    actorUserId: args.actorUserId ?? null,
   });
 
   args.app?.get?.("io")?.emit("message.created", {
@@ -393,6 +455,14 @@ export async function sendConfiguredTemplateForConversation(args: {
       templateName: metaTemplateName,
       templateLanguage: languageCode,
     });
+
+    if (auditRow?.id) {
+      await updateTemplateSendEvent(auditRow.id, {
+        messageId: Number(message?.id ?? pendingMessage.id),
+        sendStatus: "accepted",
+        waMessageId: getWhatsAppMessageId(waResponse),
+      });
+    }
 
     args.app?.get?.("io")?.emit("message.created", {
       conversation_id: id,
@@ -428,6 +498,16 @@ export async function sendConfiguredTemplateForConversation(args: {
       templateName: metaTemplateName,
       templateLanguage: languageCode,
     });
+
+    if (auditRow?.id) {
+      await updateTemplateSendEvent(auditRow.id, {
+        messageId: Number(message?.id ?? pendingMessage.id),
+        sendStatus: "failed",
+        errorCode: parsed.code ?? classified.code,
+        errorTitle: parsed.title ?? classified.code,
+        errorDetails: parsed.details ?? classified.message,
+      });
+    }
 
     args.app?.get?.("io")?.emit("message.created", {
       conversation_id: id,
@@ -648,9 +728,9 @@ sendRoutes.post("/send", async (req, res) => {
     }
 
     const trimmed = String(text).trim();
-    const eligibility = getFreeReplyWindowState(await getConversationLastInboundAt(id));
+    const windowState = await getConversationWindowState(id);
 
-    if (!eligibility.allowed) {
+    if (windowState.mode !== "freeform") {
       const failedMessage = await insertOutboundMessage(id, "text", trimmed, {
         status: "failed",
         messageKind: "freeform",
@@ -730,6 +810,8 @@ sendRoutes.post("/send-template", async (req, res) => {
       templateKey: String(templateKey ?? ""),
       params: (params ?? {}) as Record<string, unknown>,
       app: req.app,
+      triggerSource: "inbox",
+      actorUserId: Number((req as any).user?.id ?? 0) || null,
     });
     return res.status(result.status).json(result.body);
   } catch (err: any) {
@@ -851,6 +933,35 @@ sendRoutes.post("/send-media", async (req, res) => {
     }
 
     const safeFilename = String(filename ?? "").trim() || "file";
+    const windowState = await getConversationWindowState(id);
+    if (windowState.mode !== "freeform") {
+      const failedMessage = await insertOutboundMessage(
+        id,
+        type,
+        encodeMediaBody({
+          kind: type,
+          mediaId,
+          filename: safeFilename,
+          caption: trimmedCaption,
+        }),
+        {
+          status: "failed",
+          messageKind: "freeform",
+          statusReason: "template_required",
+          errorTitle: "Template required",
+          errorDetails:
+            "Customer is outside the free reply window. Send a WhatsApp template before another manual media reply.",
+        }
+      );
+
+      req.app.get("io")?.emit("message.created", {
+        conversation_id: id,
+        message: failedMessage,
+      });
+
+      return sendTemplateRequired(res, failedMessage);
+    }
+
     const pendingMessage = await insertOutboundMessage(
       id,
       type,
