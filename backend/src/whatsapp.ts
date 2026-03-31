@@ -554,36 +554,129 @@ export type CatalogProduct = {
   currency?: string;
 };
 
+type CatalogLookupContext = {
+  configuredPhoneNumberId: string | null;
+  requestedWabaId: string | null;
+  configuredWabaId: string | null;
+  phoneDerivedWabaId: string | null;
+};
+
+function logCatalogLookup(stage: string, payload: Record<string, unknown>) {
+  console.info("[catalog-detect]", stage, payload);
+}
+
+export function buildCatalogLookupCandidates(args: {
+  requestedWabaId?: string | null;
+  configuredWabaId?: string | null;
+  phoneDerivedWabaId?: string | null;
+}) {
+  return Array.from(
+    new Set(
+      [args.requestedWabaId, args.configuredWabaId, args.phoneDerivedWabaId]
+        .map((value) => String(value ?? "").trim())
+        .filter((value) => value.length > 0)
+    )
+  );
+}
+
+async function deriveWabaIdFromPhoneNumber(phoneNumberId: string | null): Promise<string | null> {
+  const phoneId = String(phoneNumberId ?? "").trim();
+  if (!phoneId) return null;
+
+  const phoneMeta = await apiGet(
+    `${phoneId}?fields=id,display_phone_number,verified_name,whatsapp_business_account{id,name}`
+  );
+
+  logCatalogLookup("phone_lookup_response", {
+    phoneNumberId: phoneId,
+    rawResponse: phoneMeta,
+  });
+
+  const discovered = String(phoneMeta?.whatsapp_business_account?.id ?? "").trim();
+  return discovered || null;
+}
+
 export async function getConnectedCatalogId(
   wabaId?: string | null
 ): Promise<string | null> {
-  let id = (wabaId ?? getWabaIdEffective() ?? "").toString().trim();
+  const configuredPhoneNumberId = getPhoneNumberIdEffective();
+  const requestedWabaId = String(wabaId ?? "").trim() || null;
+  const configuredWabaId = String(getWabaIdEffective() ?? "").trim() || null;
 
-  // Fallback: discover WABA id from configured phone number id.
-  if (!id) {
-    const phoneId = getPhoneNumberIdEffective();
-    if (phoneId) {
-      try {
-        const phoneMeta = await apiGet(
-          `${phoneId}?fields=whatsapp_business_account`
-        );
-        const discovered = String(
-          phoneMeta?.whatsapp_business_account?.id ?? ""
-        ).trim();
-        if (discovered) id = discovered;
-      } catch {
-        // ignore; final null return handled by callers
-      }
+  let phoneDerivedWabaId: string | null = null;
+  if (configuredPhoneNumberId) {
+    try {
+      phoneDerivedWabaId = await deriveWabaIdFromPhoneNumber(configuredPhoneNumberId);
+    } catch (error: any) {
+      logCatalogLookup("phone_lookup_error", {
+        phoneNumberId: configuredPhoneNumberId,
+        error: error?.message ?? String(error),
+        payload: error?.payload ?? null,
+      });
     }
   }
 
-  if (!id) return null;
+  const context: CatalogLookupContext = {
+    configuredPhoneNumberId,
+    requestedWabaId,
+    configuredWabaId,
+    phoneDerivedWabaId,
+  };
 
-  const res = await apiGet(`${id}/product_catalogs?fields=id,name`);
-  const data = Array.isArray(res?.data) ? res.data : [];
-  const first = data[0];
-  const catalogId = (first?.id ?? "").toString().trim();
-  return catalogId || null;
+  const candidates = buildCatalogLookupCandidates({
+    requestedWabaId,
+    configuredWabaId,
+    phoneDerivedWabaId,
+  });
+
+  logCatalogLookup("lookup_start", {
+    ...context,
+    candidates,
+  });
+
+  if (candidates.length === 0) {
+    logCatalogLookup("lookup_aborted", {
+      ...context,
+      reason: "no_waba_id_candidates",
+    });
+    return null;
+  }
+
+  for (const candidate of candidates) {
+    try {
+      const res = await apiGet(`${candidate}/product_catalogs?fields=id,name`);
+      logCatalogLookup("product_catalogs_response", {
+        ...context,
+        wabaIdUsed: candidate,
+        rawResponse: res,
+      });
+
+      const data = Array.isArray(res?.data) ? res.data : [];
+      const first = data[0];
+      const catalogId = String(first?.id ?? "").trim();
+      if (catalogId) {
+        logCatalogLookup("catalog_detected", {
+          ...context,
+          wabaIdUsed: candidate,
+          catalogId,
+        });
+        return catalogId;
+      }
+    } catch (error: any) {
+      logCatalogLookup("product_catalogs_error", {
+        ...context,
+        wabaIdUsed: candidate,
+        error: error?.message ?? String(error),
+        payload: error?.payload ?? null,
+      });
+    }
+  }
+
+  logCatalogLookup("catalog_not_found", {
+    ...context,
+    reason: "empty_or_failed_product_catalogs",
+  });
+  return null;
 }
 
 export async function listCatalogProducts(

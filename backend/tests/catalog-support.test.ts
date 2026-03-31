@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  buildCatalogLookupCandidates,
   buildMultiProductMessagePayload,
   buildSingleProductMessagePayload,
 } from "../src/whatsapp.ts";
@@ -42,4 +43,14 @@ test("buildMultiProductMessagePayload groups retailer ids into product list sect
     { product_retailer_id: "SKU-001" },
     { product_retailer_id: "SKU-002" },
   ]);
+});
+
+test("buildCatalogLookupCandidates prefers unique configured and phone-derived WABA ids", () => {
+  const candidates = buildCatalogLookupCandidates({
+    requestedWabaId: "waba-requested",
+    configuredWabaId: "waba-requested",
+    phoneDerivedWabaId: "waba-derived",
+  });
+
+  assert.deepEqual(candidates, ["waba-requested", "waba-derived"]);
 });
