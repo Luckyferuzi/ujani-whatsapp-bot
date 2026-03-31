@@ -19,6 +19,7 @@ type ThreadComposerProps = {
     mimeType: string;
   } | null;
   onOpenTemplate: () => void;
+  onOpenCatalog: () => void;
   onClearAttachment: () => void;
   onDismissNotice: (key: string) => void;
   onRequestAgentHint: () => void;
@@ -38,6 +39,7 @@ export default function ThreadComposer({
   inputRef,
   pendingAttachment,
   onOpenTemplate,
+  onOpenCatalog,
   onClearAttachment,
   onDismissNotice,
   onRequestAgentHint,
@@ -129,8 +131,20 @@ export default function ThreadComposer({
               <button type="button" className="thread-dock-action" onClick={onOpenTemplate}>
                 Template
               </button>
-              <button type="button" className="thread-dock-action thread-dock-action--placeholder" disabled>
-                Catalog soon
+              <button
+                type="button"
+                className="thread-dock-action"
+                onClick={() => {
+                  if (!agentAllowed) {
+                    onRequestAgentHint();
+                    return;
+                  }
+                  if (composerBlockedByWindow) return;
+                  onOpenCatalog();
+                }}
+                disabled={composerBlockedByWindow}
+              >
+                Catalog
               </button>
             </div>
           </div>

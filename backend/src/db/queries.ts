@@ -452,6 +452,43 @@ export interface ProductRow {
   discount_is_active?: boolean | null;
 }
 
+export type ProductCatalogLinkRow = {
+  id: number;
+  product_id: number;
+  sku: string;
+  meta_catalog_id: string | null;
+  meta_retailer_id: string;
+  meta_product_id: string | null;
+  sync_status: string;
+  last_synced_at: string | null;
+  last_error: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CatalogSendKind = "catalog" | "single_product" | "multi_product";
+
+export type CatalogSendEventRow = {
+  id: number;
+  conversation_id: number;
+  message_id: number | null;
+  customer_id: number | null;
+  send_kind: CatalogSendKind;
+  product_id: number | null;
+  product_ids_json: number[] | null;
+  meta_catalog_id: string | null;
+  meta_retailer_id: string | null;
+  wa_message_id: string | null;
+  send_status: string;
+  error_code: string | null;
+  error_title: string | null;
+  error_details: string | null;
+  trigger_source: string;
+  actor_user_id: number | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export async function listActiveProducts(): Promise<ProductRow[]> {
   const rows = await db("products as p")
     .leftJoin("product_discounts as d", "d.product_id", "p.id")
@@ -513,6 +550,100 @@ export async function findProductById(
 ): Promise<ProductRow | null> {
   const row = await db<ProductRow>("products").where({ id }).first();
   return row ?? null;
+}
+
+export async function getProductCatalogLinkByProductId(
+  productId: number
+): Promise<ProductCatalogLinkRow | null> {
+  const row = await db("product_catalog_links")
+    .where({ product_id: productId })
+    .first();
+  return (row as ProductCatalogLinkRow) ?? null;
+}
+
+export async function getProductCatalogLinkBySku(
+  sku: string
+): Promise<ProductCatalogLinkRow | null> {
+  const trimmedSku = String(sku ?? "").trim();
+  if (!trimmedSku) return null;
+
+  const row = await db("product_catalog_links")
+    .whereRaw("LOWER(sku) = LOWER(?)", [trimmedSku])
+    .first();
+  return (row as ProductCatalogLinkRow) ?? null;
+}
+
+export async function listProductCatalogLinksSummary() {
+  const [linkedCounts, totalProducts] = await Promise.all([
+    db("product_catalog_links")
+      .select("sync_status")
+      .count<{ sync_status: string; count: string }[]>("id as count")
+      .groupBy("sync_status"),
+    db("products").count<{ count: string }[]>("id as count").first(),
+  ]);
+
+  return {
+    totalProducts: Number(totalProducts?.count ?? 0),
+    linkedProducts: linkedCounts.reduce(
+      (sum, row) => sum + Number((row as any).count ?? 0),
+      0
+    ),
+    byStatus: Object.fromEntries(
+      linkedCounts.map((row) => [String((row as any).sync_status ?? "unknown"), Number((row as any).count ?? 0)])
+    ) as Record<string, number>,
+  };
+}
+
+export async function upsertProductCatalogLink(input: {
+  productId: number;
+  sku: string;
+  metaCatalogId?: string | null;
+  metaRetailerId: string;
+  metaProductId?: string | null;
+  syncStatus: string;
+  lastSyncedAt?: string | Date | null;
+  lastError?: string | null;
+}) {
+  const payload = {
+    product_id: input.productId,
+    sku: String(input.sku ?? "").trim(),
+    meta_catalog_id: input.metaCatalogId ?? null,
+    meta_retailer_id: String(input.metaRetailerId ?? "").trim(),
+    meta_product_id: input.metaProductId ?? null,
+    sync_status: input.syncStatus,
+    last_synced_at: input.lastSyncedAt ?? null,
+    last_error: input.lastError ?? null,
+    updated_at: db.fn.now(),
+  };
+
+  const [row] = await db("product_catalog_links")
+    .insert({
+      ...payload,
+      created_at: db.fn.now(),
+    })
+    .onConflict("product_id")
+    .merge(payload)
+    .returning("*");
+
+  return (row as ProductCatalogLinkRow) ?? null;
+}
+
+export async function markProductCatalogLinkFailed(input: {
+  productId: number;
+  sku: string;
+  metaCatalogId?: string | null;
+  metaRetailerId?: string | null;
+  lastError: string;
+}) {
+  return upsertProductCatalogLink({
+    productId: input.productId,
+    sku: input.sku,
+    metaCatalogId: input.metaCatalogId ?? null,
+    metaRetailerId: String(input.metaRetailerId ?? input.sku ?? "").trim(),
+    syncStatus: "failed",
+    lastError: input.lastError,
+    lastSyncedAt: null,
+  });
 }
 
 
@@ -1063,6 +1194,79 @@ export async function updateTemplateSendEvent(
     .returning("*");
 
   return (updated ?? null) as TemplateSendEventRow | null;
+}
+
+export async function createCatalogSendEvent(input: {
+  conversationId: number;
+  messageId?: number | null;
+  customerId?: number | null;
+  sendKind: CatalogSendKind;
+  productId?: number | null;
+  productIds?: number[] | null;
+  metaCatalogId?: string | null;
+  metaRetailerId?: string | null;
+  waMessageId?: string | null;
+  sendStatus: string;
+  errorCode?: string | null;
+  errorTitle?: string | null;
+  errorDetails?: string | null;
+  triggerSource: string;
+  actorUserId?: number | null;
+}) {
+  const [inserted] = await db("catalog_send_events")
+    .insert({
+      conversation_id: input.conversationId,
+      message_id: input.messageId ?? null,
+      customer_id: input.customerId ?? null,
+      send_kind: input.sendKind,
+      product_id: input.productId ?? null,
+      product_ids_json:
+        Array.isArray(input.productIds) && input.productIds.length > 0
+          ? JSON.stringify(input.productIds)
+          : null,
+      meta_catalog_id: input.metaCatalogId ?? null,
+      meta_retailer_id: input.metaRetailerId ?? null,
+      wa_message_id: input.waMessageId ?? null,
+      send_status: input.sendStatus,
+      error_code: input.errorCode ?? null,
+      error_title: input.errorTitle ?? null,
+      error_details: input.errorDetails ?? null,
+      trigger_source: input.triggerSource,
+      actor_user_id: input.actorUserId ?? null,
+    })
+    .returning("*");
+
+  return (inserted ?? null) as CatalogSendEventRow | null;
+}
+
+export async function updateCatalogSendEvent(
+  id: number,
+  input: {
+    messageId?: number | null;
+    waMessageId?: string | null;
+    sendStatus?: string;
+    errorCode?: string | null;
+    errorTitle?: string | null;
+    errorDetails?: string | null;
+  }
+) {
+  const patch: Record<string, unknown> = {
+    updated_at: db.fn.now(),
+  };
+
+  if (input.messageId !== undefined) patch.message_id = input.messageId;
+  if (input.waMessageId !== undefined) patch.wa_message_id = input.waMessageId;
+  if (input.sendStatus !== undefined) patch.send_status = input.sendStatus;
+  if (input.errorCode !== undefined) patch.error_code = input.errorCode;
+  if (input.errorTitle !== undefined) patch.error_title = input.errorTitle;
+  if (input.errorDetails !== undefined) patch.error_details = input.errorDetails;
+
+  const [updated] = await db("catalog_send_events")
+    .where({ id })
+    .update(patch)
+    .returning("*");
+
+  return (updated ?? null) as CatalogSendEventRow | null;
 }
 
 export async function updateMessageTransportState(

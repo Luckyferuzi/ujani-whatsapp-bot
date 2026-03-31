@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { api, API, type ApiError } from "@/lib/api";
 import { formatPhonePretty } from "@/lib/phone";
 import { socket } from "@/lib/socket";
+import CatalogSendModal from "./CatalogSendModal";
 import TemplateSendModal from "./TemplateSendModal";
 import ThreadComposer from "./thread/ThreadComposer";
 import ThreadHeader from "./thread/ThreadHeader";
@@ -153,6 +154,7 @@ export default function Thread({ convo, onOpenContext, onToggleContext, contextO
   const [sending, setSending] = useState(false);
   const [showBotModeHint, setShowBotModeHint] = useState(false);
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
+  const [catalogModalOpen, setCatalogModalOpen] = useState(false);
   const [dismissedComposerNoticeKey, setDismissedComposerNoticeKey] = useState<string | null>(null);
   const [activeMediaActionsId, setActiveMediaActionsId] = useState<string | number | null>(null);
   const [expandedFailureId, setExpandedFailureId] = useState<string | number | null>(null);
@@ -411,6 +413,7 @@ export default function Thread({ convo, onOpenContext, onToggleContext, contextO
     setText("");
     setShowBotModeHint(false);
     setTemplateModalOpen(false);
+    setCatalogModalOpen(false);
     setDismissedComposerNoticeKey(null);
     setPendingAttachment(null);
     setExpandedFailureId(null);
@@ -522,6 +525,7 @@ export default function Thread({ convo, onOpenContext, onToggleContext, contextO
         inputRef={inputRef}
         pendingAttachment={pendingAttachment}
         onOpenTemplate={() => setTemplateModalOpen(true)}
+        onOpenCatalog={() => setCatalogModalOpen(true)}
         onClearAttachment={() => setPendingAttachment(null)}
         onDismissNotice={(key) => setDismissedComposerNoticeKey(key)}
         onRequestAgentHint={() => setShowBotModeHint(true)}
@@ -535,6 +539,16 @@ export default function Thread({ convo, onOpenContext, onToggleContext, contextO
         open={templateModalOpen}
         onClose={() => setTemplateModalOpen(false)}
         onSent={loadMessages}
+      />
+
+      <CatalogSendModal
+        conversationId={convo.id}
+        open={catalogModalOpen}
+        onClose={() => setCatalogModalOpen(false)}
+        onSent={async () => {
+          await loadMessages();
+          toast.success("Catalog content shared.");
+        }}
       />
     </div>
   );

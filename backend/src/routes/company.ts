@@ -38,6 +38,7 @@ import { setJsonSetting } from "../db/settings.js";
 import {
   getOrCreateConversationForPhone,
   insertOutboundMessage,
+  listProductCatalogLinksSummary,
   listWhatsAppPhoneNumbers,
   reconcileCustomersAndConversations,
   setDefaultWhatsAppPhoneNumber,
@@ -651,10 +652,16 @@ companyRoutes.get("/setup/catalog-diagnostics", async (_req, res) => {
     const configuredWabaId = getWabaIdEffective();
     const configuredPhoneId = getPhoneNumberIdEffective();
 
-    const [phoneSummary, catalogId] = await Promise.all([
+    const [phoneSummary, catalogId, linkSummary] = await Promise.all([
       getPhoneNumberSummary().catch(() => null),
       getConnectedCatalogId(configuredWabaId ?? null).catch(() => null),
+      listProductCatalogLinksSummary().catch(() => ({
+        totalProducts: 0,
+        linkedProducts: 0,
+        byStatus: {},
+      })),
     ]);
+    const inboxSendUsable = catalogEnabled && !!catalogId && !!configuredPhoneId;
 
     const issues: Array<{ level: "error" | "warn"; code: string; message: string }> = [];
     if (!catalogEnabled) {
@@ -685,6 +692,13 @@ companyRoutes.get("/setup/catalog-diagnostics", async (_req, res) => {
         message: "No connected product catalog found for this WhatsApp business.",
       });
     }
+    if (catalogEnabled && linkSummary.totalProducts > 0 && linkSummary.linkedProducts === 0) {
+      issues.push({
+        level: "warn",
+        code: "no_local_catalog_links",
+        message: "Catalog is connected, but no local products have durable catalog linkage yet.",
+      });
+    }
 
     return res.json({
       ok: true,
@@ -694,7 +708,9 @@ companyRoutes.get("/setup/catalog-diagnostics", async (_req, res) => {
         configured_waba_id: s.waba_id ?? null,
         graph_phone_summary: phoneSummary,
         connected_catalog_id: catalogId,
-        healthy: catalogEnabled && !!catalogId && !!configuredPhoneId,
+        inbox_send_usable: inboxSendUsable,
+        product_link_summary: linkSummary,
+        healthy: inboxSendUsable,
         issues,
       },
     });

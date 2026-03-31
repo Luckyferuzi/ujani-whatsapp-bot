@@ -352,6 +352,155 @@ export async function sendCatalogMessage(
   return (await apiFetch(`${phoneId}/messages`, payload)) as WhatsAppSendResponse | null;
 }
 
+export function buildSingleProductMessagePayload(args: {
+  to: string;
+  body: string;
+  catalogId: string;
+  retailerId: string;
+}): Record<string, unknown> {
+  return {
+    messaging_product: "whatsapp",
+    to: args.to,
+    type: "interactive",
+    interactive: {
+      type: "product",
+      body: { text: args.body || " " },
+      action: {
+        catalog_id: args.catalogId,
+        product_retailer_id: args.retailerId,
+      },
+    },
+  };
+}
+
+export async function sendSingleProductMessage(
+  to: string,
+  body: string,
+  opts: {
+    catalogId: string;
+    retailerId: string;
+    phoneNumberId?: string | null;
+  }
+): Promise<WhatsAppSendResponse | null> {
+  const phoneId = resolvePhoneNumberId(opts?.phoneNumberId ?? null, to);
+  if (!phoneId) {
+    throw new Error(
+      "[whatsapp] PHONE_NUMBER_ID missing; cannot send single product message. Set PHONE_NUMBER_ID in Setup or .env."
+    );
+  }
+
+  const catalogId = String(opts.catalogId ?? "").trim();
+  const retailerId = String(opts.retailerId ?? "").trim();
+  if (!catalogId) throw new Error("missing_catalog_id");
+  if (!retailerId) throw new Error("missing_retailer_id");
+
+  const payload = buildSingleProductMessagePayload({
+    to,
+    body,
+    catalogId,
+    retailerId,
+  });
+
+  return (await apiFetch(`${phoneId}/messages`, payload)) as WhatsAppSendResponse | null;
+}
+
+export function buildMultiProductMessagePayload(args: {
+  to: string;
+  header?: string | null;
+  body: string;
+  footer?: string | null;
+  catalogId: string;
+  sections: Array<{
+    title: string;
+    retailerIds: string[];
+  }>;
+}): Record<string, unknown> {
+  const headerText = String(args.header ?? "").trim();
+  const footerText = String(args.footer ?? "").trim();
+
+  const payload: Record<string, unknown> = {
+    messaging_product: "whatsapp",
+    to: args.to,
+    type: "interactive",
+    interactive: {
+      type: "product_list",
+      body: { text: args.body || " " },
+      action: {
+        catalog_id: args.catalogId,
+        sections: args.sections.map((section) => ({
+          title: section.title,
+          product_items: section.retailerIds.map((retailerId) => ({
+            product_retailer_id: retailerId,
+          })),
+        })),
+      },
+    },
+  };
+
+  const interactive = payload.interactive as Record<string, unknown>;
+  if (headerText) {
+    interactive.header = { type: "text", text: headerText };
+  }
+  if (footerText) {
+    interactive.footer = { text: footerText };
+  }
+
+  return payload;
+}
+
+export async function sendMultiProductMessage(
+  to: string,
+  body: string,
+  opts: {
+    catalogId: string;
+    sections: Array<{
+      title: string;
+      retailerIds: string[];
+    }>;
+    header?: string | null;
+    footer?: string | null;
+    phoneNumberId?: string | null;
+  }
+): Promise<WhatsAppSendResponse | null> {
+  const phoneId = resolvePhoneNumberId(opts?.phoneNumberId ?? null, to);
+  if (!phoneId) {
+    throw new Error(
+      "[whatsapp] PHONE_NUMBER_ID missing; cannot send multi-product message. Set PHONE_NUMBER_ID in Setup or .env."
+    );
+  }
+
+  const catalogId = String(opts.catalogId ?? "").trim();
+  if (!catalogId) throw new Error("missing_catalog_id");
+
+  const sections = (opts.sections ?? [])
+    .map((section) => ({
+      title: String(section?.title ?? "").trim() || "Products",
+      retailerIds: Array.from(
+        new Set(
+          (section?.retailerIds ?? [])
+            .map((retailerId) => String(retailerId ?? "").trim())
+            .filter((retailerId) => retailerId.length > 0)
+        )
+      ),
+    }))
+    .filter((section) => section.retailerIds.length > 0);
+
+  if (sections.length === 0) {
+    throw new Error("missing_product_items");
+  }
+
+  const payload = buildMultiProductMessagePayload({
+    to,
+    body,
+    catalogId,
+    sections,
+    header: opts.header ?? null,
+    footer: opts.footer ?? null,
+  });
+
+  return (await apiFetch(`${phoneId}/messages`, payload)) as WhatsAppSendResponse | null;
+}
+
 /**
  * CTA URL button message. WhatsApp supports only a single URL button.
  */

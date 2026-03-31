@@ -2,27 +2,39 @@
 import e, { Router, type Request, type Response } from "express";
 import db from "../db/knex.js";
 import {
+  getWhatsAppMessageId,
   sendText,
   downloadMedia,
   getConnectedCatalogId,
   listCatalogProducts,
+  sendCatalogMessage,
+  sendMultiProductMessage,
+  sendSingleProductMessage,
   upsertCatalogProduct,
 } from "../whatsapp.js";
 import { emit } from "../sockets.js";
 import {
   applyOrderStatusAudit,
   applyPaymentStatusUpdate,
+  createCatalogSendEvent,
   createInternalNote,
   createManualOrderFromSkus,
   createOrderWithPayment,
   getConversationWindowState,
   getOrdersForCustomer,
+  getProductCatalogLinkByProductId,
+  getProductCatalogLinkBySku,
+  listProductCatalogLinksSummary,
   insertOutboundMessage,
+  markProductCatalogLinkFailed,
   listInternalNotesForOrder,
   listOutstandingOrdersForCustomer,
   listTimelineForConversation,
   listTimelineForOrder,
+  findProductById,
   reconcileCustomersAndConversations,
+  updateCatalogSendEvent,
+  upsertProductCatalogLink,
 } from "../db/queries.js";
 import { t, Lang } from "../i18n.js";
 import { z } from "zod";
@@ -44,7 +56,7 @@ import {
   type BroadcastAudienceKey,
   type FollowupQueueKey,
 } from "../services/followups.js";
-import { sendConfiguredTemplateForConversation } from "./send.js";
+import { parseWhatsAppApiError, sendConfiguredTemplateForConversation } from "./send.js";
 
 
 export const inboxRoutes = Router();
@@ -74,6 +86,287 @@ async function maybeReconcileInboxConversations() {
   }
 
   await reconcilePromise;
+}
+
+type InboxCatalogSendKind = "catalog" | "single_product" | "multi_product";
+
+async function loadCatalogConversation(id: number) {
+  return db("conversations as c")
+    .leftJoin("customers as u", "u.id", "c.customer_id")
+    .where("c.id", id)
+    .select("c.id", "c.agent_allowed", "c.phone_number_id", "c.customer_id", "u.wa_id", "u.name")
+    .first();
+}
+
+function buildCatalogSharePreview(args: {
+  kind: InboxCatalogSendKind;
+  productNames?: string[];
+}) {
+  const names = (args.productNames ?? []).filter(Boolean);
+  if (args.kind === "catalog") {
+    return "[CATALOG] Shared the full WhatsApp catalog.";
+  }
+  if (args.kind === "single_product") {
+    return `[PRODUCT] Shared ${names[0] ?? "a catalog product"}.`;
+  }
+  return `[PRODUCT_LIST] Shared ${names.length} catalog products${names.length ? `: ${names.join(", ")}` : ""}.`;
+}
+
+async function syncProductCatalogLink(args: {
+  productId: number;
+  sku: string;
+  catalogId?: string | null;
+  retailerId?: string | null;
+  metaProductId?: string | null;
+  status: "synced" | "imported" | "failed";
+  error?: string | null;
+}) {
+  if (args.status === "failed") {
+    return markProductCatalogLinkFailed({
+      productId: args.productId,
+      sku: args.sku,
+      metaCatalogId: args.catalogId ?? null,
+      metaRetailerId: args.retailerId ?? args.sku,
+      lastError: args.error ?? "catalog_sync_failed",
+    });
+  }
+
+  return upsertProductCatalogLink({
+    productId: args.productId,
+    sku: args.sku,
+    metaCatalogId: args.catalogId ?? null,
+    metaRetailerId: args.retailerId ?? args.sku,
+    metaProductId: args.metaProductId ?? null,
+    syncStatus: args.status,
+    lastSyncedAt: new Date().toISOString(),
+    lastError: null,
+  });
+}
+
+async function resolveCatalogProductMapping(productId: number) {
+  const product = await findProductById(productId);
+  if (!product) return null;
+
+  const link =
+    (await getProductCatalogLinkByProductId(productId)) ??
+    (await getProductCatalogLinkBySku(product.sku));
+
+  return {
+    product,
+    link,
+    retailerId:
+      String(link?.meta_retailer_id ?? product.sku ?? "")
+        .trim() || null,
+  };
+}
+
+async function sendCatalogShareResponse(args: {
+  req: Request;
+  res: Response;
+  conversationId: number;
+  sendKind: InboxCatalogSendKind;
+  messageBody: string;
+  send: (convo: any) => Promise<any>;
+  productId?: number | null;
+  productIds?: number[] | null;
+  metaCatalogId?: string | null;
+  metaRetailerId?: string | null;
+}) {
+  const convo = await loadCatalogConversation(args.conversationId);
+
+  if (!convo) {
+    return args.res.status(404).json({ error: "Conversation not found" });
+  }
+
+  if (!convo.agent_allowed) {
+    return args.res.status(403).json({
+      error:
+        "Agent is not allowed for this conversation (customer has not chosen Ongea na mhudumu).",
+    });
+  }
+
+  if (!convo.wa_id) {
+    return args.res.status(400).json({ error: "Customer wa_id missing; cannot send" });
+  }
+
+  const windowState = await getConversationWindowState(args.conversationId);
+  if (windowState.mode !== "freeform") {
+    const failedMessage = await insertOutboundMessage(
+      args.conversationId,
+      "interactive",
+      args.messageBody,
+      {
+        status: "failed",
+        messageKind: "freeform",
+        statusReason: "template_required",
+        errorTitle: "Template required",
+        errorDetails:
+          "Customer is outside the free reply window. Send a WhatsApp template before another manual catalog or product share.",
+      }
+    );
+
+    await createCatalogSendEvent({
+      conversationId: args.conversationId,
+      messageId: Number(failedMessage.id),
+      customerId: Number((convo as any).customer_id ?? 0) || null,
+      sendKind: args.sendKind,
+      productId: args.productId ?? null,
+      productIds: args.productIds ?? null,
+      metaCatalogId: args.metaCatalogId ?? null,
+      metaRetailerId: args.metaRetailerId ?? null,
+      sendStatus: "failed",
+      errorCode: "template_required",
+      errorTitle: "Template required",
+      errorDetails:
+        "Customer is outside the free reply window. Send a WhatsApp template before another manual catalog or product share.",
+      triggerSource: "inbox",
+      actorUserId: Number((args.req as any).user?.id ?? 0) || null,
+    });
+
+    args.req.app.get("io")?.emit("message.created", {
+      conversation_id: args.conversationId,
+      message: failedMessage,
+    });
+
+    return args.res.status(409).json({
+      ok: false,
+      code: "template_required",
+      message: "Customer is outside the free reply window",
+      error: "Customer is outside the free reply window",
+      transport: failedMessage,
+    });
+  }
+
+  const pendingMessage = await insertOutboundMessage(
+    args.conversationId,
+    "interactive",
+    args.messageBody,
+    {
+      status: "pending",
+      messageKind: "freeform",
+    }
+  );
+
+  const auditEvent = await createCatalogSendEvent({
+    conversationId: args.conversationId,
+    messageId: Number(pendingMessage.id),
+    customerId: Number((convo as any).customer_id ?? 0) || null,
+    sendKind: args.sendKind,
+    productId: args.productId ?? null,
+    productIds: args.productIds ?? null,
+    metaCatalogId: args.metaCatalogId ?? null,
+    metaRetailerId: args.metaRetailerId ?? null,
+    sendStatus: "attempted",
+    triggerSource: "inbox",
+    actorUserId: Number((args.req as any).user?.id ?? 0) || null,
+  });
+
+  args.req.app.get("io")?.emit("message.created", {
+    conversation_id: args.conversationId,
+    message: pendingMessage,
+  });
+
+  try {
+    const waResponse = await args.send(convo);
+    const waMessageId = getWhatsAppMessageId(waResponse);
+
+    const message = await db("messages")
+      .where({ id: Number(pendingMessage.id) })
+      .update({
+        wa_message_id: waMessageId,
+        status: "sent",
+        message_kind: "freeform",
+        status_reason: null,
+        error_code: null,
+        error_title: null,
+        error_details: null,
+      })
+      .returning([
+        "id",
+        "conversation_id",
+        "wa_message_id",
+        "direction",
+        "type",
+        "body",
+        "status",
+        "message_kind",
+        "status_reason",
+        "error_code",
+        "error_title",
+        "error_details",
+        "template_key",
+        "template_name",
+        "template_language",
+        "created_at",
+      ])
+      .then((rows) => rows[0] ?? null);
+
+    if (auditEvent?.id) {
+      await updateCatalogSendEvent(auditEvent.id, {
+        messageId: Number(pendingMessage.id),
+        waMessageId,
+        sendStatus: "accepted",
+        errorCode: null,
+        errorTitle: null,
+        errorDetails: null,
+      });
+    }
+
+    args.req.app.get("io")?.emit("message.created", {
+      conversation_id: args.conversationId,
+      message: message ?? pendingMessage,
+    });
+
+    return args.res.json({ ok: true, message: message ?? pendingMessage, transport: waResponse });
+  } catch (err: any) {
+    const parsed = parseWhatsAppApiError(err);
+    const message = await db("messages")
+      .where({ id: Number(pendingMessage.id) })
+      .update({
+        status: "failed",
+        message_kind: "freeform",
+        status_reason: "transport_failed",
+        error_code: parsed.code,
+        error_title: parsed.title,
+        error_details: parsed.details,
+      })
+      .returning([
+        "id",
+        "conversation_id",
+        "wa_message_id",
+        "direction",
+        "type",
+        "body",
+        "status",
+        "message_kind",
+        "status_reason",
+        "error_code",
+        "error_title",
+        "error_details",
+        "template_key",
+        "template_name",
+        "template_language",
+        "created_at",
+      ])
+      .then((rows) => rows[0] ?? null);
+
+    if (auditEvent?.id) {
+      await updateCatalogSendEvent(auditEvent.id, {
+        messageId: Number(pendingMessage.id),
+        sendStatus: "failed",
+        errorCode: parsed.code,
+        errorTitle: parsed.title,
+        errorDetails: parsed.details,
+      });
+    }
+
+    args.req.app.get("io")?.emit("message.created", {
+      conversation_id: args.conversationId,
+      message: message ?? pendingMessage,
+    });
+
+    throw err;
+  }
 }
 
 const updateOrderStatusSchema = z.object({
@@ -1735,6 +2028,7 @@ inboxRoutes.post("/catalog/import", async (_req, res) => {
       const image_url = it?.image_url ? String(it.image_url).trim() : null;
 
       const exists = await db("products").where({ sku }).first("id");
+      const metaProductId = String(it?.id ?? "").trim() || null;
 
       if (exists) {
         await db("products")
@@ -1746,9 +2040,17 @@ inboxRoutes.post("/catalog/import", async (_req, res) => {
             image_url: image_url ?? db.raw("products.image_url"),
             updated_at: db.fn.now(),
           });
+        await syncProductCatalogLink({
+          productId: Number((exists as any).id),
+          sku,
+          catalogId,
+          retailerId: sku,
+          metaProductId,
+          status: "imported",
+        });
         updated++;
       } else {
-        await db("products").insert({
+        const [createdProduct] = await db("products").insert({
           sku,
           name,
           price_tzs: priceTzs || 0,
@@ -1764,6 +2066,14 @@ inboxRoutes.post("/catalog/import", async (_req, res) => {
           stock_qty: 0,
           created_at: db.fn.now(),
           updated_at: db.fn.now(),
+        }, ["id"]);
+        await syncProductCatalogLink({
+          productId: Number((createdProduct as any).id),
+          sku,
+          catalogId,
+          retailerId: sku,
+          metaProductId,
+          status: "imported",
         });
         created++;
       }
@@ -1778,11 +2088,189 @@ inboxRoutes.post("/catalog/import", async (_req, res) => {
   }
 });
 
+inboxRoutes.post("/send-catalog", async (req, res) => {
+  try {
+    const conversationId = Number(req.body?.conversationId);
+    if (!Number.isFinite(conversationId)) {
+      return res.status(400).json({ error: "Invalid conversationId" });
+    }
+
+    if (!getCatalogEnabledEffective()) {
+      return res.status(403).json({ error: "catalog_disabled" });
+    }
+
+    const catalogId = await getConnectedCatalogId();
+    if (!catalogId) {
+      return res.status(400).json({ error: "no_connected_catalog" });
+    }
+
+    const body =
+      String(req.body?.body ?? "").trim() ||
+      "Browse our catalog and message me if you want help choosing the right product.";
+    const thumbnailRetailerId =
+      String(req.body?.thumbnailRetailerId ?? "").trim() || null;
+
+    return sendCatalogShareResponse({
+      req,
+      res,
+      conversationId,
+      sendKind: "catalog",
+      messageBody: buildCatalogSharePreview({ kind: "catalog" }),
+      metaCatalogId: catalogId,
+      metaRetailerId: thumbnailRetailerId,
+      send: async (convo) =>
+        sendCatalogMessage(String(convo?.wa_id ?? ""), body, {
+          phoneNumberId: convo?.phone_number_id ?? null,
+          thumbnailProductRetailerId: thumbnailRetailerId,
+        }),
+    });
+  } catch (err: any) {
+    console.error("POST /api/send-catalog failed", err);
+    return res.status(500).json({ error: err?.message ?? "Failed to send catalog" });
+  }
+});
+
+inboxRoutes.post("/send-product", async (req, res) => {
+  try {
+    const conversationId = Number(req.body?.conversationId);
+    const productId = Number(req.body?.productId);
+    if (!Number.isFinite(conversationId) || !Number.isFinite(productId)) {
+      return res.status(400).json({ error: "Invalid conversationId or productId" });
+    }
+
+    if (!getCatalogEnabledEffective()) {
+      return res.status(403).json({ error: "catalog_disabled" });
+    }
+
+    const catalogId = await getConnectedCatalogId();
+    if (!catalogId) {
+      return res.status(400).json({ error: "no_connected_catalog" });
+    }
+
+    const mapped = await resolveCatalogProductMapping(productId);
+    if (!mapped) {
+      return res.status(404).json({ error: "Product not found" });
+    }
+    if (!mapped.retailerId) {
+      return res.status(409).json({ error: "product_catalog_mapping_missing" });
+    }
+
+    const body =
+      String(req.body?.body ?? "").trim() ||
+      `I’ve shared ${mapped.product.name} from our catalog for you here.`;
+
+    return sendCatalogShareResponse({
+      req,
+      res,
+      conversationId,
+      sendKind: "single_product",
+      messageBody: buildCatalogSharePreview({
+        kind: "single_product",
+        productNames: [mapped.product.name],
+      }),
+      productId: mapped.product.id,
+      productIds: [mapped.product.id],
+      metaCatalogId: mapped.link?.meta_catalog_id ?? catalogId,
+      metaRetailerId: mapped.retailerId,
+      send: (convo) =>
+        sendSingleProductMessage(String(convo?.wa_id ?? ""), body, {
+          phoneNumberId: convo?.phone_number_id ?? null,
+          catalogId,
+          retailerId: mapped.retailerId!,
+        }),
+    });
+  } catch (err: any) {
+    console.error("POST /api/send-product failed", err);
+    return res.status(500).json({ error: err?.message ?? "Failed to send product" });
+  }
+});
+
+inboxRoutes.post("/send-multi-product", async (req, res) => {
+  try {
+    const conversationId = Number(req.body?.conversationId);
+    const rawProductIds = Array.isArray(req.body?.productIds) ? req.body.productIds : [];
+    const productIds: number[] = Array.from(
+      new Set<number>(
+        rawProductIds
+          .map((value: unknown) => Number(value))
+          .filter((value: number): value is number => Number.isFinite(value))
+      )
+    );
+
+    if (!Number.isFinite(conversationId) || productIds.length === 0) {
+      return res.status(400).json({ error: "conversationId and productIds are required" });
+    }
+
+    if (!getCatalogEnabledEffective()) {
+      return res.status(403).json({ error: "catalog_disabled" });
+    }
+
+    const catalogId = await getConnectedCatalogId();
+    if (!catalogId) {
+      return res.status(400).json({ error: "no_connected_catalog" });
+    }
+
+    const resolved = (
+      await Promise.all(productIds.map((productId) => resolveCatalogProductMapping(productId)))
+    ).filter((item): item is NonNullable<typeof item> => !!item);
+
+    if (resolved.length === 0) {
+      return res.status(404).json({ error: "No products found" });
+    }
+
+    const missing = resolved.filter((item) => !item.retailerId);
+    if (missing.length > 0) {
+      return res.status(409).json({ error: "product_catalog_mapping_missing" });
+    }
+
+    const body =
+      String(req.body?.body ?? "").trim() ||
+      "I’ve shared a few products from our catalog for you to review.";
+    const header = String(req.body?.header ?? "").trim() || "Recommended products";
+    const footer = String(req.body?.footer ?? "").trim() || null;
+    const sectionTitle = String(req.body?.sectionTitle ?? "").trim() || "Selected products";
+    const retailerIds = resolved
+      .map((item) => item.retailerId)
+      .filter((value): value is string => !!value);
+
+    return sendCatalogShareResponse({
+      req,
+      res,
+      conversationId,
+      sendKind: "multi_product",
+      messageBody: buildCatalogSharePreview({
+        kind: "multi_product",
+        productNames: resolved.map((item) => item.product.name),
+      }),
+      productIds: resolved.map((item) => item.product.id),
+      metaCatalogId: catalogId,
+      metaRetailerId: retailerIds.join(","),
+      send: (convo) =>
+        sendMultiProductMessage(String(convo?.wa_id ?? ""), body, {
+          phoneNumberId: convo?.phone_number_id ?? null,
+          catalogId,
+          header,
+          footer,
+          sections: [
+            {
+              title: sectionTitle,
+              retailerIds,
+            },
+          ],
+        }),
+    });
+  } catch (err: any) {
+    console.error("POST /api/send-multi-product failed", err);
+    return res.status(500).json({ error: err?.message ?? "Failed to send product list" });
+  }
+});
+
 // GET /api/products  -> list all products for admin
 inboxRoutes.get("/products", async (req, res) => {
   try {
     const rows = await db("products as p")
       .leftJoin("product_discounts as d", "d.product_id", "p.id")
+      .leftJoin("product_catalog_links as pcl", "pcl.product_id", "p.id")
       .orderBy("p.created_at", "desc")
       .select(
         "p.id",
@@ -1790,6 +2278,7 @@ inboxRoutes.get("/products", async (req, res) => {
         "p.name",
         "p.price_tzs",
         "p.stock_qty",
+        "p.image_url",
         "p.short_description",
         "p.short_description_en",
         "p.description",
@@ -1798,6 +2287,10 @@ inboxRoutes.get("/products", async (req, res) => {
         "p.is_active",
         "p.stock_qty",
         "p.created_at",
+        "pcl.sync_status as catalog_link_status",
+        "pcl.meta_retailer_id as catalog_meta_retailer_id",
+        "pcl.meta_catalog_id as catalog_meta_catalog_id",
+        "pcl.last_error as catalog_link_error",
         "d.type as discount_type",
         "d.amount as discount_amount",
         "d.name as discount_name",
@@ -1994,7 +2487,7 @@ publish_to_catalog,
         catalog = { ok: false, error: "no_connected_catalog" };
       } else {
         try {
-          await upsertCatalogProduct(catalogId, {
+          const catalogResponse = await upsertCatalogProduct(catalogId, {
             retailer_id: finalSku,
             name: String(name).trim(),
             description: description ? String(description).trim() : "",
@@ -2003,8 +2496,24 @@ publish_to_catalog,
             availability: stockNum > 0 ? "in stock" : "out of stock",
             allow_upsert: true,
           });
+          await syncProductCatalogLink({
+            productId: Number((created as any).id),
+            sku: finalSku,
+            catalogId,
+            retailerId: finalSku,
+            metaProductId: String((catalogResponse as any)?.id ?? "").trim() || null,
+            status: "synced",
+          });
           catalog = { ok: true };
         } catch (e: any) {
+          await syncProductCatalogLink({
+            productId: Number((created as any).id),
+            sku: finalSku,
+            catalogId,
+            retailerId: finalSku,
+            status: "failed",
+            error: e?.message ?? String(e),
+          });
           catalog = { ok: false, error: e?.message ?? String(e) };
         }
       }
@@ -2222,7 +2731,7 @@ inboxRoutes.put("/products/:id", async (req, res) => {
         catalog = { ok: false, error: "no_connected_catalog" };
       } else {
         try {
-          await upsertCatalogProduct(catalogId, {
+          const catalogResponse = await upsertCatalogProduct(catalogId, {
             retailer_id: String(row.sku ?? before.sku).trim(),
             name: String(row.name ?? "").trim(),
             description: String(row.description ?? "").trim(),
@@ -2231,8 +2740,24 @@ inboxRoutes.put("/products/:id", async (req, res) => {
             availability: Number(row.stock_qty ?? 0) > 0 ? "in stock" : "out of stock",
             allow_upsert: true,
           });
+          await syncProductCatalogLink({
+            productId: Number((row as any).id),
+            sku: String(row.sku ?? before.sku).trim(),
+            catalogId,
+            retailerId: String(row.sku ?? before.sku).trim(),
+            metaProductId: String((catalogResponse as any)?.id ?? "").trim() || null,
+            status: "synced",
+          });
           catalog = { ok: true };
         } catch (e: any) {
+          await syncProductCatalogLink({
+            productId: Number((updated as any).id),
+            sku: String((updated as any).sku ?? before.sku).trim(),
+            catalogId,
+            retailerId: String((updated as any).sku ?? before.sku).trim(),
+            status: "failed",
+            error: e?.message ?? String(e),
+          });
           catalog = { ok: false, error: e?.message ?? String(e) };
         }
       }

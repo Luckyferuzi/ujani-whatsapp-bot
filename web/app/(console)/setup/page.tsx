@@ -132,6 +132,12 @@ type CatalogDiagnostics = {
   configured_phone_number_id: string | null;
   configured_waba_id: string | null;
   connected_catalog_id: string | null;
+  inbox_send_usable?: boolean;
+  product_link_summary?: {
+    totalProducts: number;
+    linkedProducts: number;
+    byStatus: Record<string, number>;
+  };
   healthy: boolean;
   issues: Array<{ level: "error" | "warn"; code: string; message: string }>;
 };
@@ -1053,6 +1059,7 @@ export default function SetupPage() {
           <div className="config-list">
             <div className="config-list-item"><div className="config-list-item__copy"><div className="config-list-title">Setup status</div><div className="config-list-copy">Only finalize after test send, webhook verification, and diagnostics checks pass.</div></div><Badge tone={settings.is_setup_complete ? "success" : "warning"}>{settings.is_setup_complete ? "Complete" : "Incomplete"}</Badge></div>
             {catalogDiag ? <div className="config-list-item"><div className="config-list-item__copy"><div className="config-list-title">Catalog health</div><div className="config-list-copy">Connected catalog ID: {catalogDiag.connected_catalog_id || "-"}</div></div><Badge tone={catalogDiag.healthy ? "success" : settings.catalog_enabled ? "warning" : "neutral"}>{catalogDiag.healthy ? "Healthy" : settings.catalog_enabled ? "Needs attention" : "Disabled"}</Badge></div> : null}
+            {catalogDiag?.product_link_summary ? <div className="config-list-item"><div className="config-list-item__copy"><div className="config-list-title">Inbox catalog send</div><div className="config-list-copy">{catalogDiag.inbox_send_usable ? "Inbox can send catalog shares." : "Inbox catalog sending still needs setup."} Linked products: {catalogDiag.product_link_summary.linkedProducts}/{catalogDiag.product_link_summary.totalProducts}</div></div><Badge tone={catalogDiag.inbox_send_usable ? "success" : "warning"}>{catalogDiag.inbox_send_usable ? "Usable" : "Blocked"}</Badge></div> : null}
             {catalogDiag?.issues.map((issue) => <Alert key={issue.code} tone={issue.level === "error" ? "danger" : "warning"} title={issue.code} description={issue.message} />)}
           </div>
         </Card>
