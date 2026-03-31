@@ -20,6 +20,7 @@ type ThreadMessageViewportProps = {
   formatTime: (iso: string) => string;
   describeTransport: (msg: Msg) => { icon: string; label: string; className: string } | null;
   describeFailure: (msg: Msg) => string;
+  expandedFailureId: string | number | null;
   renderBody: (
     msg: Msg,
     onResendMedia?: (kind: string, mediaId: string) => void,
@@ -29,6 +30,7 @@ type ThreadMessageViewportProps = {
   ) => ReactNode;
   onScrollBottomStateChange: (isAtBottom: boolean) => void;
   onMessageHover: (id: string | number | null) => void;
+  onToggleFailureDetails: (messageId: string | number) => void;
   onCopyMessage: (body: string | null) => void | Promise<void>;
   onDeleteMessage: (id: string | number) => void | Promise<void>;
   onEditMessage: (msg: Msg) => void | Promise<void>;
@@ -55,9 +57,11 @@ export default function ThreadMessageViewport({
   formatTime,
   describeTransport,
   describeFailure,
+  expandedFailureId,
   renderBody,
   onScrollBottomStateChange,
   onMessageHover,
+  onToggleFailureDetails,
   onCopyMessage,
   onDeleteMessage,
   onEditMessage,
@@ -138,6 +142,8 @@ export default function ThreadMessageViewport({
               const showDayDivider = index === 0 || msg.created_at.slice(0, 10) !== prev?.created_at?.slice(0, 10);
               const transport = outbound ? describeTransport(msg) : null;
               const isFailed = outbound && String(msg.status ?? "").toLowerCase() === "failed";
+              const failureExpanded =
+                isFailed && expandedFailureId != null && String(expandedFailureId) === String(msg.id);
 
               return (
                 <Fragment key={msg.id}>
@@ -220,6 +226,20 @@ export default function ThreadMessageViewport({
                             {showMeta ? (
                               <div className="thread-meta">
                                 <span className="thread-time">{formatTime(msg.created_at)}</span>
+                                {isFailed ? (
+                                  <button
+                                    type="button"
+                                    className={
+                                      "thread-failure-trigger" +
+                                      (failureExpanded ? " thread-failure-trigger--active" : "")
+                                    }
+                                    onClick={() => onToggleFailureDetails(msg.id)}
+                                    aria-label="Show error details"
+                                    title="Show error details"
+                                  >
+                                    ⚠️
+                                  </button>
+                                ) : null}
                                 {transport ? (
                                   <span
                                     className={transport.className}
@@ -231,7 +251,9 @@ export default function ThreadMessageViewport({
                                 ) : null}
                               </div>
                             ) : null}
-                            {isFailed ? <div className="thread-failure-copy">{describeFailure(msg)}</div> : null}
+                            {failureExpanded ? (
+                              <div className="thread-failure-detail">{describeFailure(msg)}</div>
+                            ) : null}
                           </div>
 
                           {!outbound && String(hoveredMessageId ?? "") === String(msg.id) ? (

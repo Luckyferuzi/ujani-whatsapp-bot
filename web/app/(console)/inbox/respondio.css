@@ -686,6 +686,26 @@
   color: var(--ds-color-danger-solid);
 }
 
+.thread-composer-inline-hint {
+  display: inline-flex;
+  justify-self: start;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 1.35;
+  background: color-mix(in srgb, var(--ds-color-surface-raised) 96%, white 4%);
+  border-color: color-mix(in srgb, var(--inbox-border) 78%, white 22%);
+  color: var(--inbox-text-muted);
+}
+
+.thread-composer-inline-hint--warning {
+  border-color: var(--ds-color-warning-border);
+  background: color-mix(in srgb, var(--ds-color-warning-soft) 58%, white 42%);
+  color: var(--ds-color-warning-solid);
+}
+
 .thread-banner-close,
 .thread-inline-dismiss {
   border: 0;
@@ -987,6 +1007,7 @@
 
 .thread-meta {
   margin-top: 7px;
+  display: inline-flex;
   justify-content: flex-end;
   gap: 6px;
   align-items: center;
@@ -1007,8 +1028,27 @@
 .thread-ticks--read { color: #1d4ed8; }
 .thread-ticks--failed { color: var(--ds-color-danger-solid); }
 
-.thread-failure-copy {
+.thread-failure-trigger {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.88;
+}
+
+.thread-failure-trigger--active {
+  opacity: 1;
+}
+
+.thread-failure-detail {
   margin-top: 8px;
+  padding: 7px 9px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--ds-color-danger-border) 72%, white 28%);
+  background: color-mix(in srgb, var(--ds-color-danger-soft) 44%, white 56%);
   font-size: 11px;
   line-height: 1.5;
   color: var(--ds-color-danger-solid);

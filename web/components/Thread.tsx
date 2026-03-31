@@ -9,7 +9,6 @@ import TemplateSendModal from "./TemplateSendModal";
 import ThreadComposer from "./thread/ThreadComposer";
 import ThreadHeader from "./thread/ThreadHeader";
 import ThreadMessageViewport from "./thread/ThreadMessageViewport";
-import ThreadStatusStrip from "./thread/ThreadStatusStrip";
 import type { ComposerNotice, Msg, ThreadProps } from "./thread/types";
 
 const isInbound = (msg: Pick<Msg, "direction">) => msg.direction === "in" || msg.direction === "inbound";
@@ -154,9 +153,9 @@ export default function Thread({ convo, onOpenContext, onToggleContext, contextO
   const [sending, setSending] = useState(false);
   const [showBotModeHint, setShowBotModeHint] = useState(false);
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
-  const [dismissedHeaderFailureId, setDismissedHeaderFailureId] = useState<string | number | null>(null);
   const [dismissedComposerNoticeKey, setDismissedComposerNoticeKey] = useState<string | null>(null);
   const [activeMediaActionsId, setActiveMediaActionsId] = useState<string | number | null>(null);
+  const [expandedFailureId, setExpandedFailureId] = useState<string | number | null>(null);
   const [hoveredMessageId, setHoveredMessageId] = useState<string | number | null>(null);
   const [pendingAttachment, setPendingAttachment] = useState<PendingAttachment | null>(null);
   const messagesRef = useRef<HTMLDivElement | null>(null);
@@ -176,12 +175,6 @@ export default function Thread({ convo, onOpenContext, onToggleContext, contextO
     () => [...messages].reverse().find((msg) => !isInbound(msg)) ?? null,
     [messages]
   );
-  const latestFailedOutbound =
-    latestOutbound && String(latestOutbound.status ?? "").toLowerCase() === "failed" ? latestOutbound : null;
-  const shouldShowHeaderFailure =
-    !!latestFailedOutbound &&
-    String(latestFailedOutbound.status_reason ?? "").toLowerCase() !== "template_required" &&
-    String(dismissedHeaderFailureId ?? "") !== String(latestFailedOutbound.id);
   const composerNotice: ComposerNotice | null = !agentAllowed && showBotModeHint
     ? {
         key: "bot_mode",
@@ -418,9 +411,9 @@ export default function Thread({ convo, onOpenContext, onToggleContext, contextO
     setText("");
     setShowBotModeHint(false);
     setTemplateModalOpen(false);
-    setDismissedHeaderFailureId(null);
     setDismissedComposerNoticeKey(null);
     setPendingAttachment(null);
+    setExpandedFailureId(null);
     initialScrolledRef.current = false;
     void loadMessages();
   }, [convo.id, convo.agent_allowed]);
@@ -481,13 +474,6 @@ export default function Thread({ convo, onOpenContext, onToggleContext, contextO
         onToggleAgentMode={toggleAgentMode}
       />
 
-      <ThreadStatusStrip
-        latestFailedOutbound={latestFailedOutbound}
-        shouldShowHeaderFailure={shouldShowHeaderFailure}
-        describeFailure={describeFailure}
-        onDismissFailure={(id) => setDismissedHeaderFailureId(id)}
-      />
-
       <ThreadMessageViewport
         messages={messages}
         loading={loading}
@@ -504,9 +490,15 @@ export default function Thread({ convo, onOpenContext, onToggleContext, contextO
         formatTime={formatTime}
         describeTransport={describeTransport}
         describeFailure={describeFailure}
+        expandedFailureId={expandedFailureId}
         renderBody={renderBody}
         onScrollBottomStateChange={setIsAtBottom}
         onMessageHover={setHoveredMessageId}
+        onToggleFailureDetails={(messageId) =>
+          setExpandedFailureId((current) =>
+            current != null && String(current) === String(messageId) ? null : messageId
+          )
+        }
         onCopyMessage={handleCopyMessage}
         onDeleteMessage={handleDeleteMessage}
         onEditMessage={handleEditMessage}

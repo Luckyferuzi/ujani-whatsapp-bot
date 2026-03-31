@@ -69,8 +69,19 @@ export default function ThreadComposer({
     <div className="thread-footer">
       <div className="thread-lane thread-lane--composer">
         {visibleComposerNotice ? (
-          <div className="thread-composer-inline-hint">
-            <span>{visibleComposerNotice.message}</span>
+          <div
+            className={
+              "thread-composer-inline-hint" +
+              (visibleComposerNotice.key === "template_required"
+                ? " thread-composer-inline-hint--warning"
+                : "")
+            }
+          >
+            <span>
+              {visibleComposerNotice.key === "template_required"
+                ? "⚠️ Template required"
+                : visibleComposerNotice.message}
+            </span>
             <div className="thread-composer-inline-actions">
               {visibleComposerNotice.actionLabel ? (
                 <button
