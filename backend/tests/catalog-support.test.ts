@@ -45,12 +45,11 @@ test("buildMultiProductMessagePayload groups retailer ids into product list sect
   ]);
 });
 
-test("buildCatalogLookupCandidates prefers unique configured and phone-derived WABA ids", () => {
+test("buildCatalogLookupCandidates keeps unique requested and configured WABA ids", () => {
   const candidates = buildCatalogLookupCandidates({
     requestedWabaId: "waba-requested",
     configuredWabaId: "waba-requested",
-    phoneDerivedWabaId: "waba-derived",
   });
 
-  assert.deepEqual(candidates, ["waba-requested", "waba-derived"]);
+  assert.deepEqual(candidates, ["waba-requested"]);
 });

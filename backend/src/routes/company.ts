@@ -30,6 +30,7 @@ import {
 import { resolveInboxTemplateReadiness } from "../runtime/inboxTemplateReadiness.js";
 import {
   getBusinessProfile,
+  getConnectedCatalogInfo,
   getConnectedCatalogId,
   getPhoneNumberSummary,
   sendText,
@@ -652,15 +653,16 @@ companyRoutes.get("/setup/catalog-diagnostics", async (_req, res) => {
     const configuredWabaId = getWabaIdEffective();
     const configuredPhoneId = getPhoneNumberIdEffective();
 
-    const [phoneSummary, catalogId, linkSummary] = await Promise.all([
+    const [phoneSummary, catalogLookup, linkSummary] = await Promise.all([
       getPhoneNumberSummary().catch(() => null),
-      getConnectedCatalogId(configuredWabaId ?? null).catch(() => null),
+      getConnectedCatalogInfo(configuredWabaId ?? null).catch(() => null),
       listProductCatalogLinksSummary().catch(() => ({
         totalProducts: 0,
         linkedProducts: 0,
         byStatus: {},
       })),
     ]);
+    const catalogId = catalogLookup?.catalogId ?? null;
     const inboxSendUsable = catalogEnabled && !!catalogId && !!configuredPhoneId;
 
     const issues: Array<{ level: "error" | "warn"; code: string; message: string }> = [];
@@ -708,6 +710,19 @@ companyRoutes.get("/setup/catalog-diagnostics", async (_req, res) => {
         configured_waba_id: s.waba_id ?? null,
         graph_phone_summary: phoneSummary,
         connected_catalog_id: catalogId,
+        catalog_lookup:
+          catalogLookup == null
+            ? null
+            : {
+                token_source: catalogLookup.context.tokenSource,
+                effective_phone_number_id: catalogLookup.context.effectivePhoneNumberId,
+                effective_phone_number_id_source:
+                  catalogLookup.context.effectivePhoneNumberIdSource,
+                effective_waba_id: catalogLookup.context.effectiveWabaId,
+                effective_waba_id_source: catalogLookup.context.effectiveWabaIdSource,
+                candidates: catalogLookup.candidates,
+                raw_product_catalogs_responses: catalogLookup.rawProductCatalogsResponses,
+              },
         inbox_send_usable: inboxSendUsable,
         product_link_summary: linkSummary,
         healthy: inboxSendUsable,

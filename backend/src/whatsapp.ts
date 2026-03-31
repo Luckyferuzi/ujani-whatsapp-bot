@@ -5,8 +5,11 @@ import {
   getAppSecretEffective,
   getGraphApiVersionEffective,
   getPhoneNumberIdEffective,
+getPhoneNumberIdSource,
 getWhatsAppTokenEffective,
+getWhatsAppTokenSource,
 getWabaIdEffective,
+getWabaIdSource,
 } from './runtime/companySettings.js';
 
 
@@ -555,10 +558,14 @@ export type CatalogProduct = {
 };
 
 type CatalogLookupContext = {
+  tokenSource: "db" | "env" | "none";
+  effectivePhoneNumberId: string | null;
+  effectivePhoneNumberIdSource: "db" | "env" | "none";
+  effectiveWabaId: string | null;
+  effectiveWabaIdSource: "db" | "env" | "none";
   configuredPhoneNumberId: string | null;
   requestedWabaId: string | null;
   configuredWabaId: string | null;
-  phoneDerivedWabaId: string | null;
 };
 
 function logCatalogLookup(stage: string, payload: Record<string, unknown>) {
@@ -568,65 +575,57 @@ function logCatalogLookup(stage: string, payload: Record<string, unknown>) {
 export function buildCatalogLookupCandidates(args: {
   requestedWabaId?: string | null;
   configuredWabaId?: string | null;
-  phoneDerivedWabaId?: string | null;
 }) {
   return Array.from(
     new Set(
-      [args.requestedWabaId, args.configuredWabaId, args.phoneDerivedWabaId]
+      [args.requestedWabaId, args.configuredWabaId]
         .map((value) => String(value ?? "").trim())
         .filter((value) => value.length > 0)
     )
   );
 }
 
-async function deriveWabaIdFromPhoneNumber(phoneNumberId: string | null): Promise<string | null> {
-  const phoneId = String(phoneNumberId ?? "").trim();
-  if (!phoneId) return null;
-
-  const phoneMeta = await apiGet(
-    `${phoneId}?fields=id,display_phone_number,verified_name,whatsapp_business_account{id,name}`
-  );
-
-  logCatalogLookup("phone_lookup_response", {
-    phoneNumberId: phoneId,
-    rawResponse: phoneMeta,
-  });
-
-  const discovered = String(phoneMeta?.whatsapp_business_account?.id ?? "").trim();
-  return discovered || null;
-}
+export type ConnectedCatalogLookupResult = {
+  catalogId: string | null;
+  context: CatalogLookupContext;
+  candidates: string[];
+  rawProductCatalogsResponses: Array<{
+    wabaIdUsed: string;
+    ok: boolean;
+    response?: unknown;
+    error?: string | null;
+    payload?: unknown;
+  }>;
+};
 
 export async function getConnectedCatalogId(
   wabaId?: string | null
 ): Promise<string | null> {
+  const result = await getConnectedCatalogInfo(wabaId);
+  return result.catalogId;
+}
+
+export async function getConnectedCatalogInfo(
+  wabaId?: string | null
+): Promise<ConnectedCatalogLookupResult> {
   const configuredPhoneNumberId = getPhoneNumberIdEffective();
   const requestedWabaId = String(wabaId ?? "").trim() || null;
   const configuredWabaId = String(getWabaIdEffective() ?? "").trim() || null;
 
-  let phoneDerivedWabaId: string | null = null;
-  if (configuredPhoneNumberId) {
-    try {
-      phoneDerivedWabaId = await deriveWabaIdFromPhoneNumber(configuredPhoneNumberId);
-    } catch (error: any) {
-      logCatalogLookup("phone_lookup_error", {
-        phoneNumberId: configuredPhoneNumberId,
-        error: error?.message ?? String(error),
-        payload: error?.payload ?? null,
-      });
-    }
-  }
-
   const context: CatalogLookupContext = {
+    tokenSource: getWhatsAppTokenSource(),
+    effectivePhoneNumberId: configuredPhoneNumberId,
+    effectivePhoneNumberIdSource: getPhoneNumberIdSource(),
+    effectiveWabaId: configuredWabaId,
+    effectiveWabaIdSource: getWabaIdSource(),
     configuredPhoneNumberId,
     requestedWabaId,
     configuredWabaId,
-    phoneDerivedWabaId,
   };
 
   const candidates = buildCatalogLookupCandidates({
     requestedWabaId,
     configuredWabaId,
-    phoneDerivedWabaId,
   });
 
   logCatalogLookup("lookup_start", {
@@ -639,9 +638,15 @@ export async function getConnectedCatalogId(
       ...context,
       reason: "no_waba_id_candidates",
     });
-    return null;
+    return {
+      catalogId: null,
+      context,
+      candidates,
+      rawProductCatalogsResponses: [],
+    };
   }
 
+  const rawProductCatalogsResponses: ConnectedCatalogLookupResult["rawProductCatalogsResponses"] = [];
   for (const candidate of candidates) {
     try {
       const res = await apiGet(`${candidate}/product_catalogs?fields=id,name`);
@@ -649,6 +654,11 @@ export async function getConnectedCatalogId(
         ...context,
         wabaIdUsed: candidate,
         rawResponse: res,
+      });
+      rawProductCatalogsResponses.push({
+        wabaIdUsed: candidate,
+        ok: true,
+        response: res,
       });
 
       const data = Array.isArray(res?.data) ? res.data : [];
@@ -660,12 +670,23 @@ export async function getConnectedCatalogId(
           wabaIdUsed: candidate,
           catalogId,
         });
-        return catalogId;
+        return {
+          catalogId,
+          context,
+          candidates,
+          rawProductCatalogsResponses,
+        };
       }
     } catch (error: any) {
       logCatalogLookup("product_catalogs_error", {
         ...context,
         wabaIdUsed: candidate,
+        error: error?.message ?? String(error),
+        payload: error?.payload ?? null,
+      });
+      rawProductCatalogsResponses.push({
+        wabaIdUsed: candidate,
+        ok: false,
         error: error?.message ?? String(error),
         payload: error?.payload ?? null,
       });
@@ -675,8 +696,14 @@ export async function getConnectedCatalogId(
   logCatalogLookup("catalog_not_found", {
     ...context,
     reason: "empty_or_failed_product_catalogs",
+    rawProductCatalogsResponses,
   });
-  return null;
+  return {
+    catalogId: null,
+    context,
+    candidates,
+    rawProductCatalogsResponses,
+  };
 }
 
 export async function listCatalogProducts(

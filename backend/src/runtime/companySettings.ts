@@ -388,8 +388,20 @@ export function getWhatsAppTokenEffective(): string | null {
   return cached.whatsapp_token || process.env.ACCESS_TOKEN || process.env.WHATSAPP_TOKEN || null;
 }
 
+export function getWhatsAppTokenSource(): "db" | "env" | "none" {
+  if (cached.whatsapp_token) return "db";
+  if (process.env.ACCESS_TOKEN || process.env.WHATSAPP_TOKEN) return "env";
+  return "none";
+}
+
 export function getPhoneNumberIdEffective(): string | null {
   return cached.phone_number_id || process.env.PHONE_NUMBER_ID || null;
+}
+
+export function getPhoneNumberIdSource(): "db" | "env" | "none" {
+  if (cached.phone_number_id) return "db";
+  if (process.env.PHONE_NUMBER_ID) return "env";
+  return "none";
 }
 
 export function getWabaIdEffective(): string | null {
@@ -399,6 +411,12 @@ export function getWabaIdEffective(): string | null {
     process.env.WHATSAPP_WABA_ID ||
     null
   );
+}
+
+export function getWabaIdSource(): "db" | "env" | "none" {
+  if (cached.waba_id) return "db";
+  if (process.env.WABA_ID || process.env.WHATSAPP_WABA_ID) return "env";
+  return "none";
 }
 
 export function getCatalogEnabledEffective(): boolean {
