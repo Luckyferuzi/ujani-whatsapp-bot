@@ -9,6 +9,7 @@ import {
 } from "../../db/queries.js";
 import type { Lang } from "../../i18n.js";
 import { emit } from "../../sockets.js";
+import { rememberCatalogIdFromWebhook } from "../../runtime/companySettings.js";
 import {
   addToCart,
   clearCart,
@@ -150,9 +151,12 @@ export function createWebhookProcessor(deps: ProcessorDeps) {
 
   async function processCatalogOrder(from: string, lang: Lang, msg: any) {
     await clearCart(from);
+    await rememberCatalogIdFromWebhook(msg?.order?.catalog_id ?? null).catch((error) => {
+      console.warn("[webhook.processor] failed to remember webhook catalog id", error);
+    });
 
     const productItems = msg.order.product_items as any[];
-    const requestedSkus = Array.from(
+    const requestedRetailerIds = Array.from(
       new Set(
         productItems
           .map((it) => String(it?.product_retailer_id ?? "").trim())
@@ -160,22 +164,39 @@ export function createWebhookProcessor(deps: ProcessorDeps) {
       )
     );
 
-    const rows = await db("products")
-      .whereIn("sku", requestedSkus)
-      .select<{ sku: string; name: string; price_tzs: number }[]>("sku", "name", "price_tzs");
+    const rows = await db("products as p")
+      .leftJoin("product_catalog_links as pcl", "pcl.product_id", "p.id")
+      .where((qb) => {
+        qb.whereIn("p.sku", requestedRetailerIds).orWhereIn(
+          "pcl.meta_retailer_id",
+          requestedRetailerIds
+        );
+      })
+      .select<{
+        sku: string;
+        name: string;
+        price_tzs: number;
+        meta_retailer_id: string | null;
+      }[]>("p.sku", "p.name", "p.price_tzs", "pcl.meta_retailer_id");
 
-    const bySku = new Map(rows.map((r) => [r.sku, r]));
+    const byRetailerId = new Map<string, (typeof rows)[number]>();
+    for (const row of rows) {
+      const skuKey = String(row.sku ?? "").trim();
+      if (skuKey) byRetailerId.set(skuKey, row);
+      const retailerKey = String(row.meta_retailer_id ?? "").trim();
+      if (retailerKey) byRetailerId.set(retailerKey, row);
+    }
 
     for (const it of productItems) {
-      const sku = String(it?.product_retailer_id ?? "").trim();
-      if (!sku) continue;
+      const retailerId = String(it?.product_retailer_id ?? "").trim();
+      if (!retailerId) continue;
 
       const qty = Math.max(1, Math.floor(Number(it?.quantity ?? 1)));
-      const p = bySku.get(sku);
+      const p = byRetailerId.get(retailerId);
       if (!p) continue;
 
       await addToCart(from, {
-        sku,
+        sku: p.sku,
         name: p.name,
         qty,
         unitPrice: Number(p.price_tzs ?? 0),
@@ -183,11 +204,21 @@ export function createWebhookProcessor(deps: ProcessorDeps) {
     }
 
     const cartNow = await getCart(from);
-    const missingSkus = requestedSkus.filter((sku) => !bySku.has(sku));
+    const missingRetailerIds = requestedRetailerIds.filter(
+      (retailerId) => !byRetailerId.has(retailerId)
+    );
 
-    if (missingSkus.length > 0) {
-      const shown = missingSkus.slice(0, 5).join(", ");
-      const more = missingSkus.length > 5 ? " ..." : "";
+    if (missingRetailerIds.length > 0) {
+      console.warn("[webhook.processor] catalog order items missing local mapping", {
+        from,
+        catalogId: String(msg?.order?.catalog_id ?? "").trim() || null,
+        missingRetailerIds,
+      });
+    }
+
+    if (missingRetailerIds.length > 0) {
+      const shown = missingRetailerIds.slice(0, 5).join(", ");
+      const more = missingRetailerIds.length > 5 ? " ..." : "";
       await sendBotText(
         from,
         lang === "sw"

@@ -5,6 +5,7 @@ import {
   buildCatalogLookupCandidates,
   buildMultiProductMessagePayload,
   buildSingleProductMessagePayload,
+  resolveCatalogIdFromSources,
 } from "../src/whatsapp.ts";
 
 test("buildSingleProductMessagePayload uses catalog product interactive shape", () => {
@@ -52,4 +53,42 @@ test("buildCatalogLookupCandidates keeps unique requested and configured WABA id
   });
 
   assert.deepEqual(candidates, ["waba-requested"]);
+});
+
+test("resolveCatalogIdFromSources prioritizes stored and webhook catalog ids over WABA detection", () => {
+  assert.deepEqual(
+    resolveCatalogIdFromSources({
+      configuredCatalogId: "catalog-configured",
+      requestedCatalogId: "catalog-requested",
+      webhookCatalogId: "catalog-webhook",
+      detectedCatalogFromWaba: "catalog-waba",
+    }),
+    {
+      catalogId: "catalog-configured",
+      source: "company_settings.catalog_id",
+    }
+  );
+
+  assert.deepEqual(
+    resolveCatalogIdFromSources({
+      requestedCatalogId: "catalog-requested",
+      webhookCatalogId: "catalog-webhook",
+      detectedCatalogFromWaba: "catalog-waba",
+    }),
+    {
+      catalogId: "catalog-requested",
+      source: "request.catalogId",
+    }
+  );
+
+  assert.deepEqual(
+    resolveCatalogIdFromSources({
+      webhookCatalogId: "catalog-webhook",
+      detectedCatalogFromWaba: "catalog-waba",
+    }),
+    {
+      catalogId: "catalog-webhook",
+      source: "company_settings.webhook_catalog_id",
+    }
+  );
 });

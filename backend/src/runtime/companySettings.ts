@@ -104,6 +104,8 @@ export type CompanySettings = {
   app_id: string | null;
   graph_api_version: string | null;
   catalog_enabled: boolean;
+  catalog_id: string | null;
+  webhook_catalog_id: string | null;
 
   // Embedded Signup / Coexistence
   whatsapp_embedded_config_id: string | null;
@@ -136,6 +138,8 @@ export const DEFAULT_COMPANY_SETTINGS: CompanySettings = {
   app_id: null,
   graph_api_version: "v19.0",
   catalog_enabled: false,
+  catalog_id: null,
+  webhook_catalog_id: null,
 
   whatsapp_embedded_config_id: null,
   whatsapp_solution_id: null,
@@ -427,6 +431,38 @@ export function getCatalogEnabledEffective(): boolean {
   return raw === "1" || raw === "true" || raw === "yes" || raw === "on";
 }
 
+export function getConfiguredCatalogIdEffective(): string | null {
+  return String(cached.catalog_id ?? "").trim() || null;
+}
+
+export function getWebhookCatalogIdEffective(): string | null {
+  return String(cached.webhook_catalog_id ?? "").trim() || null;
+}
+
+export async function rememberCatalogIdFromWebhook(
+  catalogId: string | null | undefined
+): Promise<void> {
+  const normalized = String(catalogId ?? "").trim();
+  if (!normalized) return;
+
+  const current = await loadCompanySettingsToCache().catch(() => getCompanySettingsCached());
+  const nextCatalogId = String(current.catalog_id ?? "").trim() || normalized;
+  const nextWebhookCatalogId = String(current.webhook_catalog_id ?? "").trim() || normalized;
+
+  if (
+    nextCatalogId === String(current.catalog_id ?? "").trim() &&
+    nextWebhookCatalogId === String(current.webhook_catalog_id ?? "").trim()
+  ) {
+    return;
+  }
+
+  await saveCompanySettings({
+    ...current,
+    catalog_id: nextCatalogId,
+    webhook_catalog_id: nextWebhookCatalogId,
+  });
+}
+
 function normalizeTemplateParameterMeta(
   value: TemplateParameterMeta[] | null | undefined
 ): TemplateParameterMeta[] {
@@ -572,10 +608,14 @@ export function getSolutionIdEffective(): string | null {
 }
 
 export async function loadCompanySettingsToCache(): Promise<CompanySettings> {
-  cached = await getJsonSetting<CompanySettings>(
+  const stored = await getJsonSetting<CompanySettings>(
     "company_settings",
     DEFAULT_COMPANY_SETTINGS
   );
+  cached = {
+    ...DEFAULT_COMPANY_SETTINGS,
+    ...stored,
+  };
 
   // Always ensure inbox is present (the UI assumes it)
   if (!cached.enabled_modules?.includes("inbox")) {

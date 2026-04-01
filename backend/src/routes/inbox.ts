@@ -5,7 +5,7 @@ import {
   getWhatsAppMessageId,
   sendText,
   downloadMedia,
-  getConnectedCatalogId,
+  resolveCatalogId,
   listCatalogProducts,
   sendCatalogMessage,
   sendMultiProductMessage,
@@ -23,6 +23,7 @@ import {
   getConversationWindowState,
   getOrdersForCustomer,
   getProductCatalogLinkByProductId,
+  getProductCatalogLinkByRetailerId,
   getProductCatalogLinkBySku,
   listProductCatalogLinksSummary,
   insertOutboundMessage,
@@ -89,6 +90,14 @@ async function maybeReconcileInboxConversations() {
 }
 
 type InboxCatalogSendKind = "catalog" | "single_product" | "multi_product";
+
+async function resolveCatalogIdForInbox(args?: {
+  requestCatalogId?: string | null;
+}) {
+  return resolveCatalogId({
+    catalogId: args?.requestCatalogId ?? null,
+  });
+}
 
 async function loadCatalogConversation(id: number) {
   return db("conversations as c")
@@ -1971,17 +1980,22 @@ inboxRoutes.get(
 /* -------------------------------------------------------------------------- */
 
 // GET /api/catalog/products -> list catalog products from Meta (does not touch local DB)
-inboxRoutes.get("/catalog/products", async (_req, res) => {
+inboxRoutes.get("/catalog/products", async (req, res) => {
   try {
     if (!getCatalogEnabledEffective()) {
       return res.status(403).json({ error: "catalog_disabled" });
     }
-    const catalogId = await getConnectedCatalogId();
+    const resolvedCatalog = await resolveCatalogIdForInbox({
+      requestCatalogId:
+        typeof req.query.catalogId === "string" ? req.query.catalogId : null,
+    });
+    const catalogId = resolvedCatalog.catalogId;
     if (!catalogId) {
       return res.status(400).json({
-        error: "no_connected_catalog",
+        error: "catalog_id_unresolved",
         message:
-          "No connected catalog found. Ensure PHONE_NUMBER_ID is valid and WABA has a product catalog connected.",
+          "No catalog_id could be resolved from company settings, request override, webhook discovery, or WABA lookup.",
+        resolution: resolvedCatalog,
       });
     }
 
@@ -1996,17 +2010,21 @@ inboxRoutes.get("/catalog/products", async (_req, res) => {
 });
 
 // POST /api/catalog/import -> import / upsert catalog products into local DB
-inboxRoutes.post("/catalog/import", async (_req, res) => {
+inboxRoutes.post("/catalog/import", async (req, res) => {
   try {
     if (!getCatalogEnabledEffective()) {
       return res.status(403).json({ error: "catalog_disabled" });
     }
-    const catalogId = await getConnectedCatalogId();
+    const resolvedCatalog = await resolveCatalogIdForInbox({
+      requestCatalogId: String(req.body?.catalogId ?? "").trim() || null,
+    });
+    const catalogId = resolvedCatalog.catalogId;
     if (!catalogId) {
       return res.status(400).json({
-        error: "no_connected_catalog",
+        error: "catalog_id_unresolved",
         message:
-          "No connected catalog found. Ensure PHONE_NUMBER_ID is valid and WABA has a product catalog connected.",
+          "No catalog_id could be resolved from company settings, request override, webhook discovery, or WABA lookup.",
+        resolution: resolvedCatalog,
       });
     }
 
@@ -2016,23 +2034,30 @@ inboxRoutes.post("/catalog/import", async (_req, res) => {
     let updated = 0;
 
     for (const it of items as any[]) {
-      const sku = String(it?.retailer_id || "").trim();
-      if (!sku) continue;
+      const retailerId = String(it?.retailer_id || "").trim();
+      if (!retailerId) continue;
 
-      const name = String(it?.name || sku).trim();
+      const name = String(it?.name || retailerId).trim();
       const priceRaw = String(it?.price || "").trim();
       const priceNum = Number((priceRaw.match(/[0-9]+(?:\.[0-9]+)?/)?.[0]) ?? 0);
       const priceTzs = Number.isFinite(priceNum) && priceNum > 0 ? Math.floor(priceNum) : 0;
 
       const description = String(it?.description || "").trim();
       const image_url = it?.image_url ? String(it.image_url).trim() : null;
+      const currency = String(it?.currency ?? "").trim() || null;
 
-      const exists = await db("products").where({ sku }).first("id");
+      const existingLink =
+        (await getProductCatalogLinkByRetailerId(retailerId)) ??
+        (await getProductCatalogLinkBySku(retailerId));
+      const exists =
+        existingLink?.product_id != null
+          ? await db("products").where({ id: existingLink.product_id }).first("id", "sku")
+          : await db("products").where({ sku: retailerId }).first("id", "sku");
       const metaProductId = String(it?.id ?? "").trim() || null;
 
       if (exists) {
         await db("products")
-          .where({ sku })
+          .where({ id: Number((exists as any).id) })
           .update({
             name,
             price_tzs: priceTzs || db.raw("products.price_tzs"),
@@ -2042,16 +2067,16 @@ inboxRoutes.post("/catalog/import", async (_req, res) => {
           });
         await syncProductCatalogLink({
           productId: Number((exists as any).id),
-          sku,
+          sku: String((exists as any).sku ?? retailerId).trim() || retailerId,
           catalogId,
-          retailerId: sku,
+          retailerId,
           metaProductId,
           status: "imported",
         });
         updated++;
       } else {
         const [createdProduct] = await db("products").insert({
-          sku,
+          sku: retailerId,
           name,
           price_tzs: priceTzs || 0,
           image_url,
@@ -2069,9 +2094,9 @@ inboxRoutes.post("/catalog/import", async (_req, res) => {
         }, ["id"]);
         await syncProductCatalogLink({
           productId: Number((createdProduct as any).id),
-          sku,
+          sku: retailerId,
           catalogId,
-          retailerId: sku,
+          retailerId,
           metaProductId,
           status: "imported",
         });
@@ -2079,7 +2104,13 @@ inboxRoutes.post("/catalog/import", async (_req, res) => {
       }
     }
 
-    return res.json({ catalog_id: catalogId, imported: created, updated });
+    return res.json({
+      catalog_id: catalogId,
+      catalog_resolution_source: resolvedCatalog.source,
+      imported: created,
+      updated,
+      currency_hint: items.find((item: any) => String(item?.currency ?? "").trim())?.currency ?? null,
+    });
   } catch (err: any) {
     console.error("POST /catalog/import failed", err);
     return res.status(500).json({
@@ -2099,9 +2130,13 @@ inboxRoutes.post("/send-catalog", async (req, res) => {
       return res.status(403).json({ error: "catalog_disabled" });
     }
 
-    const catalogId = await getConnectedCatalogId();
+    const resolvedCatalog = await resolveCatalogIdForInbox();
+    const catalogId = resolvedCatalog.catalogId;
     if (!catalogId) {
-      return res.status(400).json({ error: "no_connected_catalog" });
+      return res.status(400).json({
+        error: "catalog_id_unresolved",
+        resolution: resolvedCatalog,
+      });
     }
 
     const body =
@@ -2142,9 +2177,13 @@ inboxRoutes.post("/send-product", async (req, res) => {
       return res.status(403).json({ error: "catalog_disabled" });
     }
 
-    const catalogId = await getConnectedCatalogId();
+    const resolvedCatalog = await resolveCatalogIdForInbox();
+    const catalogId = resolvedCatalog.catalogId;
     if (!catalogId) {
-      return res.status(400).json({ error: "no_connected_catalog" });
+      return res.status(400).json({
+        error: "catalog_id_unresolved",
+        resolution: resolvedCatalog,
+      });
     }
 
     const mapped = await resolveCatalogProductMapping(productId);
@@ -2205,9 +2244,13 @@ inboxRoutes.post("/send-multi-product", async (req, res) => {
       return res.status(403).json({ error: "catalog_disabled" });
     }
 
-    const catalogId = await getConnectedCatalogId();
+    const resolvedCatalog = await resolveCatalogIdForInbox();
+    const catalogId = resolvedCatalog.catalogId;
     if (!catalogId) {
-      return res.status(400).json({ error: "no_connected_catalog" });
+      return res.status(400).json({
+        error: "catalog_id_unresolved",
+        resolution: resolvedCatalog,
+      });
     }
 
     const resolved = (
@@ -2479,12 +2522,12 @@ publish_to_catalog,
 
     let catalog: any = null;
     if (publish) {
-      const catalogId = await getConnectedCatalogId().catch(() => null);
+      const catalogId = (await resolveCatalogIdForInbox().catch(() => null))?.catalogId ?? null;
 
       if (!imageUrl) {
         catalog = { ok: false, error: "image_url_required_for_catalog" };
       } else if (!catalogId) {
-        catalog = { ok: false, error: "no_connected_catalog" };
+        catalog = { ok: false, error: "catalog_id_unresolved" };
       } else {
         try {
           const catalogResponse = await upsertCatalogProduct(catalogId, {
@@ -2721,14 +2764,14 @@ inboxRoutes.put("/products/:id", async (req, res) => {
     // Publish/update in WhatsApp Catalog if requested
     let catalog: any = null;
     if (publish) {
-      const catalogId = await getConnectedCatalogId().catch(() => null);
+      const catalogId = (await resolveCatalogIdForInbox().catch(() => null))?.catalogId ?? null;
       const row = updated as any;
       const finalImage = effectiveImageUrl || String(row.image_url ?? "").trim();
 
       if (!finalImage) {
         catalog = { ok: false, error: "image_url_required_for_catalog" };
       } else if (!catalogId) {
-        catalog = { ok: false, error: "no_connected_catalog" };
+        catalog = { ok: false, error: "catalog_id_unresolved" };
       } else {
         try {
           const catalogResponse = await upsertCatalogProduct(catalogId, {

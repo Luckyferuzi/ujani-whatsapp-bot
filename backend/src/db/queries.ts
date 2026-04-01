@@ -573,6 +573,18 @@ export async function getProductCatalogLinkBySku(
   return (row as ProductCatalogLinkRow) ?? null;
 }
 
+export async function getProductCatalogLinkByRetailerId(
+  retailerId: string
+): Promise<ProductCatalogLinkRow | null> {
+  const trimmedRetailerId = String(retailerId ?? "").trim();
+  if (!trimmedRetailerId) return null;
+
+  const row = await db("product_catalog_links")
+    .whereRaw("LOWER(meta_retailer_id) = LOWER(?)", [trimmedRetailerId])
+    .first();
+  return (row as ProductCatalogLinkRow) ?? null;
+}
+
 export async function listProductCatalogLinksSummary() {
   const [linkedCounts, totalProducts] = await Promise.all([
     db("product_catalog_links")

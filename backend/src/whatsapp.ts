@@ -3,9 +3,11 @@ import crypto from 'crypto';
 import { env } from './config.js';
 import {
   getAppSecretEffective,
+  getConfiguredCatalogIdEffective,
   getGraphApiVersionEffective,
   getPhoneNumberIdEffective,
 getPhoneNumberIdSource,
+getWebhookCatalogIdEffective,
 getWhatsAppTokenEffective,
 getWhatsAppTokenSource,
 getWabaIdEffective,
@@ -568,6 +570,23 @@ type CatalogLookupContext = {
   configuredWabaId: string | null;
 };
 
+export type CatalogResolutionSource =
+  | "company_settings.catalog_id"
+  | "request.catalogId"
+  | "company_settings.webhook_catalog_id"
+  | "waba.product_catalogs"
+  | "none";
+
+export type CatalogResolutionResult = {
+  catalogId: string | null;
+  source: CatalogResolutionSource;
+  configuredCatalogId: string | null;
+  requestedCatalogId: string | null;
+  webhookCatalogId: string | null;
+  detectedCatalogFromWaba: string | null;
+  wabaLookup: ConnectedCatalogLookupResult | null;
+};
+
 function logCatalogLookup(stage: string, payload: Record<string, unknown>) {
   console.info("[catalog-detect]", stage, payload);
 }
@@ -597,6 +616,53 @@ export type ConnectedCatalogLookupResult = {
     payload?: unknown;
   }>;
 };
+
+export function resolveCatalogIdFromSources(args: {
+  configuredCatalogId?: string | null;
+  requestedCatalogId?: string | null;
+  webhookCatalogId?: string | null;
+  detectedCatalogFromWaba?: string | null;
+}): {
+  catalogId: string | null;
+  source: CatalogResolutionSource;
+} {
+  const configuredCatalogId = String(args.configuredCatalogId ?? "").trim() || null;
+  if (configuredCatalogId) {
+    return {
+      catalogId: configuredCatalogId,
+      source: "company_settings.catalog_id",
+    };
+  }
+
+  const requestedCatalogId = String(args.requestedCatalogId ?? "").trim() || null;
+  if (requestedCatalogId) {
+    return {
+      catalogId: requestedCatalogId,
+      source: "request.catalogId",
+    };
+  }
+
+  const webhookCatalogId = String(args.webhookCatalogId ?? "").trim() || null;
+  if (webhookCatalogId) {
+    return {
+      catalogId: webhookCatalogId,
+      source: "company_settings.webhook_catalog_id",
+    };
+  }
+
+  const detectedCatalogFromWaba = String(args.detectedCatalogFromWaba ?? "").trim() || null;
+  if (detectedCatalogFromWaba) {
+    return {
+      catalogId: detectedCatalogFromWaba,
+      source: "waba.product_catalogs",
+    };
+  }
+
+  return {
+    catalogId: null,
+    source: "none",
+  };
+}
 
 export async function getConnectedCatalogId(
   wabaId?: string | null
@@ -703,6 +769,47 @@ export async function getConnectedCatalogInfo(
     context,
     candidates,
     rawProductCatalogsResponses,
+  };
+}
+
+export async function resolveCatalogId(args?: {
+  catalogId?: string | null;
+  wabaId?: string | null;
+  allowWabaLookup?: boolean;
+}): Promise<CatalogResolutionResult> {
+  const configuredCatalogId = getConfiguredCatalogIdEffective();
+  const requestedCatalogId = String(args?.catalogId ?? "").trim() || null;
+  const webhookCatalogId = getWebhookCatalogIdEffective();
+  const allowWabaLookup = args?.allowWabaLookup !== false;
+
+  let wabaLookup: ConnectedCatalogLookupResult | null = null;
+  let detectedCatalogFromWaba: string | null = null;
+
+  if (
+    allowWabaLookup &&
+    !configuredCatalogId &&
+    !requestedCatalogId &&
+    !webhookCatalogId
+  ) {
+    wabaLookup = await getConnectedCatalogInfo(args?.wabaId ?? null);
+    detectedCatalogFromWaba = wabaLookup.catalogId;
+  }
+
+  const resolved = resolveCatalogIdFromSources({
+    configuredCatalogId,
+    requestedCatalogId,
+    webhookCatalogId,
+    detectedCatalogFromWaba,
+  });
+
+  return {
+    catalogId: resolved.catalogId,
+    source: resolved.source,
+    configuredCatalogId,
+    requestedCatalogId,
+    webhookCatalogId,
+    detectedCatalogFromWaba,
+    wabaLookup,
   };
 }
 

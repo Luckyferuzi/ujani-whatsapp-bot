@@ -16,6 +16,8 @@ import {
   DEFAULT_INBOX_TEMPLATES,
   DEFAULT_COMPANY_SETTINGS,
   getBusinessContentSettings,
+  getConfiguredCatalogIdEffective,
+  getWebhookCatalogIdEffective,
   getPhoneNumberIdEffective,
   getWabaIdEffective,
   getCatalogEnabledEffective,
@@ -31,8 +33,8 @@ import { resolveInboxTemplateReadiness } from "../runtime/inboxTemplateReadiness
 import {
   getBusinessProfile,
   getConnectedCatalogInfo,
-  getConnectedCatalogId,
   getPhoneNumberSummary,
+  resolveCatalogId,
   sendText,
 } from "../whatsapp.js";
 import { setJsonSetting } from "../db/settings.js";
@@ -73,6 +75,7 @@ const patchSchema = z
     app_id: z.string().nullable().optional(),
     graph_api_version: z.string().nullable().optional(),
     catalog_enabled: z.boolean().optional(),
+    catalog_id: z.string().nullable().optional(),
 
     whatsapp_embedded_config_id: z.string().nullable().optional(),
     whatsapp_solution_id: z.string().nullable().optional(),
@@ -662,8 +665,14 @@ companyRoutes.get("/setup/catalog-diagnostics", async (_req, res) => {
         byStatus: {},
       })),
     ]);
-    const catalogId = catalogLookup?.catalogId ?? null;
+    const resolvedCatalog = await resolveCatalogId({
+      wabaId: configuredWabaId ?? null,
+    }).catch(() => null);
+    const catalogId = resolvedCatalog?.catalogId ?? null;
     const inboxSendUsable = catalogEnabled && !!catalogId && !!configuredPhoneId;
+    const configuredCatalogId = getConfiguredCatalogIdEffective();
+    const webhookCatalogId = getWebhookCatalogIdEffective();
+    const detectedCatalogFromWaba = catalogLookup?.catalogId ?? null;
 
     const issues: Array<{ level: "error" | "warn"; code: string; message: string }> = [];
     if (!catalogEnabled) {
@@ -690,8 +699,9 @@ companyRoutes.get("/setup/catalog-diagnostics", async (_req, res) => {
     if (!catalogId) {
       issues.push({
         level: "error",
-        code: "no_connected_catalog",
-        message: "No connected product catalog found for this WhatsApp business.",
+        code: "catalog_id_unresolved",
+        message:
+          "No catalog_id could be resolved from company settings, webhook discovery, or WABA lookup.",
       });
     }
     if (catalogEnabled && linkSummary.totalProducts > 0 && linkSummary.linkedProducts === 0) {
@@ -708,8 +718,11 @@ companyRoutes.get("/setup/catalog-diagnostics", async (_req, res) => {
         catalog_enabled: catalogEnabled,
         configured_phone_number_id: s.phone_number_id ?? null,
         configured_waba_id: s.waba_id ?? null,
+        configured_catalog_id: configuredCatalogId,
+        webhook_catalog_id: webhookCatalogId,
         graph_phone_summary: phoneSummary,
         connected_catalog_id: catalogId,
+        detected_catalog_from_waba: detectedCatalogFromWaba,
         catalog_lookup:
           catalogLookup == null
             ? null
@@ -722,6 +735,16 @@ companyRoutes.get("/setup/catalog-diagnostics", async (_req, res) => {
                 effective_waba_id_source: catalogLookup.context.effectiveWabaIdSource,
                 candidates: catalogLookup.candidates,
                 raw_product_catalogs_responses: catalogLookup.rawProductCatalogsResponses,
+              },
+        catalog_resolution:
+          resolvedCatalog == null
+            ? null
+            : {
+                source: resolvedCatalog.source,
+                configured_catalog_id: resolvedCatalog.configuredCatalogId,
+                requested_catalog_id: resolvedCatalog.requestedCatalogId,
+                webhook_catalog_id: resolvedCatalog.webhookCatalogId,
+                detected_catalog_from_waba: resolvedCatalog.detectedCatalogFromWaba,
               },
         inbox_send_usable: inboxSendUsable,
         product_link_summary: linkSummary,
