@@ -2159,6 +2159,8 @@ inboxRoutes.post("/catalog/import", async (req, res) => {
 
     let created = 0;
     let updated = 0;
+    let matchedByCatalogLink = 0;
+    let matchedBySku = 0;
 
     for (const it of items as any[]) {
       const retailerId = String(it?.retailer_id || "").trim();
@@ -2183,6 +2185,8 @@ inboxRoutes.post("/catalog/import", async (req, res) => {
       const metaProductId = String(it?.id ?? "").trim() || null;
 
       if (exists) {
+        if (existingLink?.product_id != null) matchedByCatalogLink++;
+        else matchedBySku++;
         await db("products")
           .where({ id: Number((exists as any).id) })
           .update({
@@ -2235,14 +2239,58 @@ inboxRoutes.post("/catalog/import", async (req, res) => {
       await markCatalogInitialized(null).catch(() => {});
     }
 
+    const remoteFetchOk = fetchMode === "meta_catalog_products";
+    const fallbackUsed = !remoteFetchOk;
+    const remoteErrorKind = fetchWarning?.code ?? null;
+    const graphPathAttempted = fetchWarning?.graph_path ?? null;
+    const reconciledCount = created + updated;
+
+    if (!remoteFetchOk && reconciledCount === 0) {
+      return res.status(409).json({
+        ok: false,
+        catalog_id: catalogId,
+        catalog_resolution_source: resolvedCatalog.source,
+        remote_fetch_ok: false,
+        import_source: "none",
+        fallback_used: fallbackUsed,
+        remote_error_kind: remoteErrorKind,
+        graph_path_attempted: graphPathAttempted,
+        warning:
+          "Remote catalog fetch failed and no local fallback products were reconciled.",
+        imported: created,
+        updated,
+        reconciliation: {
+          matched_by_product_catalog_link: matchedByCatalogLink,
+          matched_by_sku: matchedBySku,
+          created_products: created,
+          updated_products: updated,
+        },
+      });
+    }
+
     return res.json({
+      ok: true,
       catalog_id: catalogId,
       catalog_resolution_source: resolvedCatalog.source,
+      remote_fetch_ok: remoteFetchOk,
+      import_source: remoteFetchOk ? "meta_catalog" : "local_fallback",
+      fallback_used: fallbackUsed,
+      remote_error_kind: remoteErrorKind,
+      graph_path_attempted: graphPathAttempted,
+      warning: remoteFetchOk
+        ? null
+        : "Remote catalog fetch failed; only local products were reconciled.",
       imported: created,
       updated,
       catalog_initialized: items.length > 0,
       fetch_mode: fetchMode,
       fetch_warning: fetchWarning,
+      reconciliation: {
+        matched_by_product_catalog_link: matchedByCatalogLink,
+        matched_by_sku: matchedBySku,
+        created_products: created,
+        updated_products: updated,
+      },
       currency_hint: items.find((item: any) => String(item?.currency ?? "").trim())?.currency ?? null,
     });
   } catch (err: any) {
