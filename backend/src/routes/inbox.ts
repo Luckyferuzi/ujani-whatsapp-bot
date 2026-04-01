@@ -170,6 +170,44 @@ async function resolveCatalogProductMapping(productId: number) {
   };
 }
 
+async function listFallbackCatalogImportItems(catalogId: string) {
+  const rows = await db("products as p")
+    .leftJoin("product_catalog_links as pcl", "pcl.product_id", "p.id")
+    .where((qb) => {
+      qb.where("pcl.meta_catalog_id", catalogId).orWhereNull("pcl.meta_catalog_id");
+    })
+    .whereNotNull("p.sku")
+    .select(
+      "p.id",
+      "p.sku",
+      "p.name",
+      "p.description",
+      "p.price_tzs",
+      "p.image_url",
+      "pcl.meta_product_id",
+      "pcl.meta_retailer_id",
+      "pcl.meta_catalog_id"
+    );
+
+  return (rows as any[])
+    .map((row) => ({
+      id: String(row.meta_product_id ?? "").trim() || undefined,
+      retailer_id:
+        String(row.meta_retailer_id ?? "").trim() ||
+        String(row.sku ?? "").trim() ||
+        undefined,
+      name: String(row.name ?? "").trim() || undefined,
+      description: String(row.description ?? "").trim() || undefined,
+      price:
+        Number.isFinite(Number(row.price_tzs ?? NaN)) && Number(row.price_tzs) >= 0
+          ? `${Math.floor(Number(row.price_tzs))}.00`
+          : undefined,
+      currency: "TZS",
+      image_url: String(row.image_url ?? "").trim() || undefined,
+    }))
+    .filter((item) => !!item.retailer_id);
+}
+
 async function sendCatalogShareResponse(args: {
   req: Request;
   res: Response;
@@ -2000,7 +2038,51 @@ inboxRoutes.get("/catalog/products", async (req, res) => {
       });
     }
 
-    const items = await listCatalogProducts(catalogId);
+    let items: any[] = [];
+    let fetchMode: "meta_catalog_products" | "local_catalog_fallback" = "meta_catalog_products";
+    let fetchWarning:
+      | {
+          code: string;
+          message: string;
+          graph_path: string | null;
+        }
+      | null = null;
+
+    try {
+      items = await listCatalogProducts(catalogId);
+    } catch (err: any) {
+      const fallbackItems = await listFallbackCatalogImportItems(catalogId);
+      if (fallbackItems.length > 0) {
+        items = fallbackItems;
+        fetchMode = "local_catalog_fallback";
+        fetchWarning = {
+          code: String(err?.catalogProductsFetchKind ?? "catalog_fetch_failed"),
+          message:
+            "Meta catalog product fetch failed for this token, so import fell back to existing local linked products.",
+          graph_path: String(err?.catalogProductsGraphPath ?? "") || null,
+        };
+      } else {
+        const fetchKind = String(err?.catalogProductsFetchKind ?? "catalog_fetch_failed");
+        const graphPath = String(err?.catalogProductsGraphPath ?? "") || null;
+        const statusCode =
+          fetchKind === "catalog_permission_failure" || fetchKind === "wrong_graph_path_failure"
+            ? 502
+            : 500;
+
+        return res.status(statusCode).json({
+          error: fetchKind,
+          message:
+            fetchKind === "catalog_permission_failure"
+              ? "Catalog id resolved, but the current token cannot read Commerce catalog products."
+              : fetchKind === "wrong_graph_path_failure"
+              ? "Catalog id resolved, but the Graph API rejected the catalog product fetch path."
+              : err?.message ?? "Failed to fetch catalog products.",
+          catalog_id: catalogId,
+          graph_path: graphPath,
+          resolution: resolvedCatalog,
+        });
+      }
+    }
     return res.json({ catalog_id: catalogId, items });
   } catch (err: any) {
     console.error("GET /catalog/products failed", err);
@@ -2029,7 +2111,51 @@ inboxRoutes.post("/catalog/import", async (req, res) => {
       });
     }
 
-    const items = await listCatalogProducts(catalogId);
+    let items: any[] = [];
+    let fetchMode: "meta_catalog_products" | "local_catalog_fallback" = "meta_catalog_products";
+    let fetchWarning:
+      | {
+          code: string;
+          message: string;
+          graph_path: string | null;
+        }
+      | null = null;
+
+    try {
+      items = await listCatalogProducts(catalogId);
+    } catch (err: any) {
+      const fallbackItems = await listFallbackCatalogImportItems(catalogId);
+      if (fallbackItems.length > 0) {
+        items = fallbackItems;
+        fetchMode = "local_catalog_fallback";
+        fetchWarning = {
+          code: String(err?.catalogProductsFetchKind ?? "catalog_fetch_failed"),
+          message:
+            "Meta catalog product fetch failed for this token, so import fell back to existing local linked products.",
+          graph_path: String(err?.catalogProductsGraphPath ?? "") || null,
+        };
+      } else {
+        const fetchKind = String(err?.catalogProductsFetchKind ?? "catalog_fetch_failed");
+        const graphPath = String(err?.catalogProductsGraphPath ?? "") || null;
+        const statusCode =
+          fetchKind === "catalog_permission_failure" || fetchKind === "wrong_graph_path_failure"
+            ? 502
+            : 500;
+
+        return res.status(statusCode).json({
+          error: fetchKind,
+          message:
+            fetchKind === "catalog_permission_failure"
+              ? "Catalog id resolved, but the current token cannot read Commerce catalog products."
+              : fetchKind === "wrong_graph_path_failure"
+              ? "Catalog id resolved, but the Graph API rejected the catalog product fetch path."
+              : err?.message ?? "Failed to fetch catalog products.",
+          catalog_id: catalogId,
+          graph_path: graphPath,
+          resolution: resolvedCatalog,
+        });
+      }
+    }
 
     let created = 0;
     let updated = 0;
@@ -2115,6 +2241,8 @@ inboxRoutes.post("/catalog/import", async (req, res) => {
       imported: created,
       updated,
       catalog_initialized: items.length > 0,
+      fetch_mode: fetchMode,
+      fetch_warning: fetchWarning,
       currency_hint: items.find((item: any) => String(item?.currency ?? "").trim())?.currency ?? null,
     });
   } catch (err: any) {

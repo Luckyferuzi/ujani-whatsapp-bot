@@ -559,6 +559,11 @@ export type CatalogProduct = {
   currency?: string;
 };
 
+export type CatalogProductsFetchErrorKind =
+  | "catalog_permission_failure"
+  | "wrong_graph_path_failure"
+  | "catalog_fetch_failed";
+
 type CatalogLookupContext = {
   tokenSource: "db" | "env" | "none";
   effectivePhoneNumberId: string | null;
@@ -838,9 +843,52 @@ export async function listCatalogProducts(
   const id = (catalogId ?? "").toString().trim();
   if (!id) return [];
 
-  const res = await apiGet(
-    `${id}/products?fields=id,retailer_id,name,description,price,currency,availability,image_url`
-  );
+  const graphPath =
+    `${id}/products?fields=id,retailer_id,name,description,price,currency,availability,image_url`;
+
+  console.info("[catalog-fetch] requesting products", {
+    graphPath,
+    graphVersion: getGraphVer(),
+    tokenSource: getWhatsAppTokenSource(),
+    catalogId: id,
+  });
+
+  let res: any;
+  try {
+    res = await apiGet(graphPath);
+  } catch (error: any) {
+    const message = String(error?.message ?? "");
+    const payloadMessage = String(error?.payload?.error?.message ?? "");
+    const details = `${message} ${payloadMessage}`.toLowerCase();
+
+    let kind: CatalogProductsFetchErrorKind = "catalog_fetch_failed";
+    if (
+      details.includes("unsupported get request") ||
+      details.includes("does not support this operation")
+    ) {
+      kind = "wrong_graph_path_failure";
+    } else if (
+      details.includes("missing permissions") ||
+      details.includes("cannot be loaded due to missing permissions") ||
+      error?.status === 403
+    ) {
+      kind = "catalog_permission_failure";
+    }
+
+    error.catalogProductsFetchKind = kind;
+    error.catalogProductsGraphPath = graphPath;
+
+    console.warn("[catalog-fetch] product fetch failed", {
+      graphPath,
+      graphVersion: getGraphVer(),
+      tokenSource: getWhatsAppTokenSource(),
+      catalogId: id,
+      kind,
+      status: error?.status ?? null,
+      payload: error?.payload ?? null,
+    });
+    throw error;
+  }
   return Array.isArray(res?.data) ? (res.data as CatalogProduct[]) : [];
 }
 
