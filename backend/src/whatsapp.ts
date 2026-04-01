@@ -778,6 +778,9 @@ export async function resolveCatalogId(args?: {
   allowWabaLookup?: boolean;
 }): Promise<CatalogResolutionResult> {
   const configuredCatalogId = getConfiguredCatalogIdEffective();
+  console.info("[catalog-debug] configuredCatalogId from runtime cache", {
+    configuredCatalogId,
+  });
   const requestedCatalogId = String(args?.catalogId ?? "").trim() || null;
   const webhookCatalogId = getWebhookCatalogIdEffective();
   const allowWabaLookup = args?.allowWabaLookup !== false;
