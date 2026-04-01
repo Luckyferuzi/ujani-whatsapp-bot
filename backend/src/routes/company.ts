@@ -16,6 +16,7 @@ import {
   DEFAULT_INBOX_TEMPLATES,
   DEFAULT_COMPANY_SETTINGS,
   getBusinessContentSettings,
+  getCatalogInitializedEffective,
   getConfiguredCatalogIdEffective,
   getWebhookCatalogIdEffective,
   getPhoneNumberIdEffective,
@@ -27,6 +28,7 @@ import {
   loadCompanySettingsToCache,
   saveInboxTemplateRegistry,
   saveCompanySettings,
+  setCompanyCatalogId,
   type InboxTemplateConfig,
 } from "../runtime/companySettings.js";
 import { resolveInboxTemplateReadiness } from "../runtime/inboxTemplateReadiness.js";
@@ -459,6 +461,46 @@ companyRoutes.post("/setup/test-send", async (req, res) => {
   }
 });
 
+companyRoutes.post("/setup/set-catalog-id", async (req, res) => {
+  const parsed = z
+    .object({
+      catalogId: z.string().trim().min(5),
+    })
+    .strict()
+    .safeParse(req.body ?? {});
+
+  if (!parsed.success) {
+    return res.status(400).json({
+      error: "invalid_payload",
+      message: "catalogId is required",
+      details: parsed.error.flatten(),
+    });
+  }
+
+  const catalogId = String(parsed.data.catalogId ?? "").trim();
+  if (!/^\d{5,}$/.test(catalogId)) {
+    return res.status(400).json({
+      error: "invalid_catalog_id",
+      message: "catalogId must be digits only.",
+    });
+  }
+
+  try {
+    const settings = await setCompanyCatalogId(null, catalogId);
+    return res.json({
+      ok: true,
+      catalog_id: settings.catalog_id,
+      settings,
+    });
+  } catch (e: any) {
+    return res.status(500).json({
+      ok: false,
+      error: "catalog_id_save_failed",
+      message: e?.message ?? "Failed to save catalog id.",
+    });
+  }
+});
+
 companyRoutes.get("/setup/diagnostics", async (_req, res) => {
   try {
     const s = await loadCompanySettingsToCache().catch(() => getCompanySettingsCached());
@@ -720,6 +762,7 @@ companyRoutes.get("/setup/catalog-diagnostics", async (_req, res) => {
         configured_waba_id: s.waba_id ?? null,
         configured_catalog_id: configuredCatalogId,
         webhook_catalog_id: webhookCatalogId,
+        catalog_initialized: getCatalogInitializedEffective(),
         graph_phone_summary: phoneSummary,
         connected_catalog_id: catalogId,
         detected_catalog_from_waba: detectedCatalogFromWaba,

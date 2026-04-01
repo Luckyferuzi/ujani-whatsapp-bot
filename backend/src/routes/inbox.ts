@@ -42,6 +42,7 @@ import { z } from "zod";
 import {
   getCatalogEnabledEffective,
   getInboxTemplateRegistry,
+  markCatalogInitialized,
 } from "../runtime/companySettings.js";
 import { listReadyInboxTemplates } from "../runtime/inboxTemplateReadiness.js";
 import {
@@ -2104,11 +2105,16 @@ inboxRoutes.post("/catalog/import", async (req, res) => {
       }
     }
 
+    if (items.length > 0) {
+      await markCatalogInitialized(null).catch(() => {});
+    }
+
     return res.json({
       catalog_id: catalogId,
       catalog_resolution_source: resolvedCatalog.source,
       imported: created,
       updated,
+      catalog_initialized: items.length > 0,
       currency_hint: items.find((item: any) => String(item?.currency ?? "").trim())?.currency ?? null,
     });
   } catch (err: any) {

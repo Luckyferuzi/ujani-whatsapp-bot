@@ -802,6 +802,22 @@ export async function resolveCatalogId(args?: {
     detectedCatalogFromWaba,
   });
 
+  const logSource =
+    resolved.source === "company_settings.catalog_id"
+      ? "company_settings"
+      : resolved.source === "request.catalogId"
+      ? "request"
+      : resolved.source === "company_settings.webhook_catalog_id"
+      ? "webhook"
+      : resolved.source === "waba.product_catalogs"
+      ? "waba"
+      : "none";
+
+  logCatalogLookup("catalog_resolved", {
+    resolvedCatalogId: resolved.catalogId,
+    source: logSource,
+  });
+
   return {
     catalogId: resolved.catalogId,
     source: resolved.source,

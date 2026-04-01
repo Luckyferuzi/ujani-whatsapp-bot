@@ -106,6 +106,7 @@ export type CompanySettings = {
   catalog_enabled: boolean;
   catalog_id: string | null;
   webhook_catalog_id: string | null;
+  catalog_initialized: boolean;
 
   // Embedded Signup / Coexistence
   whatsapp_embedded_config_id: string | null;
@@ -140,6 +141,7 @@ export const DEFAULT_COMPANY_SETTINGS: CompanySettings = {
   catalog_enabled: false,
   catalog_id: null,
   webhook_catalog_id: null,
+  catalog_initialized: false,
 
   whatsapp_embedded_config_id: null,
   whatsapp_solution_id: null,
@@ -437,6 +439,46 @@ export function getConfiguredCatalogIdEffective(): string | null {
 
 export function getWebhookCatalogIdEffective(): string | null {
   return String(cached.webhook_catalog_id ?? "").trim() || null;
+}
+
+export function getCatalogInitializedEffective(): boolean {
+  return cached.catalog_initialized === true;
+}
+
+export async function setCompanyCatalogId(
+  _companyId: string | number | null,
+  catalogId: string
+): Promise<CompanySettings> {
+  const normalized = String(catalogId ?? "").trim();
+  if (!normalized) {
+    throw new Error("catalog_id_required");
+  }
+
+  const current = await loadCompanySettingsToCache().catch(() => getCompanySettingsCached());
+  const next: CompanySettings = {
+    ...current,
+    catalog_id: normalized,
+  };
+
+  await saveCompanySettings(next);
+  return next;
+}
+
+export async function markCatalogInitialized(
+  _companyId: string | number | null
+): Promise<CompanySettings> {
+  const current = await loadCompanySettingsToCache().catch(() => getCompanySettingsCached());
+  if (current.catalog_initialized === true) {
+    return current;
+  }
+
+  const next: CompanySettings = {
+    ...current,
+    catalog_initialized: true,
+  };
+
+  await saveCompanySettings(next);
+  return next;
 }
 
 export async function rememberCatalogIdFromWebhook(
