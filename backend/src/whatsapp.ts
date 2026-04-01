@@ -150,6 +150,58 @@ if (!res.ok) {
   return res.json() as Promise<any>;
 }
 
+export async function checkCatalogFetchPaths(args: {
+  catalogId: string;
+  candidatePaths?: string[];
+}): Promise<{
+  catalogId: string;
+  graphVersion: string;
+  tokenSource: "db" | "env" | "none";
+  results: CatalogPathCheckResult[];
+}> {
+  const catalogId = String(args.catalogId ?? "").trim();
+  if (!catalogId) {
+    throw new Error("catalog_id_required");
+  }
+
+  const candidatePaths =
+    args.candidatePaths && args.candidatePaths.length > 0
+      ? args.candidatePaths
+      : [
+          `${catalogId}/products?fields=id,retailer_id,name,description,price,currency,availability,image_url`,
+          `${catalogId}/items?fields=id,retailer_id,name,description,price,currency,availability,image_url`,
+          `${catalogId}?fields=id,name`,
+        ];
+
+  const results: CatalogPathCheckResult[] = [];
+
+  for (const path of candidatePaths) {
+    try {
+      const payload = await apiGet(path);
+      results.push({
+        path,
+        status: 200,
+        ok: true,
+        payload,
+      });
+    } catch (error: any) {
+      results.push({
+        path,
+        status: Number(error?.status ?? 500) || 500,
+        ok: false,
+        payload: error?.payload ?? error?.message ?? null,
+      });
+    }
+  }
+
+  return {
+    catalogId,
+    graphVersion: getGraphVer(),
+    tokenSource: getWhatsAppTokenSource(),
+    results,
+  };
+}
+
 async function apiFetch(path: string, body: unknown) {
   const token = getToken();
   if (!token) {
@@ -563,6 +615,13 @@ export type CatalogProductsFetchErrorKind =
   | "catalog_permission_failure"
   | "wrong_graph_path_failure"
   | "catalog_fetch_failed";
+
+export type CatalogPathCheckResult = {
+  path: string;
+  status: number;
+  ok: boolean;
+  payload: unknown;
+};
 
 type CatalogLookupContext = {
   tokenSource: "db" | "env" | "none";

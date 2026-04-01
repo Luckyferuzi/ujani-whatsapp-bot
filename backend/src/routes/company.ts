@@ -33,6 +33,7 @@ import {
 } from "../runtime/companySettings.js";
 import { resolveInboxTemplateReadiness } from "../runtime/inboxTemplateReadiness.js";
 import {
+  checkCatalogFetchPaths,
   getBusinessProfile,
   getConnectedCatalogInfo,
   getPhoneNumberSummary,
@@ -800,6 +801,30 @@ companyRoutes.get("/setup/catalog-diagnostics", async (_req, res) => {
       ok: false,
       error: "catalog_diagnostics_failed",
       message: e?.message ?? "Failed to run catalog diagnostics.",
+    });
+  }
+});
+
+companyRoutes.get("/setup/catalog-path-check", async (req, res) => {
+  try {
+    const catalogId =
+      String(req.query.catalogId ?? "").trim() || getConfiguredCatalogIdEffective() || getWebhookCatalogIdEffective();
+
+    if (!catalogId) {
+      return res.status(400).json({
+        ok: false,
+        error: "catalog_id_unresolved",
+        message: "Provide catalogId or configure one in company settings first.",
+      });
+    }
+
+    const results = await checkCatalogFetchPaths({ catalogId });
+    return res.json({ ok: true, ...results });
+  } catch (e: any) {
+    return res.status(500).json({
+      ok: false,
+      error: "catalog_path_check_failed",
+      message: e?.message ?? "Failed to test catalog fetch paths.",
     });
   }
 });
